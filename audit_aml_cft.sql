@@ -1813,6 +1813,80 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-408 : Frequence transactionnelle anormalement elevee
+    -- ---------------------------------------------------------
+    p_test('AML-408', 'Clients avec frequence transactionnelle anormale (> 100 transactions sur 30 jours)');
+
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.CUST_NO
+        FROM ACTB_HISTORY h
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+        WHERE h.TRAN_DT >= SYSDATE - 30
+        GROUP BY a.CUST_NO
+        HAVING COUNT(*) > 100
+    );
+    p_kv('Clients avec > 100 transactions/30j', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM (
+        SELECT a.CUST_NO
+        FROM ACTB_HISTORY h
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+        WHERE h.TRAN_DT >= SYSDATE - 30
+        GROUP BY a.CUST_NO
+        HAVING COUNT(*) > 300
+    );
+    p_kv('  Dont > 300 transactions/30j', TO_CHAR(v_count2));
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', v_count || ' clients ont une frequence transactionnelle anormalement elevee.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 clients les plus actifs (30j, tri par nb transactions) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28)  || '|' || RPAD(' NB TXN',8)      || '|'
+            || RPAD(' CPTS',6)         || '|' || RPAD(' VOL.30J FCFA',18) || '|'
+            || RPAD(' RISK_LEVEL',13)  || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1,
+                       COUNT(*)                      nb_txn,
+                       COUNT(DISTINCT h.CUST_AC_NO)  nb_cpts,
+                       SUM(h.LCY_AMOUNT)             vol_total,
+                       km.RISK_LEVEL
+                FROM ACTB_HISTORY h
+                JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
+                LEFT JOIN STTM_KYC_MASTER km ON km.KYC_REF_NO = c.KYC_REF_NO
+                WHERE h.TRAN_DT >= SYSDATE - 30
+                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, km.RISK_LEVEL
+                HAVING COUNT(*) > 100
+                ORDER BY COUNT(*) DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                             || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)          || '|'
+                || LPAD(TO_CHAR(r.nb_txn), 7)                                      || ' |'
+                || LPAD(TO_CHAR(r.nb_cpts), 5)                                     || ' |'
+                || LPAD(NVL(TO_CHAR(r.vol_total,'FM999G999G999G990'),'0'), 17)     || ' |'
+                || RPAD(' ' || NVL(r.RISK_LEVEL,'N/A'), 13)                        || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

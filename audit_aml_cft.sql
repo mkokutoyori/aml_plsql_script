@@ -895,5 +895,362 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 2 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
+
+    -- =========================================================
+    -- SECTION 3 : CONTROLES D'IDENTITE & DOUBLONS
+    -- =========================================================
+    p_section('SECTION 3 : CONTROLES D''IDENTITE & DOUBLONS');
+
+    -- ---------------------------------------------------------
+    -- TEST AML-301 : Doublons de pièce nationale d'identité
+    -- ---------------------------------------------------------
+    p_test('AML-301', 'Doublons de P_NATIONAL_ID (même CNI pour plusieurs clients)');
+
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT P_NATIONAL_ID FROM STTM_CUST_PERSONAL
+        WHERE P_NATIONAL_ID IS NOT NULL AND P_NATIONAL_ID != ' '
+        GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
+    );
+    p_kv('Nb P_NATIONAL_ID en doublon', TO_CHAR(v_count));
+
+    -- Nombre total de clients impliqués
+    SELECT COUNT(*) INTO v_count2 FROM STTM_CUST_PERSONAL p
+    WHERE p.P_NATIONAL_ID IN (
+        SELECT P_NATIONAL_ID FROM STTM_CUST_PERSONAL
+        WHERE P_NATIONAL_ID IS NOT NULL AND P_NATIONAL_ID != ' '
+        GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
+    );
+    p_kv('Nb clients impliqués', TO_CHAR(v_count2));
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', 'Des CNI identiques sont partagées entre plusieurs clients.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Échantillon doublons CNI (10 premiers, avec info comptes) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 28, '-') || '+' || RPAD('-', 6, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#', 4) || '|'
+            || RPAD(' P_NATIONAL_ID', 18) || '|' || RPAD(' CIF', 13) || '|'
+            || RPAD(' NOM CLIENT', 28)    || '|' || RPAD(' TYPE', 6) || '|'
+            || RPAD(' CPT.A', 7)          || '|' || RPAD(' SOLDE TOTAL', 18) || '|'
+            || RPAD(' DERN.TXN', 12)      || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 28, '-') || '+' || RPAD('-', 6, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+
+        FOR r IN (
+            SELECT * FROM (
+                SELECT p.P_NATIONAL_ID, c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE,
+                       NVL(ac.nb_cpt, 0) nb_cpt, NVL(ac.solde_total, 0) solde_total, ac.last_txn
+                FROM STTM_CUST_PERSONAL p
+                JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = p.CUSTOMER_NO
+                LEFT JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE p.P_NATIONAL_ID IN (
+                    SELECT P_NATIONAL_ID FROM STTM_CUST_PERSONAL
+                    WHERE P_NATIONAL_ID IS NOT NULL AND P_NATIONAL_ID != ' '
+                    GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
+                )
+                ORDER BY p.P_NATIONAL_ID, NVL(ac.solde_total, 0) DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+                || RPAD(' ' || NVL(SUBSTR(r.P_NATIONAL_ID, 1, 16), ''), 18) || '|'
+                || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13)              || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
+                || RPAD(' ' || NVL(r.CUSTOMER_TYPE, ''), 6)             || '|'
+                || LPAD(TO_CHAR(r.nb_cpt), 5) || '  |'
+                || LPAD(NVL(TO_CHAR(r.solde_total, 'FM999G999G999G990'), '0'), 17) || ' |'
+                || RPAD(' ' || CASE WHEN r.last_txn IS NULL OR r.last_txn = DATE '1900-01-01'
+                                    THEN 'N/A' ELSE TO_CHAR(r.last_txn, 'DD/MM/YYYY') END, 12) || '|');
+        END LOOP;
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 28, '-') || '+' || RPAD('-', 6, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-302 : Doublons de UNIQUE_ID_VALUE
+    -- ---------------------------------------------------------
+    p_test('AML-302', 'Doublons de UNIQUE_ID_VALUE');
+
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT UNIQUE_ID_VALUE FROM STTM_CUSTOMER
+        WHERE UNIQUE_ID_VALUE IS NOT NULL AND UNIQUE_ID_VALUE != ' '
+        GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+    );
+    p_kv('Nb UNIQUE_ID_VALUE en doublon', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM STTM_CUSTOMER c
+    WHERE c.UNIQUE_ID_VALUE IN (
+        SELECT UNIQUE_ID_VALUE FROM STTM_CUSTOMER
+        WHERE UNIQUE_ID_VALUE IS NOT NULL AND UNIQUE_ID_VALUE != ' '
+        GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+    );
+    p_kv('Nb clients impliqués', TO_CHAR(v_count2));
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', 'Des identifiants uniques sont partagés entre plusieurs clients.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Échantillon doublons UNIQUE_ID (10 premiers) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 8, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#', 4) || '|'
+            || RPAD(' UNIQUE_ID_VALUE', 18) || '|' || RPAD(' ID_NAME', 8) || '|'
+            || RPAD(' CIF', 13)    || '|' || RPAD(' NOM CLIENT', 28) || '|'
+            || RPAD(' CPT.A', 7)   || '|' || RPAD(' SOLDE TOTAL', 18) || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 8, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.UNIQUE_ID_VALUE, c.UNIQUE_ID_NAME, c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                       NVL(ac.nb_cpt, 0) nb_cpt, NVL(ac.solde_total, 0) solde_total
+                FROM STTM_CUSTOMER c
+                LEFT JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE c.UNIQUE_ID_VALUE IN (
+                    SELECT UNIQUE_ID_VALUE FROM STTM_CUSTOMER
+                    WHERE UNIQUE_ID_VALUE IS NOT NULL AND UNIQUE_ID_VALUE != ' '
+                    GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+                )
+                ORDER BY c.UNIQUE_ID_VALUE, NVL(ac.solde_total, 0) DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+                || RPAD(' ' || NVL(SUBSTR(r.UNIQUE_ID_VALUE, 1, 16), ''), 18) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.UNIQUE_ID_NAME, 1, 6), ''), 8)   || '|'
+                || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13)               || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
+                || LPAD(TO_CHAR(r.nb_cpt), 5) || '  |'
+                || LPAD(NVL(TO_CHAR(r.solde_total, 'FM999G999G999G990'), '0'), 17) || ' |');
+        END LOOP;
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 18, '-') || '+' || RPAD('-', 8, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-303 : Doublons de passeport
+    -- ---------------------------------------------------------
+    p_test('AML-303', 'Doublons de numéro de passeport');
+
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT PASSPORT_NO FROM STTM_CUST_PERSONAL
+        WHERE PASSPORT_NO IS NOT NULL AND PASSPORT_NO != ' '
+        GROUP BY PASSPORT_NO HAVING COUNT(*) > 1
+    );
+    p_kv('Nb PASSPORT_NO en doublon (CUST_PERSONAL)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM (
+        SELECT PASSPORT_NO FROM STTM_KYC_RETAIL
+        WHERE PASSPORT_NO IS NOT NULL AND PASSPORT_NO != ' '
+        GROUP BY PASSPORT_NO HAVING COUNT(*) > 1
+    );
+    p_kv('Nb PASSPORT_NO en doublon (KYC_RETAIL)', TO_CHAR(v_count2));
+
+    -- ---------------------------------------------------------
+    -- TEST AML-304 : Clients sans AUCUNE identification
+    -- ---------------------------------------------------------
+    p_test('AML-304', 'Clients sans aucune forme d''identification');
+
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    LEFT JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE (c.UNIQUE_ID_VALUE IS NULL OR c.UNIQUE_ID_VALUE = ' ')
+      AND (p.P_NATIONAL_ID IS NULL OR p.P_NATIONAL_ID = ' ')
+      AND (p.PASSPORT_NO IS NULL OR p.PASSPORT_NO = ' ')
+      AND c.CUSTOMER_TYPE = 'I';
+    SELECT COUNT(*) INTO v_total FROM STTM_CUSTOMER WHERE CUSTOMER_TYPE = 'I';
+    p_pct('Individus sans aucune ID', v_count, v_total);
+
+    -- Dont avec comptes actifs
+    SELECT COUNT(*) INTO v_count2
+    FROM STTM_CUSTOMER c
+    LEFT JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE (c.UNIQUE_ID_VALUE IS NULL OR c.UNIQUE_ID_VALUE = ' ')
+      AND (p.P_NATIONAL_ID IS NULL OR p.P_NATIONAL_ID = ' ')
+      AND (p.PASSPORT_NO IS NULL OR p.PASSPORT_NO = ' ')
+      AND c.CUSTOMER_TYPE = 'I'
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  Dont avec comptes actifs', TO_CHAR(v_count2));
+
+    IF v_count2 > 0 THEN
+        p_finding('CRITIQUE', v_count2 || ' individus opèrent des comptes sans aucune pièce d''identité.');
+        DBMS_OUTPUT.PUT_LINE('');
+        p_tbl_header;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn, ac.first_open
+                FROM STTM_CUSTOMER c
+                LEFT JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn,
+                           MIN(AC_OPEN_DATE) first_open
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE (c.UNIQUE_ID_VALUE IS NULL OR c.UNIQUE_ID_VALUE = ' ')
+                  AND (p.P_NATIONAL_ID IS NULL OR p.P_NATIONAL_ID = ' ')
+                  AND (p.PASSPORT_NO IS NULL OR p.PASSPORT_NO = ' ')
+                  AND c.CUSTOMER_TYPE = 'I'
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+                      r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
+                      CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
+                      r.first_open);
+        END LOOP;
+        p_tbl_line;
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-305 : Incohérence dates de naissance entre tables
+    -- ---------------------------------------------------------
+    p_test('AML-305', 'Incohérence DATE_OF_BIRTH (CUST_PERSONAL) vs BIRTH_DATE (KYC_RETAIL)');
+
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_PERSONAL p
+    JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = p.CUSTOMER_NO
+    JOIN STTM_KYC_RETAIL kr ON kr.KYC_REF_NO = c.KYC_REF_NO
+    WHERE p.DATE_OF_BIRTH IS NOT NULL
+      AND kr.BIRTH_DATE IS NOT NULL
+      AND p.DATE_OF_BIRTH != kr.BIRTH_DATE;
+    p_kv('Incohérences DATE_OF_BIRTH vs BIRTH_DATE', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        p_finding('MOYENNE', 'Des dates de naissance divergent entre CUST_PERSONAL et KYC_RETAIL.');
+        DBMS_OUTPUT.PUT_LINE('');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#', 4) || '|'
+            || RPAD(' CIF', 13)        || '|' || RPAD(' NOM CLIENT', 28)    || '|'
+            || RPAD(' DOB PERSONAL', 13) || '|' || RPAD(' DOB KYC', 13) || '|'
+            || RPAD(' CPT.A', 7)       || '|' || RPAD(' SOLDE TOTAL', 18) || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                       p.DATE_OF_BIRTH, kr.BIRTH_DATE,
+                       NVL(ac.nb_cpt, 0) nb_cpt, NVL(ac.solde_total, 0) solde_total
+                FROM STTM_CUST_PERSONAL p
+                JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = p.CUSTOMER_NO
+                JOIN STTM_KYC_RETAIL kr ON kr.KYC_REF_NO = c.KYC_REF_NO
+                LEFT JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE p.DATE_OF_BIRTH IS NOT NULL AND kr.BIRTH_DATE IS NOT NULL
+                  AND p.DATE_OF_BIRTH != kr.BIRTH_DATE
+                ORDER BY NVL(ac.solde_total, 0) DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+                || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
+                || RPAD(' ' || TO_CHAR(r.DATE_OF_BIRTH, 'DD/MM/YYYY'), 13) || '|'
+                || RPAD(' ' || TO_CHAR(r.BIRTH_DATE, 'DD/MM/YYYY'), 13)    || '|'
+                || LPAD(TO_CHAR(r.nb_cpt), 5) || '  |'
+                || LPAD(NVL(TO_CHAR(r.solde_total, 'FM999G999G999G990'), '0'), 17) || ' |');
+        END LOOP;
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 13, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-306 : Clients mineurs avec comptes actifs
+    -- ---------------------------------------------------------
+    p_test('AML-306', 'Clients mineurs (MINOR=Y ou âge < 18) avec comptes actifs');
+
+    -- Depuis CUST_PERSONAL.MINOR
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL WHERE MINOR = 'Y';
+    p_kv('Clients MINOR=Y (CUST_PERSONAL)', TO_CHAR(v_count));
+
+    -- Calcul par l'âge réel (DATE_OF_BIRTH)
+    SELECT COUNT(*) INTO v_count2 FROM STTM_CUST_PERSONAL
+    WHERE DATE_OF_BIRTH IS NOT NULL
+      AND MONTHS_BETWEEN(SYSDATE, DATE_OF_BIRTH) / 12 < 18;
+    p_kv('Clients âge < 18 ans (par DOB)', TO_CHAR(v_count2));
+
+    -- Mineurs avec comptes actifs
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL p
+    WHERE (p.MINOR = 'Y' OR (p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 < 18))
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = p.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  Mineurs avec comptes actifs', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Échantillon mineurs avec comptes actifs :');
+        p_tbl_header;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn, ac.first_open
+                FROM STTM_CUST_PERSONAL p
+                JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = p.CUSTOMER_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn,
+                           MIN(AC_OPEN_DATE) first_open
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE p.MINOR = 'Y' OR (p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 < 18)
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+                      r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
+                      CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
+                      r.first_open);
+        END LOOP;
+        p_tbl_line;
+    END IF;
+
+
+    -- =========================================================
+    -- FIN SECTION 3
+    -- =========================================================
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 3 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+
 END;
 /

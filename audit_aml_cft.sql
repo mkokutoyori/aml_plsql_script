@@ -1739,6 +1739,80 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-407 : Comptes transit / pass-through
+    -- ---------------------------------------------------------
+    p_test('AML-407', 'Comptes transit : credit >= 1M FCFA suivi d''un debit >= 80% en moins de 48h');
+
+    SELECT COUNT(DISTINCT h_cr.CUST_AC_NO) INTO v_count
+    FROM ACTB_HISTORY h_cr
+    WHERE h_cr.TRAN_DT  >= SYSDATE - 90
+      AND h_cr.DRCR_IND  = 'C'
+      AND h_cr.LCY_AMOUNT >= 1000000
+      AND EXISTS (
+          SELECT 1 FROM ACTB_HISTORY h_dr
+          WHERE h_dr.CUST_AC_NO   = h_cr.CUST_AC_NO
+            AND h_dr.DRCR_IND     = 'D'
+            AND h_dr.TRAN_DT      > h_cr.TRAN_DT
+            AND h_dr.TRAN_DT     <= h_cr.TRAN_DT + 2
+            AND h_dr.LCY_AMOUNT  >= h_cr.LCY_AMOUNT * 0.8
+      );
+    p_kv('Comptes avec episodes transit (90j)', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', v_count || ' comptes presentent un comportement transit (pass-through).');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 comptes transit (par solde actuel) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',12,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28)     || '|' || RPAD(' COMPTE',14)       || '|'
+            || RPAD(' SOLDE ACTUEL',18)   || '|' || RPAD(' DERN.CREDIT',12)  || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',12,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT DISTINCT
+                       a.CUST_NO, c.CUSTOMER_NAME1,
+                       h_cr.CUST_AC_NO,
+                       a.ACY_CURR_BALANCE,
+                       a.DATE_LAST_CR_ACTIVITY
+                FROM ACTB_HISTORY h_cr
+                JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO  = h_cr.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
+                WHERE h_cr.TRAN_DT  >= SYSDATE - 90
+                  AND h_cr.DRCR_IND  = 'C'
+                  AND h_cr.LCY_AMOUNT >= 1000000
+                  AND EXISTS (
+                      SELECT 1 FROM ACTB_HISTORY h_dr
+                      WHERE h_dr.CUST_AC_NO  = h_cr.CUST_AC_NO
+                        AND h_dr.DRCR_IND    = 'D'
+                        AND h_dr.TRAN_DT     > h_cr.TRAN_DT
+                        AND h_dr.TRAN_DT    <= h_cr.TRAN_DT + 2
+                        AND h_dr.LCY_AMOUNT >= h_cr.LCY_AMOUNT * 0.8
+                  )
+                ORDER BY a.ACY_CURR_BALANCE DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                                      || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)                   || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUST_AC_NO,1,12),''), 14)                      || '|'
+                || LPAD(NVL(TO_CHAR(r.ACY_CURR_BALANCE,'FM999G999G999G990'),'0'), 17)       || ' |'
+                || RPAD(' ' || NVL(TO_CHAR(r.DATE_LAST_CR_ACTIVITY,'DD/MM/YYYY'),'N/A'), 12) || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',12,'-') || '+');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

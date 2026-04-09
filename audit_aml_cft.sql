@@ -1299,12 +1299,12 @@ BEGIN
     p_kv('    Seuil surveillance renforcee virements', '10 000 000 FCFA');
     DBMS_OUTPUT.PUT_LINE('');
 
-    SELECT COUNT(*) INTO v_count  FROM ACTB_HISTORY WHERE TRAN_DATE >= SYSDATE - 90;
+    SELECT COUNT(*) INTO v_count  FROM ACTB_HISTORY WHERE TRN_DT >= SYSDATE - 90;
     p_kv('Total transactions (90j)', TO_CHAR(v_count));
-    SELECT COUNT(DISTINCT AC_NO) INTO v_count2 FROM ACTB_HISTORY WHERE TRAN_DATE >= SYSDATE - 90;
+    SELECT COUNT(DISTINCT AC_NO) INTO v_count2 FROM ACTB_HISTORY WHERE TRN_DT >= SYSDATE - 90;
     p_kv('Comptes actifs sur la periode', TO_CHAR(v_count2));
     SELECT NVL(SUM(LCY_AMOUNT), 0) INTO v_total FROM ACTB_HISTORY
-    WHERE TRAN_DATE >= SYSDATE - 90 AND DRCR_IND = 'C';
+    WHERE TRN_DT >= SYSDATE - 90 AND DRCR_IND = 'C';
     p_kv('Volume total credits (90j) FCFA', TO_CHAR(v_total, 'FM999G999G999G999G990'));
 
 
@@ -1314,13 +1314,13 @@ BEGIN
     p_test('AML-401', 'Transactions en especes >= 5 000 000 FCFA (seuil declarable COBAC)');
 
     SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
-    WHERE TRAN_DATE >= SYSDATE - 90
+    WHERE TRN_DT >= SYSDATE - 90
       AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
       AND LCY_AMOUNT >= 5000000;
     p_kv('Nb operations especes >= 5M FCFA (90j)', TO_CHAR(v_count));
 
     SELECT NVL(SUM(LCY_AMOUNT), 0) INTO v_total FROM ACTB_HISTORY
-    WHERE TRAN_DATE >= SYSDATE - 90
+    WHERE TRN_DT >= SYSDATE - 90
       AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
       AND LCY_AMOUNT >= 5000000;
     p_kv('Volume especes >= 5M FCFA', TO_CHAR(v_total, 'FM999G999G999G999G990') || ' FCFA');
@@ -1328,7 +1328,7 @@ BEGIN
     SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count2
     FROM ACTB_HISTORY h
     JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-    WHERE h.TRAN_DATE >= SYSDATE - 90
+    WHERE h.TRN_DT >= SYSDATE - 90
       AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
       AND h.LCY_AMOUNT >= 5000000;
     p_kv('Clients distincts concernes', TO_CHAR(v_count2));
@@ -1339,7 +1339,7 @@ BEGIN
                COUNT(*)                 nb,
                NVL(SUM(h.LCY_AMOUNT),0) vol
         FROM ACTB_HISTORY h
-        WHERE h.TRAN_DATE >= SYSDATE - 90
+        WHERE h.TRN_DT >= SYSDATE - 90
           AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
           AND h.LCY_AMOUNT >= 5000000
         GROUP BY h.DRCR_IND
@@ -1372,11 +1372,11 @@ BEGIN
         FOR r IN (
             SELECT * FROM (
                 SELECT a.CUST_NO, c.CUSTOMER_NAME1,
-                       h.AC_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRAN_DATE
+                       h.AC_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT
                 FROM ACTB_HISTORY h
                 JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
                 JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
-                WHERE h.TRAN_DATE >= SYSDATE - 90
+                WHERE h.TRN_DT >= SYSDATE - 90
                   AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
                   AND h.LCY_AMOUNT >= 5000000
                 ORDER BY h.LCY_AMOUNT DESC
@@ -1389,7 +1389,7 @@ BEGIN
                 || RPAD(' ' || NVL(SUBSTR(r.AC_NO,1,12),''), 14)               || '|'
                 || RPAD(' ' || NVL(r.DRCR_IND,''), 4)                               || '|'
                 || LPAD(NVL(TO_CHAR(r.LCY_AMOUNT,'FM999G999G999G990'),'0'), 17)     || ' |'
-                || RPAD(' ' || NVL(TO_CHAR(r.TRAN_DATE,'DD/MM/YYYY'),'N/A'), 12)      || '|');
+                || RPAD(' ' || NVL(TO_CHAR(r.TRN_DT,'DD/MM/YYYY'),'N/A'), 12)      || '|');
         END LOOP;
         DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
             || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',4,'-') || '+'
@@ -1403,13 +1403,13 @@ BEGIN
     p_test('AML-402', 'Fractionnement (structuring) : cumul journalier >= 5M FCFA par transactions < 5M');
 
     SELECT COUNT(*) INTO v_count FROM (
-        SELECT AC_NO, TRUNC(TRAN_DATE)
+        SELECT AC_NO, TRUNC(TRN_DT)
         FROM ACTB_HISTORY
-        WHERE TRAN_DATE >= SYSDATE - 90
+        WHERE TRN_DT >= SYSDATE - 90
           AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
           AND LCY_AMOUNT >  500000
           AND LCY_AMOUNT <  5000000
-        GROUP BY AC_NO, TRUNC(TRAN_DATE)
+        GROUP BY AC_NO, TRUNC(TRN_DT)
         HAVING COUNT(*) >= 3 AND SUM(LCY_AMOUNT) >= 5000000
     );
     p_kv('Journees suspectes (structuring)', TO_CHAR(v_count));
@@ -1418,11 +1418,11 @@ BEGIN
         SELECT a.CUST_NO
         FROM ACTB_HISTORY h
         JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-        WHERE h.TRAN_DATE >= SYSDATE - 90
+        WHERE h.TRN_DT >= SYSDATE - 90
           AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
           AND h.LCY_AMOUNT >  500000
           AND h.LCY_AMOUNT <  5000000
-        GROUP BY a.CUST_NO, TRUNC(h.TRAN_DATE)
+        GROUP BY a.CUST_NO, TRUNC(h.TRN_DT)
         HAVING COUNT(*) >= 3 AND SUM(h.LCY_AMOUNT) >= 5000000
     );
     p_kv('Clients distincts suspects', TO_CHAR(v_count2));
@@ -1447,17 +1447,17 @@ BEGIN
         FOR r IN (
             SELECT * FROM (
                 SELECT a.CUST_NO, c.CUSTOMER_NAME1, h.AC_NO,
-                       TRUNC(h.TRAN_DATE)       jour,
+                       TRUNC(h.TRN_DT)       jour,
                        COUNT(*)               nb_txn,
                        SUM(h.LCY_AMOUNT)      cumul_jour
                 FROM ACTB_HISTORY h
                 JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
                 JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
-                WHERE h.TRAN_DATE >= SYSDATE - 90
+                WHERE h.TRN_DT >= SYSDATE - 90
                   AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
                   AND h.LCY_AMOUNT >  500000
                   AND h.LCY_AMOUNT <  5000000
-                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, h.AC_NO, TRUNC(h.TRAN_DATE)
+                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, h.AC_NO, TRUNC(h.TRN_DT)
                 HAVING COUNT(*) >= 3 AND SUM(h.LCY_AMOUNT) >= 5000000
                 ORDER BY SUM(h.LCY_AMOUNT) DESC
             ) WHERE ROWNUM <= 15
@@ -1490,13 +1490,13 @@ BEGIN
       AND EXISTS (
           SELECT 1 FROM ACTB_HISTORY h
           WHERE h.AC_NO = a.CUST_AC_NO
-            AND h.TRAN_DATE   >= SYSDATE - 30
+            AND h.TRN_DT   >= SYSDATE - 30
       );
     p_kv('Comptes dormants redevenus actifs (30j)', TO_CHAR(v_count));
 
     SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 30
+    WHERE h.TRN_DT >= SYSDATE - 30
       AND h.AC_NO IN (
           SELECT a.CUST_AC_NO FROM STTM_CUST_ACCOUNT a
           WHERE a.RECORD_STAT = 'O'
@@ -1536,7 +1536,7 @@ BEGIN
                            SUM(h.LCY_AMOUNT) vol_30j,
                            COUNT(*)          nb_txn
                     FROM ACTB_HISTORY h
-                    WHERE h.TRAN_DATE >= SYSDATE - 30
+                    WHERE h.TRN_DT >= SYSDATE - 30
                     GROUP BY h.AC_NO
                 ) act ON act.AC_NO = a.CUST_AC_NO
                 WHERE a.RECORD_STAT = 'O'
@@ -1569,7 +1569,7 @@ BEGIN
     -- Pays liste noire GAFI + liste grise elevee (codes ISO-2)
     SELECT COUNT(*) INTO v_count
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 90
+    WHERE h.TRN_DT >= SYSDATE - 90
       AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
       AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
                                       'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
@@ -1579,7 +1579,7 @@ BEGIN
 
     SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 90
+    WHERE h.TRN_DT >= SYSDATE - 90
       AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
       AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
                                       'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
@@ -1594,7 +1594,7 @@ BEGIN
                    COUNT(*)              nb,
                    NVL(SUM(h.LCY_AMOUNT),0) vol
             FROM ACTB_HISTORY h
-            WHERE h.TRAN_DATE >= SYSDATE - 90
+            WHERE h.TRN_DT >= SYSDATE - 90
               AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
               AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
                                               'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
@@ -1621,31 +1621,31 @@ BEGIN
 
     SELECT COUNT(*) INTO v_count
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 90
-      AND (TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) >= 22
-           OR TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) < 6)
+    WHERE h.TRN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) < 6)
       AND h.LCY_AMOUNT >= 500000;
     p_kv('Transactions nocturnes >= 500K FCFA (90j)', TO_CHAR(v_count));
 
     SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 90
-      AND (TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) >= 22
-           OR TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) < 6)
+    WHERE h.TRN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) < 6)
       AND h.LCY_AMOUNT >= 500000;
     p_kv('Volume nocturne (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
 
     DBMS_OUTPUT.PUT_LINE('  Repartition par tranche horaire :');
     FOR r IN (
-        SELECT TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) heure,
+        SELECT TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) heure,
                COUNT(*)              nb,
                NVL(SUM(h.LCY_AMOUNT),0) vol
         FROM ACTB_HISTORY h
-        WHERE h.TRAN_DATE >= SYSDATE - 90
-          AND (TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) >= 22
-               OR TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) < 6)
+        WHERE h.TRN_DT >= SYSDATE - 90
+          AND (TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) >= 22
+               OR TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) < 6)
           AND h.LCY_AMOUNT >= 500000
-        GROUP BY TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24'))
+        GROUP BY TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24'))
         ORDER BY heure
     ) LOOP
         p_kv('    ' || LPAD(TO_CHAR(r.heure),2,'0') || 'h00',
@@ -1656,9 +1656,9 @@ BEGIN
     SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count2
     FROM ACTB_HISTORY h
     JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-    WHERE h.TRAN_DATE >= SYSDATE - 90
-      AND (TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) >= 22
-           OR TO_NUMBER(TO_CHAR(h.TRAN_DATE,'HH24')) < 6)
+    WHERE h.TRN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRN_DT,'HH24')) < 6)
       AND h.LCY_AMOUNT >= 500000;
     p_kv('Clients distincts concernes', TO_CHAR(v_count2));
 
@@ -1674,7 +1674,7 @@ BEGIN
 
     SELECT COUNT(*) INTO v_count
     FROM ACTB_HISTORY h
-    WHERE h.TRAN_DATE >= SYSDATE - 90
+    WHERE h.TRN_DT >= SYSDATE - 90
       AND h.LCY_AMOUNT >= 1000000
       AND MOD(h.LCY_AMOUNT, 1000000) = 0;
     p_kv('Total transactions montant rond >= 1M (90j)', TO_CHAR(v_count));
@@ -1683,7 +1683,7 @@ BEGIN
         SELECT a.CUST_NO
         FROM ACTB_HISTORY h
         JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-        WHERE h.TRAN_DATE >= SYSDATE - 90
+        WHERE h.TRN_DT >= SYSDATE - 90
           AND h.LCY_AMOUNT >= 1000000
           AND MOD(h.LCY_AMOUNT, 1000000) = 0
         GROUP BY a.CUST_NO
@@ -1717,7 +1717,7 @@ BEGIN
                 JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.AC_NO
                 JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
                 LEFT JOIN STTM_KYC_MASTER km ON km.KYC_REF_NO = c.KYC_REF_NO
-                WHERE h.TRAN_DATE >= SYSDATE - 90
+                WHERE h.TRN_DT >= SYSDATE - 90
                   AND h.LCY_AMOUNT >= 1000000
                   AND MOD(h.LCY_AMOUNT, 1000000) = 0
                 GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, km.RISK_LEVEL
@@ -1746,15 +1746,15 @@ BEGIN
 
     SELECT COUNT(DISTINCT h_cr.AC_NO) INTO v_count
     FROM ACTB_HISTORY h_cr
-    WHERE h_cr.TRAN_DATE  >= SYSDATE - 90
+    WHERE h_cr.TRN_DT  >= SYSDATE - 90
       AND h_cr.DRCR_IND  = 'C'
       AND h_cr.LCY_AMOUNT >= 1000000
       AND EXISTS (
           SELECT 1 FROM ACTB_HISTORY h_dr
           WHERE h_dr.AC_NO   = h_cr.AC_NO
             AND h_dr.DRCR_IND     = 'D'
-            AND h_dr.TRAN_DATE      > h_cr.TRAN_DATE
-            AND h_dr.TRAN_DATE     <= h_cr.TRAN_DATE + 2
+            AND h_dr.TRN_DT      > h_cr.TRN_DT
+            AND h_dr.TRN_DT     <= h_cr.TRN_DT + 2
             AND h_dr.LCY_AMOUNT  >= h_cr.LCY_AMOUNT * 0.8
       );
     p_kv('Comptes avec episodes transit (90j)', TO_CHAR(v_count));
@@ -1785,15 +1785,15 @@ BEGIN
                 FROM ACTB_HISTORY h_cr
                 JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO  = h_cr.AC_NO
                 JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
-                WHERE h_cr.TRAN_DATE  >= SYSDATE - 90
+                WHERE h_cr.TRN_DT  >= SYSDATE - 90
                   AND h_cr.DRCR_IND  = 'C'
                   AND h_cr.LCY_AMOUNT >= 1000000
                   AND EXISTS (
                       SELECT 1 FROM ACTB_HISTORY h_dr
                       WHERE h_dr.AC_NO  = h_cr.AC_NO
                         AND h_dr.DRCR_IND    = 'D'
-                        AND h_dr.TRAN_DATE     > h_cr.TRAN_DATE
-                        AND h_dr.TRAN_DATE    <= h_cr.TRAN_DATE + 2
+                        AND h_dr.TRN_DT     > h_cr.TRN_DT
+                        AND h_dr.TRN_DT    <= h_cr.TRN_DT + 2
                         AND h_dr.LCY_AMOUNT >= h_cr.LCY_AMOUNT * 0.8
                   )
                 ORDER BY a.ACY_CURR_BALANCE DESC
@@ -1822,7 +1822,7 @@ BEGIN
         SELECT a.CUST_NO
         FROM ACTB_HISTORY h
         JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-        WHERE h.TRAN_DATE >= SYSDATE - 30
+        WHERE h.TRN_DT >= SYSDATE - 30
         GROUP BY a.CUST_NO
         HAVING COUNT(*) > 100
     );
@@ -1832,7 +1832,7 @@ BEGIN
         SELECT a.CUST_NO
         FROM ACTB_HISTORY h
         JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-        WHERE h.TRAN_DATE >= SYSDATE - 30
+        WHERE h.TRN_DT >= SYSDATE - 30
         GROUP BY a.CUST_NO
         HAVING COUNT(*) > 300
     );
@@ -1866,7 +1866,7 @@ BEGIN
                 JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.AC_NO
                 JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
                 LEFT JOIN STTM_KYC_MASTER km ON km.KYC_REF_NO = c.KYC_REF_NO
-                WHERE h.TRAN_DATE >= SYSDATE - 30
+                WHERE h.TRN_DT >= SYSDATE - 30
                 GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, km.RISK_LEVEL
                 HAVING COUNT(*) > 100
                 ORDER BY COUNT(*) DESC
@@ -1974,7 +1974,7 @@ BEGIN
     JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
     JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
     WHERE kr.PEP = 'Y'
-      AND h.TRAN_DATE    >= SYSDATE - 90
+      AND h.TRN_DT    >= SYSDATE - 90
       AND h.LCY_AMOUNT >= 1000000;
     p_kv('Transactions PEP >= 1M FCFA (90j)', TO_CHAR(v_count));
 
@@ -1984,7 +1984,7 @@ BEGIN
     JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
     JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
     WHERE kr.PEP = 'Y'
-      AND h.TRAN_DATE    >= SYSDATE - 90
+      AND h.TRN_DT    >= SYSDATE - 90
       AND h.LCY_AMOUNT >= 1000000;
     p_kv('Volume PEP >= 1M FCFA (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
 
@@ -1994,7 +1994,7 @@ BEGIN
     JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
     JOIN STTM_KYC_MASTER   km ON km.KYC_REF_NO = c.KYC_REF_NO
     WHERE km.RISK_LEVEL = 'Level3'
-      AND h.TRAN_DATE     >= SYSDATE - 90
+      AND h.TRN_DT     >= SYSDATE - 90
       AND h.LCY_AMOUNT  >= 5000000;
     p_kv('Transactions Level3 >= 5M FCFA (90j)', TO_CHAR(v_count2));
 
@@ -2027,7 +2027,7 @@ BEGIN
                 JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
                 LEFT JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
                 LEFT JOIN STTM_KYC_MASTER  km ON km.KYC_REF_NO = c.KYC_REF_NO
-                WHERE h.TRAN_DATE    >= SYSDATE - 90
+                WHERE h.TRN_DT    >= SYSDATE - 90
                   AND h.LCY_AMOUNT >= 1000000
                   AND (NVL(kr.PEP,'N') = 'Y' OR NVL(km.RISK_LEVEL,'N/A') = 'Level3')
                 GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, kr.PEP, km.RISK_LEVEL

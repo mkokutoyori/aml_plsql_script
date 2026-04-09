@@ -1561,6 +1561,59 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-404 : Virements vers / depuis pays a risque GAFI
+    -- ---------------------------------------------------------
+    p_test('AML-404', 'Virements internationaux impliquant des pays a risque eleve (liste GAFI/COBAC)');
+
+    -- Pays liste noire GAFI + liste grise elevee (codes ISO-2)
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
+      AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+           OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
+    p_kv('Transactions vers/depuis pays a risque (90j)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
+      AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+           OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
+    p_kv('Volume total (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
+
+    DBMS_OUTPUT.PUT_LINE('  Repartition par pays (top 10) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(h.CTRY_CODE, h.RELATED_CTRY_CODE) pays,
+                   COUNT(*)              nb,
+                   NVL(SUM(h.LCY_AMOUNT),0) vol
+            FROM ACTB_HISTORY h
+            WHERE h.TRAN_DT >= SYSDATE - 90
+              AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
+              AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+                   OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'))
+            GROUP BY NVL(h.CTRY_CODE, h.RELATED_CTRY_CODE)
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('    Pays ' || NVL(r.pays,'N/A'),
+             TO_CHAR(r.nb) || ' ops  —  '
+             || TO_CHAR(r.vol,'FM999G999G999G990') || ' FCFA');
+    END LOOP;
+
+    IF v_count > 0 THEN
+        p_finding('CRITIQUE', v_count || ' transactions impliquent des pays a risque eleve (liste GAFI).');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

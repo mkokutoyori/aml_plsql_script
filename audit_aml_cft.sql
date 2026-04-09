@@ -15,6 +15,7 @@ DECLARE
     v_count         NUMBER;
     v_count2        NUMBER;
     v_total         NUMBER;
+    v_row_num       NUMBER;
     v_sep           VARCHAR2(120) := RPAD('=', 110, '=');
     v_subsep        VARCHAR2(120) := RPAD('-', 110, '-');
 
@@ -142,6 +143,7 @@ BEGIN
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  Clients avec comptes actifs (tri par solde décroissant) :');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -162,7 +164,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -208,6 +211,7 @@ BEGIN
         p_finding('CRITIQUE', v_count || ' clients récents avec comptes actifs et KYC non validé.');
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -228,7 +232,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -279,6 +284,7 @@ BEGIN
     IF v_count > 0 THEN
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -298,7 +304,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -355,6 +362,7 @@ BEGIN
     IF v_count > 0 THEN
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -373,7 +381,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -417,6 +426,7 @@ BEGIN
         || RPAD('-', 13, '-') || '+' || RPAD('-', 13, '-') || '+'
         || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
 
+    v_row_num := 0;
     FOR r IN (
         SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
@@ -436,7 +446,8 @@ BEGIN
             ORDER BY ac.solde_total DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
-        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
             || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
             || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
             || RPAD(' ' || NVL(SUBSTR(r.passeport, 1, 11), ''), 13) || '|'
@@ -494,6 +505,7 @@ BEGIN
         p_finding('CRITIQUE', 'Des comptes opèrent sans dossier KYC.');
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -514,7 +526,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -575,6 +588,7 @@ BEGIN
             || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
             || RPAD('-', 12, '-') || '+' || RPAD('-', 12, '-') || '+');
 
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
@@ -592,7 +606,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 25
         ) LOOP
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
                 || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_CATEGORY, 1, 6), ''), 8) || '|'
@@ -625,6 +640,7 @@ BEGIN
         p_finding('ELEVEE', v_count || ' PEP n''ont aucune remarque documentée.');
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -642,7 +658,8 @@ BEGIN
                 ORDER BY NVL(ac.solde_total, 0) DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, NVL(r.nb_cpt, 0), NVL(r.solde_total, 0),
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -679,6 +696,7 @@ BEGIN
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  Top 20 clients Level3 avec comptes actifs (par solde) :');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -696,7 +714,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -740,6 +759,7 @@ BEGIN
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  Top 15 non-résidents avec comptes actifs (par solde) :');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -757,7 +777,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -801,6 +822,7 @@ BEGIN
             || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
             || RPAD('-', 12, '-') || '+');
 
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
@@ -818,7 +840,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
                 || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 22), ''), 24) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.PA_HOLDER_NAME, 1, 22), 'N/A'), 24) || '|'
@@ -943,6 +966,7 @@ BEGIN
             || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
             || RPAD('-', 12, '-') || '+');
 
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT p.P_NATIONAL_ID, c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE,
@@ -963,7 +987,8 @@ BEGIN
                 ORDER BY p.P_NATIONAL_ID, NVL(ac.solde_total, 0) DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
                 || RPAD(' ' || NVL(SUBSTR(r.P_NATIONAL_ID, 1, 16), ''), 18) || '|'
                 || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13)              || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
@@ -1019,6 +1044,7 @@ BEGIN
             || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
             || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
 
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.UNIQUE_ID_VALUE, c.UNIQUE_ID_NAME, c.CUSTOMER_NO, c.CUSTOMER_NAME1,
@@ -1036,7 +1062,8 @@ BEGIN
                 ORDER BY c.UNIQUE_ID_VALUE, NVL(ac.solde_total, 0) DESC
             ) WHERE ROWNUM <= 20
         ) LOOP
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
                 || RPAD(' ' || NVL(SUBSTR(r.UNIQUE_ID_VALUE, 1, 16), ''), 18) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.UNIQUE_ID_NAME, 1, 6), ''), 8)   || '|'
                 || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13)               || '|'
@@ -1101,6 +1128,7 @@ BEGIN
         p_finding('CRITIQUE', v_count2 || ' individus opèrent des comptes sans aucune pièce d''identité.');
         DBMS_OUTPUT.PUT_LINE('');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -1121,7 +1149,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);
@@ -1160,6 +1189,7 @@ BEGIN
             || RPAD('-', 13, '-') || '+' || RPAD('-', 13, '-') || '+'
             || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+');
 
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
@@ -1177,7 +1207,8 @@ BEGIN
                 ORDER BY NVL(ac.solde_total, 0) DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num), 3) || ' |'
                 || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
                 || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
                 || RPAD(' ' || TO_CHAR(r.DATE_OF_BIRTH, 'DD/MM/YYYY'), 13) || '|'
@@ -1218,6 +1249,7 @@ BEGIN
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  Échantillon mineurs avec comptes actifs :');
         p_tbl_header;
+        v_row_num := 0;
         FOR r IN (
             SELECT * FROM (
                 SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
@@ -1235,7 +1267,8 @@ BEGIN
                 ORDER BY ac.solde_total DESC
             ) WHERE ROWNUM <= 15
         ) LOOP
-            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+            v_row_num := v_row_num + 1;
+            p_tbl_row(v_row_num, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
                       r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
                       CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
                       r.first_open);

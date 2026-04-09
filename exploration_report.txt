@@ -1,0 +1,3316 @@
+
+================================================================================
+>>> 1. VOLUMETRIE GENERALE DES TABLES
+================================================================================
+  STTM_CUSTOMER........................... 29557 lignes
+  STTM_CUST_PERSONAL...................... 29558 lignes
+  STTM_CUST_ACCOUNT....................... 25773 lignes
+  STTB_ACCOUNT............................ 30081 lignes
+  STTM_KYC_MASTER......................... 29078 lignes
+  STTM_KYC_RETAIL......................... 29078 lignes
+  STTM_KYC_CORPORATE...................... 24687 lignes
+  ACTB_HISTORY............................ 5760939 lignes
+  STTM_ACCOUNT_CLASS...................... 108 lignes
+  STTM_CUSTOMER_CAT....................... 83 lignes
+  STTM_KYC_CORP_KEYPERSONS................ 2430 lignes
+
+================================================================================
+>>> 2. STTM_CUSTOMER — Fiche client principale
+================================================================================
+  [Répartition par CUSTOMER_TYPE]
+    Type : I.............................. 25606
+    Type : C.............................. 3831
+    Type : B.............................. 120
+
+  [Répartition par CUSTOMER_CATEGORY]
+    Catégorie : INDV...................... 22402
+    Catégorie : CORP...................... 2800
+    Catégorie : ABWP...................... 819
+    Catégorie : RSA1...................... 734
+    Catégorie : SME....................... 484
+    Catégorie : PSE1...................... 466
+    Catégorie : OFI....................... 358
+    Catégorie : STAF...................... 335
+    Catégorie : MINORS.................... 201
+    Catégorie : PSE2...................... 168
+    Catégorie : PFBI...................... 138
+    Catégorie : STUDENTS.................. 119
+    Catégorie : BANK...................... 107
+    Catégorie : SAL....................... 67
+    Catégorie : PSE3...................... 65
+    Catégorie : H......................... 62
+    Catégorie : PSC2...................... 38
+    Catégorie : PSC3...................... 34
+    Catégorie : FIN_INT................... 33
+    Catégorie : PEP/FEPS.................. 21
+    Catégorie : RSA....................... 19
+    Catégorie : CSE2...................... 15
+    Catégorie : CSE1...................... 10
+    Catégorie : PSC1...................... 8
+    Catégorie : NGOs...................... 7
+    Catégorie : GOVT INST................. 6
+    Catégorie : REL....................... 5
+    Catégorie : GOVT...................... 5
+    Catégorie : SENIORS................... 4
+    Catégorie : ESC....................... 4
+    Catégorie : INSURANCE................. 4
+    Catégorie : NRA1...................... 3
+    Catégorie : VPFP...................... 3
+    Catégorie : FOREIGN................... 2
+    Catégorie : CONSTRUCTN................ 2
+    Catégorie : HOSPITALIT................ 2
+    Catégorie : NRA2...................... 2
+    Catégorie : BDC....................... 1
+    Catégorie : WALKIN.................... 1
+    Catégorie : H2H....................... 1
+    Catégorie : GATEKEEPER................ 1
+    Catégorie : OIL&GAS................... 1
+
+  [Statut AML (AML_REQUIRED)]
+    AML_REQUIRED = N...................... 29545
+    AML_REQUIRED = Y...................... 12
+
+  [Statut KYC (KYC_DETAILS)]
+    KYC_DETAILS = V....................... 26132
+    KYC_DETAILS = N....................... 3411
+    KYC_DETAILS = ........................ 11
+    KYC_DETAILS = F....................... 3
+
+  [KYC_REF_NO renseigné ?]
+    Avec KYC_REF_NO....................... 27820
+    Sans KYC_REF_NO....................... 1737
+
+  [Indicateurs sensibles]
+    Clients GELÉS (FROZEN=Y).............. 1
+    Clients DÉCÉDÉS (DECEASED=Y).......... 0
+    Clients INTROUVABLES.................. 0
+
+  [Répartition RISK_PROFILE]
+    RISK_PROFILE = ....................... 29557
+
+  [Top 10 pays (COUNTRY)]
+    Pays : CMR............................ 28861
+    Pays : UK............................. 98
+    Pays : US............................. 61
+    Pays : NG............................. 48
+    Pays : FR............................. 42
+    Pays : KY............................. 40
+    Pays : SZ............................. 37
+    Pays : IN............................. 26
+    Pays : CT............................. 24
+    Pays : SO............................. 21
+
+  [Top 10 nationalités (NATIONALITY)]
+    Nationalité : CMR..................... 24539
+    Nationalité : ........................ 2614
+    Nationalité : NG...................... 490
+    Nationalité : FR...................... 230
+    Nationalité : UK...................... 156
+    Nationalité : CA...................... 155
+    Nationalité : IN...................... 145
+    Nationalité : CH...................... 143
+    Nationalité : US...................... 121
+    Nationalité : GE...................... 70
+
+  [Top 10 pays exposition (EXPOSURE_COUNTRY)]
+    EXPOSURE_COUNTRY : CMR................ 27907
+    EXPOSURE_COUNTRY : FR................. 179
+    EXPOSURE_COUNTRY : UK................. 171
+    EXPOSURE_COUNTRY : CA................. 145
+    EXPOSURE_COUNTRY : US................. 107
+    EXPOSURE_COUNTRY : CH................. 93
+    EXPOSURE_COUNTRY : NG................. 91
+    EXPOSURE_COUNTRY : IN................. 85
+    EXPOSURE_COUNTRY : GE................. 63
+    EXPOSURE_COUNTRY : KY................. 46
+
+  [Répartition CUST_CLASSIFICATION]
+    Classification : 2401................. 20210
+    Classification : ..................... 7409
+    Classification : 2202................. 844
+    Classification : 2203................. 585
+    Classification : 1302................. 273
+    Classification : 1301................. 98
+    Classification : 2201................. 43
+    Classification : 1101................. 35
+    Classification : 2301................. 13
+    Classification : 1602................. 11
+    Classification : 1401................. 9
+    Classification : 1502................. 7
+    Classification : 2101................. 6
+    Classification : 1201................. 4
+    Classification : 1501................. 3
+    Classification : 1601................. 2
+    Classification : 1202................. 1
+    Classification : 1701................. 1
+    Classification : 1402................. 1
+    Classification : 1603................. 1
+    Classification : 2103................. 1
+
+  [Répartition CIF_STATUS]
+    CIF_STATUS : ......................... 23829
+    CIF_STATUS : A........................ 3763
+    CIF_STATUS : I........................ 1945
+    CIF_STATUS : D........................ 20
+
+  [AUTH_STAT / RECORD_STAT des fiches client]
+    AUTH_STAT = A......................... 29557
+    RECORD_STAT = O....................... 29506
+    RECORD_STAT = C....................... 51
+
+  [Indicateurs complémentaires]
+    Clients STAFF (employés banque)....... 422
+    Clients PRIVÉS (banque privée)........ 291
+    JOINT_VENTURE = Y..................... 0
+    CRM_CUSTOMER = Y...................... 0
+    TREASURY_CUSTOMER = Y................. 0
+
+  [Complétude des identifiants uniques]
+    Sans UNIQUE_ID_VALUE.................. 24157
+    Avec UNIQUE_ID_VALUE.................. 5400
+
+  [Répartition UNIQUE_ID_NAME]
+    ID Type : ............................ 23861
+    ID Type : OTH......................... 2377
+    ID Type : 01.......................... 1793
+    ID Type : 03.......................... 1526
+
+    Clients avec INTRODUCTEUR............. 0
+    Clients sans INTRODUCTEUR............. 29557
+
+  [Répartition CREDIT_RATING]
+    CREDIT_RATING = ...................... 23830
+    CREDIT_RATING = CCC................... 5273
+    CREDIT_RATING = AAA................... 262
+    CREDIT_RATING = D..................... 92
+    CREDIT_RATING = B..................... 47
+    CREDIT_RATING = BB.................... 18
+    CREDIT_RATING = A..................... 16
+    CREDIT_RATING = BBB................... 15
+    CREDIT_RATING = AA.................... 4
+
+  [Plage de création des CIF]
+    CIF le plus ancien.................... 23/05/2022
+    CIF le plus récent.................... 08/04/2026
+
+  [Créations CIF par année]
+    Année 2022............................ 2537
+    Année 2023............................ 6816
+    Année 2024............................ 6737
+    Année 2025............................ 6261
+    Année 2026............................ 1478
+
+================================================================================
+>>> 3. STTM_CUST_PERSONAL — Données personnelles
+================================================================================
+  [Complétude des champs identitaires]
+    Sans P_NATIONAL_ID.................... 6706
+    Sans PASSPORT_NO...................... 29480
+    Sans DATE_OF_BIRTH.................... 3951
+    Sans E_MAIL........................... 629
+    Sans MOBILE_NUMBER.................... 599
+    Sans aucune adresse (P ni D).......... 3976
+
+    Passeports EXPIRÉS.................... 15
+
+  [Répartition par SEX]
+    SEX = M............................... 18128
+    SEX = F............................... 7502
+    SEX = ................................ 3839
+    SEX = O............................... 78
+    SEX = P............................... 11
+
+    Clients MINEURS (MINOR=Y)............. 335
+
+  [RESIDENT_STATUS]
+    Statut : R............................ 24609
+    Statut : ............................. 4227
+    Statut : N............................ 722
+
+  [Top 10 BIRTH_COUNTRY]
+    Pays naissance : CMR.................. 20135
+    Pays naissance : ..................... 8362
+    Pays naissance : NG................... 418
+    Pays naissance : FR................... 102
+    Pays naissance : IN................... 78
+    Pays naissance : CH................... 56
+    Pays naissance : US................... 31
+    Pays naissance : UK................... 27
+    Pays naissance : CT................... 27
+    Pays naissance : MAL.................. 24
+
+    Sans PLACE_OF_BIRTH................... 8364
+    Avec PLACE_OF_BIRTH................... 21194
+
+  [Top 10 pays domicile (D_COUNTRY)]
+    D_COUNTRY : CMR....................... 25018
+    D_COUNTRY : .......................... 3975
+    D_COUNTRY : UK........................ 81
+    D_COUNTRY : US........................ 50
+    D_COUNTRY : NG........................ 39
+    D_COUNTRY : FR........................ 37
+    D_COUNTRY : KY........................ 37
+    D_COUNTRY : SZ........................ 32
+    D_COUNTRY : CT........................ 24
+    D_COUNTRY : IN........................ 20
+
+  [Top 10 pays permanent (P_COUNTRY)]
+    P_COUNTRY : CMR....................... 20982
+    P_COUNTRY : .......................... 8347
+    P_COUNTRY : UK........................ 40
+    P_COUNTRY : FR........................ 23
+    P_COUNTRY : NG........................ 21
+    P_COUNTRY : US........................ 20
+    P_COUNTRY : SZ........................ 9
+    P_COUNTRY : SEN....................... 8
+    P_COUNTRY : RW........................ 7
+    P_COUNTRY : KY........................ 7
+
+  [Procuration (Power of Attorney)]
+    PA_ISSUED = N......................... 22087
+    PA_ISSUED = .......................... 7153
+    PA_ISSUED = Y......................... 318
+    Avec PA_HOLDER_NAME renseigné......... 316
+
+  [US_RES_STATUS — Conformité FATCA]
+    US_RES_STATUS = N..................... 22384
+    US_RES_STATUS = ...................... 7153
+    US_RES_STATUS = Y..................... 21
+
+  [AGE_PROOF_SUBMITTED]
+    AGE_PROOF = N......................... 25138
+    AGE_PROOF = .......................... 4386
+    AGE_PROOF = V......................... 34
+
+  [Mode de communication préféré]
+    CUST_COMM_MODE = E.................... 21744
+    CUST_COMM_MODE = M.................... 5360
+    CUST_COMM_MODE = ..................... 2454
+
+  [Complétude des noms]
+    Sans FIRST_NAME....................... 4005
+    Sans LAST_NAME........................ 4943
+
+================================================================================
+>>> 4. STTM_CUST_ACCOUNT — Comptes clients
+================================================================================
+  [Top 10 devises (CCY)]
+    CCY = XAF............................. 25706
+    CCY = USD............................. 34
+    CCY = EUR............................. 18
+    CCY = GBP............................. 6
+    CCY = ZAR............................. 2
+    CCY = CNY............................. 2
+    CCY = NGN............................. 1
+    CCY = JPY............................. 1
+    CCY = XOF............................. 1
+    CCY = CNH............................. 1
+
+  [Top 15 classes de compte (ACCOUNT_CLASS)]
+    ACCOUNT_CLASS = 020021................ 9581
+    ACCOUNT_CLASS = 020003................ 5332
+    ACCOUNT_CLASS = 010009................ 3680
+    ACCOUNT_CLASS = 010010................ 1755
+    ACCOUNT_CLASS = 010036................ 1125
+    ACCOUNT_CLASS = 020023................ 743
+    ACCOUNT_CLASS = 010037................ 550
+    ACCOUNT_CLASS = 010035................ 386
+    ACCOUNT_CLASS = 020022................ 298
+    ACCOUNT_CLASS = 010032................ 221
+    ACCOUNT_CLASS = 010026................ 216
+    ACCOUNT_CLASS = 010008................ 206
+    ACCOUNT_CLASS = 020002................ 166
+    ACCOUNT_CLASS = 010031................ 140
+    ACCOUNT_CLASS = 200004................ 138
+
+  [Comptes avec restrictions actives]
+    Comptes DORMANTS...................... 3305
+    Comptes GELÉS......................... 2
+    Bloqués au DÉBIT...................... 4015
+    Bloqués au CRÉDIT..................... 92
+    STOP PAYMENT.......................... 304
+    Comptes BLOQUÉS....................... 91
+    Liste noire NSF....................... 0
+
+  [Statistiques soldes (ACY_CURR_BALANCE)]
+    Solde MIN............................. -56445333669.5
+    Solde MAX............................. 43748192973
+    Solde MOYEN........................... 6613293.27
+    Solde TOTAL (SUM)..................... 170444407438.87
+    Comptes à solde NÉGATIF............... 1219
+
+    En OVERDRAFT.......................... 1218
+
+    Compte le plus ancien................. 01/01/1950
+    Compte le plus récent................. 08/04/2026
+
+  [Inactivité des comptes]
+    Sans activité depuis > 12 mois........ 15561
+    Sans activité depuis > 6 mois......... 17751
+    Sans activité depuis > 24 mois........ 12308
+
+  [Top 10 agences (BRANCH_CODE)]
+    Agence : 001.......................... 15390
+    Agence : 003.......................... 4518
+    Agence : 004.......................... 4034
+    Agence : 006.......................... 1273
+    Agence : 007.......................... 263
+    Agence : 008.......................... 261
+    Agence : 099.......................... 32
+    Agence : 005.......................... 2
+
+  [Répartition ACCOUNT_TYPE]
+    ACCOUNT_TYPE = S...................... 16308
+    ACCOUNT_TYPE = U...................... 9250
+    ACCOUNT_TYPE = Y...................... 167
+    ACCOUNT_TYPE = N...................... 48
+
+  [MODE_OF_OPERATION]
+    Mode : ............................... 25761
+    Mode : S.............................. 12
+
+  [Comptes joints]
+    JOINT_AC_INDICATOR = S................ 25753
+    JOINT_AC_INDICATOR = J................ 20
+
+    Comptes SALAIRE....................... 0
+
+  [Statut enregistrement des comptes]
+    AUTH_STAT = A......................... 25773
+    RECORD_STAT = O....................... 24670
+    RECORD_STAT = C....................... 1103
+
+  [Analyse dormance]
+    Comptes avec DORMANCY_DATE............ 25560
+    Dormance la plus ancienne............. 01/01/1998
+    Dormance la plus récente.............. 29/04/2030
+
+  [Statistiques turnovers (ACY)]
+    Total DR today (SUM).................. 979891835
+    Total CR today (SUM).................. 723629308
+    Total DR MTD (SUM).................... 143656916473.04
+    Total CR MTD (SUM).................... 150110618027.71
+
+  [Clients multi-comptes]
+    Clients avec 1 compte(s).............. 15895
+    Clients avec 2 compte(s).............. 4512
+    Clients avec 3 compte(s).............. 105
+    Clients avec 4 compte(s).............. 24
+    Clients avec 5 compte(s).............. 11
+    Clients avec 6 compte(s).............. 6
+    Clients avec 7 compte(s).............. 5
+    Clients avec 8 compte(s).............. 4
+    Clients avec 9 compte(s).............. 5
+    Clients avec 10 compte(s)............. 1
+    Clients avec 11 compte(s)............. 2
+    Clients avec 12 compte(s)............. 2
+    Clients avec 18 compte(s)............. 1
+    Clients avec 20 compte(s)............. 1
+    Clients avec 23 compte(s)............. 1
+    Clients avec 26 compte(s)............. 1
+    Clients avec 27 compte(s)............. 1
+    Clients avec 30 compte(s)............. 1
+    Clients avec 40 compte(s)............. 1
+
+================================================================================
+>>> 5. STTB_ACCOUNT — Comptes GL / Comptabilité
+================================================================================
+    Comptes GL DORMANTS................... 3305
+    Comptes GL GELÉS...................... 2
+    GL BLOQUÉS............................ 91
+
+  [Répartition AC_OR_GL]
+    AC_OR_GL = A.......................... 25773
+    AC_OR_GL = G.......................... 2422
+    AC_OR_GL = L.......................... 1886
+
+  [Top 10 catégories GL]
+    GL_CATEGORY = 1....................... 27027
+    GL_CATEGORY = ........................ 1886
+    GL_CATEGORY = 4....................... 435
+    GL_CATEGORY = 3....................... 308
+    GL_CATEGORY = 5....................... 125
+    GL_CATEGORY = 8....................... 113
+    GL_CATEGORY = 9....................... 112
+    GL_CATEGORY = 2....................... 75
+
+  [Statut enregistrement STTB_ACCOUNT]
+    AUTH_STAT = A......................... 30081
+    AC_GL_REC_STATUS = O.................. 27968
+    AC_GL_REC_STATUS = C.................. 2097
+    AC_GL_REC_STATUS = V.................. 16
+
+  [Top 10 devises (AC_GL_CCY)]
+    AC_GL_CCY = XAF....................... 28380
+    AC_GL_CCY = .......................... 1525
+    AC_GL_CCY = USD....................... 37
+    AC_GL_CCY = EUR....................... 20
+    AC_GL_CCY = GBP....................... 8
+    AC_GL_CCY = JPY....................... 5
+    AC_GL_CCY = GHS....................... 4
+    AC_GL_CCY = ZAR....................... 4
+    AC_GL_CCY = NGN....................... 3
+    AC_GL_CCY = XOF....................... 3
+
+  [Top 10 agences (BRANCH_CODE)]
+    Agence : 001.......................... 15390
+    Agence : 003.......................... 4518
+    Agence : 004.......................... 4034
+    Agence : ............................. 2422
+    Agence : 099.......................... 1918
+    Agence : 006.......................... 1273
+    Agence : 007.......................... 263
+    Agence : 008.......................... 261
+    Agence : 005.......................... 2
+
+  [Répartition GL_ACLASS_TYPE]
+    GL_ACLASS_TYPE = 6.................... 28097
+    GL_ACLASS_TYPE = ..................... 1886
+    GL_ACLASS_TYPE = 1.................... 48
+    GL_ACLASS_TYPE = 5.................... 43
+    GL_ACLASS_TYPE = 3.................... 3
+    GL_ACLASS_TYPE = 2.................... 2
+    GL_ACLASS_TYPE = 4.................... 2
+
+================================================================================
+>>> 6. STTM_KYC_MASTER — Référentiel KYC
+================================================================================
+  [Répartition KYC_CUST_TYPE]
+    KYC_CUST_TYPE = R..................... 26282
+    KYC_CUST_TYPE = C..................... 2750
+    KYC_CUST_TYPE = F..................... 46
+
+  [Répartition RISK_LEVEL]
+    RISK_LEVEL = Level2................... 21067
+    RISK_LEVEL = Level1................... 7436
+    RISK_LEVEL = Level3................... 575
+
+  [AUTH_STAT des dossiers KYC]
+    AUTH_STAT = A......................... 29078
+
+  [RECORD_STAT des dossiers KYC]
+    RECORD_STAT = O....................... 28821
+    RECORD_STAT = C....................... 257
+
+  [Croisement RISK_LEVEL x KYC_CUST_TYPE]
+    C / Level2............................ 2004
+    C / Level1............................ 527
+    C / Level3............................ 219
+    F / Level3............................ 24
+    F / Level1............................ 17
+    F / Level2............................ 5
+    R / Level2............................ 19058
+    R / Level1............................ 6892
+    R / Level3............................ 332
+
+  [Contrôle Maker = Checker (ségrégation des tâches)]
+    KYC où MAKER_ID = CHECKER_ID.......... 4588
+
+    KYC sans description (KYC_DESC)....... 22
+
+  [Top 10 MAKER_ID (créateurs dossiers KYC)]
+    Maker : MIGRATION..................... 4588
+    Maker : KOUEGOS00029.................. 3789
+    Maker : KEVINOS00010.................. 2794
+    Maker : MBELLOS00011.................. 2470
+    Maker : CAMAOS000001.................. 1772
+    Maker : ICHUAOS00016.................. 1682
+    Maker : MUSIOS00028................... 1422
+    Maker : EBALEOS00041.................. 1241
+    Maker : ESSAKAOS0072.................. 1102
+    Maker : EDZIMBIOS041.................. 974
+
+================================================================================
+>>> 7. STTM_KYC_RETAIL — KYC Particuliers
+================================================================================
+  [PEP — Personnes Politiquement Exposées]
+    PEP = N............................... 28636
+    PEP = Y............................... 442
+
+  [RESIDENT]
+    RESIDENT = Y.......................... 25214
+    RESIDENT = N.......................... 3864
+
+  [Statistiques TOTAL_INCOME déclaré]
+    MIN................................... 0
+    MAX................................... 170000000000
+    MOYENNE............................... 42596354.92
+    Sans revenu déclaré (NULL ou 0)....... 7339
+
+    Visas EXPIRÉS......................... 7
+    Passeports EXPIRÉS.................... 12
+    KYC Review DATE DÉPASSÉE.............. 14322
+
+  [Top 10 ACC_PURPOSE]
+    Objet : PERSONAL SAVINGS.............. 13070
+    Objet : TRANSACTIONAL................. 7027
+    Objet : OTHERS........................ 6173
+    Objet : .............................. 2796
+    Objet : INVESTMENT.................... 12
+
+  [US_RES_STATUS — Conformité FATCA]
+    US_RES_STATUS = N..................... 26261
+    US_RES_STATUS = ...................... 2759
+    US_RES_STATUS = Y..................... 58
+
+  [Détail des sources de revenus renseignées]
+    Avec SALARY_INCOME renseigné.......... 29078
+    Avec RENTAL_INCOME renseigné.......... 29078
+    Avec INVESTMENT_INCOME renseigné...... 29078
+    Avec BUSINESS_INCOME renseigné........ 29078
+    Avec PROF_BUSINESS_INCOME renseigné... 29078
+    Avec OVERSEAS_INCOME renseigné........ 29078
+    Avec OTHR_INCOME_SOURCES renseigné.... 1268
+
+  [Statistiques TOTAL_NET_WORTH]
+    NET_WORTH MIN......................... 0
+    NET_WORTH MAX......................... 5000000000000
+    NET_WORTH MOYEN....................... 226562124.66
+    Sans patrimoine (NULL ou 0)........... 7334
+
+  [Top 10 nationalités KYC Retail]
+    Nationalité : CMR..................... 23837
+    Nationalité : ........................ 2796
+    Nationalité : NG...................... 507
+    Nationalité : FR...................... 231
+    Nationalité : CA...................... 160
+    Nationalité : UK...................... 159
+    Nationalité : IN...................... 153
+    Nationalité : CH...................... 143
+    Nationalité : US...................... 121
+    Nationalité : GE...................... 71
+
+  [Top 10 BIRTH_COUNTRY KYC Retail]
+    Pays naissance : CMR.................. 23070
+    Pays naissance : ..................... 2820
+    Pays naissance : XX................... 1578
+    Pays naissance : NG................... 468
+    Pays naissance : FR................... 164
+    Pays naissance : IN................... 120
+    Pays naissance : CH................... 101
+    Pays naissance : UK................... 68
+    Pays naissance : US................... 51
+    Pays naissance : CT................... 45
+
+  [ACC_TYPE KYC Retail]
+    ACC_TYPE = ........................... 29078
+
+  [DECLARED]
+    DECLARED = ........................... 25840
+    DECLARED = C.......................... 2922
+    DECLARED = N.......................... 297
+    DECLARED = W.......................... 11
+    DECLARED = E.......................... 8
+
+  [PA_GIVEN (Power of Attorney)]
+    PA_GIVEN = N.......................... 28836
+    PA_GIVEN = Y.......................... 242
+
+    PEP=Y MAIS sans PEP_REMARKS........... 20
+    PEP=Y avec PEP_REMARKS................ 422
+
+  [Devise des montants KYC (KYC_AMTS_CCY)]
+    KYC_AMTS_CCY = XAF.................... 26268
+    KYC_AMTS_CCY = ....................... 2796
+    KYC_AMTS_CCY = USD.................... 9
+    KYC_AMTS_CCY = AED.................... 3
+    KYC_AMTS_CCY = GBP.................... 2
+
+  [Top 10 LOCAL_ADDR_COUNTRY]
+    LOCAL_ADDR_COUNTRY : CMR.............. 25977
+    LOCAL_ADDR_COUNTRY : ................. 2878
+    LOCAL_ADDR_COUNTRY : UK............... 42
+    LOCAL_ADDR_COUNTRY : FR............... 25
+    LOCAL_ADDR_COUNTRY : US............... 22
+    LOCAL_ADDR_COUNTRY : NG............... 20
+    LOCAL_ADDR_COUNTRY : CA............... 10
+    LOCAL_ADDR_COUNTRY : SEN.............. 8
+    LOCAL_ADDR_COUNTRY : SZ............... 8
+    LOCAL_ADDR_COUNTRY : CO............... 7
+
+  [Top 10 HOME_ADDR_COUNTRY]
+    HOME_ADDR_COUNTRY : CMR............... 21086
+    HOME_ADDR_COUNTRY : .................. 7693
+    HOME_ADDR_COUNTRY : NG................ 62
+    HOME_ADDR_COUNTRY : UK................ 43
+    HOME_ADDR_COUNTRY : FR................ 36
+    HOME_ADDR_COUNTRY : US................ 23
+    HOME_ADDR_COUNTRY : CA................ 10
+    HOME_ADDR_COUNTRY : CT................ 9
+    HOME_ADDR_COUNTRY : RW................ 9
+    HOME_ADDR_COUNTRY : LN................ 8
+
+================================================================================
+>>> 8. STTM_KYC_CORPORATE — KYC Entreprises
+================================================================================
+  [Répartition COMPANY_TYPE]
+    Type société : ....................... 21912
+    Type société : LIMITED LIABILITY COMPA 2015
+    Type société : ENTERPRISE............. 390
+    Type société : SOLE PROPRIETORSHIP.... 367
+    Type société : CLUB OR SOCIETY........ 3
+
+  [Top 10 sources de fonds (FUNDS_SOURCE)]
+    Fonds : .............................. 21912
+    Fonds : BUSINESS...................... 1500
+    Fonds : BUSINESS ..................... 387
+    Fonds : SCB Migrated Data............. 197
+    Fonds : BUSINESS EARNINGS............. 144
+    Fonds : BUSINESS ACTIVITIES........... 142
+    Fonds : GENERAL COMMERCE.............. 46
+    Fonds : INVESTMENT.................... 26
+    Fonds : FUNDING....................... 16
+    Fonds : BUSSINESS..................... 13
+
+  [Statistiques ANNUAL_TURNOVER]
+    CA MIN................................ 0
+    CA MAX................................ 176435830000000
+    CA MOYEN.............................. 185884740304.87
+    CA non renseigné (NULL ou 0).......... 22266
+
+    KYC Review DATE DÉPASSÉE.............. 1173
+
+  [Top 10 pays maison mère (PARENT_CMPNY_COUNTRY)]
+    Pays : ............................... 21911
+    Pays : CMR............................ 2669
+    Pays : SZ............................. 12
+    Pays : UK............................. 10
+    Pays : US............................. 9
+    Pays : NG............................. 7
+    Pays : GB............................. 6
+    Pays : KY............................. 6
+    Pays : IN............................. 5
+    Pays : CYM............................ 4
+
+  [Top 10 BUSINESS_NATURE]
+    Activité : ........................... 21911
+    Activité : SALES...................... 1598
+    Activité : TRADING.................... 1178
+
+  [Top 10 ACC_PURPOSE Corporate]
+    Objet : .............................. 21911
+    Objet : BUSINESS...................... 2470
+    Objet : INVESTMENT.................... 207
+    Objet : BANKING....................... 71
+    Objet : FINANCIAL..................... 28
+
+  [Top 10 PRODUCTS_TRADED]
+    Produits : ........................... 21913
+    Produits : SERVICES .................. 278
+    Produits : GENERAL COMMERCE........... 207
+    Produits : SERVICES................... 75
+    Produits : COMMERCE GENERAL........... 75
+    Produits : PRESTATION DE SERVICES..... 42
+    Produits : IMPORT-EXPORT.............. 33
+    Produits : PRESTATION DE SERVICES COMM 30
+    Produits : PRESTATIONS DE SERVICES.... 26
+    Produits : AGRICULTURE................ 13
+
+  [Mode paiement salaires (SALARY_MODE)]
+    SALARY_MODE = ........................ 21912
+    SALARY_MODE = CASH.................... 1320
+    SALARY_MODE = FUND TRANSFER........... 1274
+    SALARY_MODE = DIRECT DEBIT............ 180
+    SALARY_MODE = CHEQUE.................. 1
+
+  [Statistiques EMPLOYEE_NUMBER]
+    Employés MIN.......................... 0
+    Employés MAX.......................... 2000
+    Employés MOYEN........................ 31.26
+    Non renseigné (NULL ou 0)............. 22288
+
+  [Conformité et sollicitation]
+    ACC_SOLICITED = N..................... 24086
+    ACC_SOLICITED = Y..................... 401
+    ACC_SOLICITED = ...................... 200
+    COMPLIANCE_CLEARANCE = ............... 23215
+    COMPLIANCE_CLEARANCE = 26-SEP-23...... 43
+    COMPLIANCE_CLEARANCE = 25-SEP-23...... 17
+    COMPLIANCE_CLEARANCE = 10-JAN-25...... 9
+    COMPLIANCE_CLEARANCE = 06-MAR-26...... 9
+    COMPLIANCE_CLEARANCE = 28-FEB-25...... 8
+    COMPLIANCE_CLEARANCE = 03-FEB-25...... 7
+    COMPLIANCE_CLEARANCE = 02-JUN-23...... 7
+    COMPLIANCE_CLEARANCE = 23-JAN-24...... 7
+    COMPLIANCE_CLEARANCE = 17-MAR-25...... 7
+    COMPLIANCE_CLEARANCE = 29-FEB-24...... 6
+    COMPLIANCE_CLEARANCE = 26-FEB-25...... 6
+    COMPLIANCE_CLEARANCE = 19-DEC-25...... 6
+    COMPLIANCE_CLEARANCE = 07-FEB-25...... 6
+    COMPLIANCE_CLEARANCE = 04-JUN-25...... 6
+    COMPLIANCE_CLEARANCE = 31-OCT-24...... 6
+    COMPLIANCE_CLEARANCE = 05-MAY-23...... 6
+    COMPLIANCE_CLEARANCE = 25-JAN-23...... 6
+    COMPLIANCE_CLEARANCE = 18-MAR-25...... 6
+    COMPLIANCE_CLEARANCE = 17-OCT-24...... 6
+    COMPLIANCE_CLEARANCE = 15-MAY-24...... 6
+    COMPLIANCE_CLEARANCE = 21-MAR-24...... 6
+    COMPLIANCE_CLEARANCE = 08-APR-24...... 6
+    COMPLIANCE_CLEARANCE = 11-AUG-23...... 5
+    COMPLIANCE_CLEARANCE = 17-JUL-24...... 5
+    COMPLIANCE_CLEARANCE = 11-DEC-25...... 5
+    COMPLIANCE_CLEARANCE = 01-APR-26...... 5
+    COMPLIANCE_CLEARANCE = 07-MAY-24...... 5
+    COMPLIANCE_CLEARANCE = 13-NOV-24...... 5
+    COMPLIANCE_CLEARANCE = 18-NOV-24...... 5
+    COMPLIANCE_CLEARANCE = 13-MAR-25...... 5
+    COMPLIANCE_CLEARANCE = 03-OCT-25...... 5
+    COMPLIANCE_CLEARANCE = 09-JAN-26...... 5
+    COMPLIANCE_CLEARANCE = 23-MAY-25...... 5
+    COMPLIANCE_CLEARANCE = 23-MAY-24...... 5
+    COMPLIANCE_CLEARANCE = 28-MAY-24...... 5
+    COMPLIANCE_CLEARANCE = 28-NOV-24...... 5
+    COMPLIANCE_CLEARANCE = 10-MAR-25...... 5
+    COMPLIANCE_CLEARANCE = 07-MAR-25...... 5
+    COMPLIANCE_CLEARANCE = 14-MAR-23...... 5
+    COMPLIANCE_CLEARANCE = 30-JAN-25...... 5
+    COMPLIANCE_CLEARANCE = 09-OCT-25...... 5
+    COMPLIANCE_CLEARANCE = 30-MAY-25...... 5
+    COMPLIANCE_CLEARANCE = 05-MAR-25...... 5
+    COMPLIANCE_CLEARANCE = 09-MAR-23...... 5
+    COMPLIANCE_CLEARANCE = 13-DEC-23...... 5
+    COMPLIANCE_CLEARANCE = 27-SEP-24...... 5
+    COMPLIANCE_CLEARANCE = 21-NOV-25...... 5
+    COMPLIANCE_CLEARANCE = 11-NOV-25...... 5
+    COMPLIANCE_CLEARANCE = 06-DEC-23...... 5
+    COMPLIANCE_CLEARANCE = 06-MAY-24...... 5
+    COMPLIANCE_CLEARANCE = 31-MAY-24...... 5
+    COMPLIANCE_CLEARANCE = 15-JAN-25...... 5
+    COMPLIANCE_CLEARANCE = 17-SEP-25...... 5
+    COMPLIANCE_CLEARANCE = 14-OCT-25...... 5
+    COMPLIANCE_CLEARANCE = 08-MAY-24...... 4
+    COMPLIANCE_CLEARANCE = 22-MAY-23...... 4
+    COMPLIANCE_CLEARANCE = 24-JAN-25...... 4
+    COMPLIANCE_CLEARANCE = 17-APR-25...... 4
+    COMPLIANCE_CLEARANCE = 18-JAN-23...... 4
+    COMPLIANCE_CLEARANCE = 02-MAY-23...... 4
+    COMPLIANCE_CLEARANCE = 01-JUN-23...... 4
+    COMPLIANCE_CLEARANCE = 16-AUG-23...... 4
+    COMPLIANCE_CLEARANCE = 29-SEP-23...... 4
+    COMPLIANCE_CLEARANCE = 16-OCT-25...... 4
+    COMPLIANCE_CLEARANCE = 16-FEB-26...... 4
+    COMPLIANCE_CLEARANCE = 02-FEB-24...... 4
+    COMPLIANCE_CLEARANCE = 29-APR-24...... 4
+    COMPLIANCE_CLEARANCE = 16-MAY-24...... 4
+    COMPLIANCE_CLEARANCE = 02-SEP-24...... 4
+    COMPLIANCE_CLEARANCE = 31-DEC-24...... 4
+    COMPLIANCE_CLEARANCE = 12-MAR-25...... 4
+    COMPLIANCE_CLEARANCE = 28-MAR-25...... 4
+    COMPLIANCE_CLEARANCE = 02-JUN-25...... 4
+    COMPLIANCE_CLEARANCE = 21-AUG-25...... 4
+    COMPLIANCE_CLEARANCE = 15-MAR-23...... 4
+    COMPLIANCE_CLEARANCE = 15-MAR-24...... 4
+    COMPLIANCE_CLEARANCE = 25-MAR-24...... 4
+    COMPLIANCE_CLEARANCE = 19-FEB-24...... 4
+    COMPLIANCE_CLEARANCE = 01-AUG-24...... 4
+    COMPLIANCE_CLEARANCE = 14-AUG-25...... 4
+    COMPLIANCE_CLEARANCE = 04-OCT-24...... 4
+    COMPLIANCE_CLEARANCE = 08-OCT-25...... 4
+    COMPLIANCE_CLEARANCE = 30-JAN-26...... 4
+    COMPLIANCE_CLEARANCE = 10-MAY-23...... 4
+    COMPLIANCE_CLEARANCE = 05-OCT-23...... 4
+    COMPLIANCE_CLEARANCE = 09-APR-25...... 4
+    COMPLIANCE_CLEARANCE = 18-APR-24...... 4
+    COMPLIANCE_CLEARANCE = 05-MAR-24...... 4
+    COMPLIANCE_CLEARANCE = 28-JUN-24...... 4
+    COMPLIANCE_CLEARANCE = 06-MAR-25...... 4
+    COMPLIANCE_CLEARANCE = 01-AUG-25...... 4
+    COMPLIANCE_CLEARANCE = 26-SEP-25...... 4
+    COMPLIANCE_CLEARANCE = 18-JAN-24...... 4
+    COMPLIANCE_CLEARANCE = 29-DEC-23...... 4
+    COMPLIANCE_CLEARANCE = 14-DEC-23...... 4
+    COMPLIANCE_CLEARANCE = 30-JUL-24...... 4
+    COMPLIANCE_CLEARANCE = 30-SEP-24...... 4
+    COMPLIANCE_CLEARANCE = 04-FEB-25...... 4
+    COMPLIANCE_CLEARANCE = 21-FEB-25...... 4
+    COMPLIANCE_CLEARANCE = 22-JAN-25...... 4
+    COMPLIANCE_CLEARANCE = 03-SEP-25...... 4
+    COMPLIANCE_CLEARANCE = 28-NOV-25...... 4
+    COMPLIANCE_CLEARANCE = 31-MAR-23...... 4
+    COMPLIANCE_CLEARANCE = 14-MAY-24...... 4
+    COMPLIANCE_CLEARANCE = 14-MAR-25...... 4
+    COMPLIANCE_CLEARANCE = 26-NOV-24...... 4
+    COMPLIANCE_CLEARANCE = 12-JAN-23...... 3
+    COMPLIANCE_CLEARANCE = 20-MAR-23...... 3
+    COMPLIANCE_CLEARANCE = 06-JUN-24...... 3
+    COMPLIANCE_CLEARANCE = 20-FEB-26...... 3
+    COMPLIANCE_CLEARANCE = 29-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 02-FEB-26...... 3
+    COMPLIANCE_CLEARANCE = 24-MAY-23...... 3
+    COMPLIANCE_CLEARANCE = 09-MAY-23...... 3
+    COMPLIANCE_CLEARANCE = 04-MAY-23...... 3
+    COMPLIANCE_CLEARANCE = 17-OCT-23...... 3
+    COMPLIANCE_CLEARANCE = 15-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 28-MAY-25...... 3
+    COMPLIANCE_CLEARANCE = 11-OCT-24...... 3
+    COMPLIANCE_CLEARANCE = 16-OCT-24...... 3
+    COMPLIANCE_CLEARANCE = 11-SEP-24...... 3
+    COMPLIANCE_CLEARANCE = 08-AUG-24...... 3
+    COMPLIANCE_CLEARANCE = 20-FEB-25...... 3
+    COMPLIANCE_CLEARANCE = 17-FEB-25...... 3
+    COMPLIANCE_CLEARANCE = 27-MAR-25...... 3
+    COMPLIANCE_CLEARANCE = 29-JAN-26...... 3
+    COMPLIANCE_CLEARANCE = 17-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 08-APR-26...... 3
+    COMPLIANCE_CLEARANCE = 02-NOV-22...... 3
+    COMPLIANCE_CLEARANCE = 24-OCT-23...... 3
+    COMPLIANCE_CLEARANCE = 21-SEP-23...... 3
+    COMPLIANCE_CLEARANCE = 28-FEB-24...... 3
+    COMPLIANCE_CLEARANCE = 09-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 28-MAR-24...... 3
+    COMPLIANCE_CLEARANCE = 12-JUN-24...... 3
+    COMPLIANCE_CLEARANCE = 26-AUG-24...... 3
+    COMPLIANCE_CLEARANCE = 05-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 09-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 17-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 24-MAR-25...... 3
+    COMPLIANCE_CLEARANCE = 15-MAY-25...... 3
+    COMPLIANCE_CLEARANCE = 04-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 13-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 18-DEC-25...... 3
+    COMPLIANCE_CLEARANCE = 23-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 05-JUL-23...... 3
+    COMPLIANCE_CLEARANCE = 10-OCT-23...... 3
+    COMPLIANCE_CLEARANCE = 24-JAN-24...... 3
+    COMPLIANCE_CLEARANCE = 13-FEB-24...... 3
+    COMPLIANCE_CLEARANCE = 04-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 22-NOV-24...... 3
+    COMPLIANCE_CLEARANCE = 25-NOV-25...... 3
+    COMPLIANCE_CLEARANCE = 08-JUL-25...... 3
+    COMPLIANCE_CLEARANCE = 14-NOV-25...... 3
+    COMPLIANCE_CLEARANCE = 31-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 08-FEB-23...... 3
+    COMPLIANCE_CLEARANCE = 16-JAN-24...... 3
+    COMPLIANCE_CLEARANCE = 14-FEB-24...... 3
+    COMPLIANCE_CLEARANCE = 26-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 19-SEP-24...... 3
+    COMPLIANCE_CLEARANCE = 02-OCT-24...... 3
+    COMPLIANCE_CLEARANCE = 10-DEC-24...... 3
+    COMPLIANCE_CLEARANCE = 28-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 27-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 26-JUN-25...... 3
+    COMPLIANCE_CLEARANCE = 12-AUG-25...... 3
+    COMPLIANCE_CLEARANCE = 30-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 18-OCT-25...... 3
+    COMPLIANCE_CLEARANCE = 01-DEC-25...... 3
+    COMPLIANCE_CLEARANCE = 18-FEB-26...... 3
+    COMPLIANCE_CLEARANCE = 01-MAR-23...... 3
+    COMPLIANCE_CLEARANCE = 12-JUN-23...... 3
+    COMPLIANCE_CLEARANCE = 09-JUN-23...... 3
+    COMPLIANCE_CLEARANCE = 16-MAY-23...... 3
+    COMPLIANCE_CLEARANCE = 03-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 11-APR-24...... 3
+    COMPLIANCE_CLEARANCE = 18-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 07-JAN-25...... 3
+    COMPLIANCE_CLEARANCE = 14-NOV-24...... 3
+    COMPLIANCE_CLEARANCE = 05-FEB-26...... 3
+    COMPLIANCE_CLEARANCE = 07-MAY-25...... 3
+    COMPLIANCE_CLEARANCE = 31-JUL-25...... 3
+    COMPLIANCE_CLEARANCE = 13-NOV-25...... 3
+    COMPLIANCE_CLEARANCE = 19-JAN-23...... 3
+    COMPLIANCE_CLEARANCE = 13-JUN-23...... 3
+    COMPLIANCE_CLEARANCE = 17-AUG-23...... 3
+    COMPLIANCE_CLEARANCE = 20-DEC-23...... 3
+    COMPLIANCE_CLEARANCE = 18-MAR-24...... 3
+    COMPLIANCE_CLEARANCE = 16-FEB-24...... 3
+    COMPLIANCE_CLEARANCE = 27-MAR-24...... 3
+    COMPLIANCE_CLEARANCE = 09-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 25-MAR-25...... 3
+    COMPLIANCE_CLEARANCE = 27-FEB-25...... 3
+    COMPLIANCE_CLEARANCE = 11-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 12-FEB-25...... 3
+    COMPLIANCE_CLEARANCE = 22-APR-25...... 3
+    COMPLIANCE_CLEARANCE = 09-AUG-25...... 3
+    COMPLIANCE_CLEARANCE = 06-OCT-25...... 3
+    COMPLIANCE_CLEARANCE = 15-DEC-25...... 3
+    COMPLIANCE_CLEARANCE = 16-JAN-26...... 3
+    COMPLIANCE_CLEARANCE = 03-FEB-26...... 3
+    COMPLIANCE_CLEARANCE = 27-MAR-26...... 3
+    COMPLIANCE_CLEARANCE = 05-JUN-23...... 3
+    COMPLIANCE_CLEARANCE = 22-MAY-25...... 3
+    COMPLIANCE_CLEARANCE = 19-JUL-24...... 3
+    COMPLIANCE_CLEARANCE = 16-SEP-24...... 3
+    COMPLIANCE_CLEARANCE = 28-AUG-24...... 3
+    COMPLIANCE_CLEARANCE = 18-NOV-25...... 3
+    COMPLIANCE_CLEARANCE = 06-FEB-25...... 3
+    COMPLIANCE_CLEARANCE = 15-APR-25...... 3
+    COMPLIANCE_CLEARANCE = 12-SEP-25...... 3
+    COMPLIANCE_CLEARANCE = 07-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 07-MAR-24...... 2
+    COMPLIANCE_CLEARANCE = 27-FEB-24...... 2
+    COMPLIANCE_CLEARANCE = 24-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 13-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 06-SEP-24...... 2
+    COMPLIANCE_CLEARANCE = 13-SEP-24...... 2
+    COMPLIANCE_CLEARANCE = 22-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 19-DEC-24...... 2
+    COMPLIANCE_CLEARANCE = 25-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 12-DEC-24...... 2
+    COMPLIANCE_CLEARANCE = 20-JAN-25...... 2
+    COMPLIANCE_CLEARANCE = 13-FEB-25...... 2
+    COMPLIANCE_CLEARANCE = 05-FEB-25...... 2
+    COMPLIANCE_CLEARANCE = 15-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 06-AUG-25...... 2
+    COMPLIANCE_CLEARANCE = 23-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 02-OCT-25...... 2
+    COMPLIANCE_CLEARANCE = 21-JAN-26...... 2
+    COMPLIANCE_CLEARANCE = 09-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 21-MAR-23...... 2
+    COMPLIANCE_CLEARANCE = 30-AUG-23...... 2
+    COMPLIANCE_CLEARANCE = 10-AUG-23...... 2
+    COMPLIANCE_CLEARANCE = 22-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 30-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 03-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 21-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 08-JAN-25...... 2
+    COMPLIANCE_CLEARANCE = 17-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 22-OCT-25...... 2
+    COMPLIANCE_CLEARANCE = 19-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 26-MAR-25...... 2
+    COMPLIANCE_CLEARANCE = 03-JUN-25...... 2
+    COMPLIANCE_CLEARANCE = 21-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 24-SEP-25...... 2
+    COMPLIANCE_CLEARANCE = 26-NOV-25...... 2
+    COMPLIANCE_CLEARANCE = 07-JAN-26...... 2
+    COMPLIANCE_CLEARANCE = 12-MAR-26...... 2
+    COMPLIANCE_CLEARANCE = 05-JAN-23...... 2
+    COMPLIANCE_CLEARANCE = 20-FEB-23...... 2
+    COMPLIANCE_CLEARANCE = 15-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 09-FEB-24...... 2
+    COMPLIANCE_CLEARANCE = 27-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 21-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 25-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 10-JUL-24...... 2
+    COMPLIANCE_CLEARANCE = 20-SEP-24...... 2
+    COMPLIANCE_CLEARANCE = 01-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 03-MAR-25...... 2
+    COMPLIANCE_CLEARANCE = 19-FEB-25...... 2
+    COMPLIANCE_CLEARANCE = 01-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 05-MAY-25...... 2
+    COMPLIANCE_CLEARANCE = 26-MAY-25...... 2
+    COMPLIANCE_CLEARANCE = 24-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 25-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 19-NOV-25...... 2
+    COMPLIANCE_CLEARANCE = 08-DEC-25...... 2
+    COMPLIANCE_CLEARANCE = 10-MAR-26...... 2
+    COMPLIANCE_CLEARANCE = 11-MAY-23...... 2
+    COMPLIANCE_CLEARANCE = 08-JUN-23...... 2
+    COMPLIANCE_CLEARANCE = 01-DEC-23...... 2
+    COMPLIANCE_CLEARANCE = 13-MAY-24...... 2
+    COMPLIANCE_CLEARANCE = 21-FEB-24...... 2
+    COMPLIANCE_CLEARANCE = 30-MAY-24...... 2
+    COMPLIANCE_CLEARANCE = 10-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 19-AUG-24...... 2
+    COMPLIANCE_CLEARANCE = 29-AUG-24...... 2
+    COMPLIANCE_CLEARANCE = 22-AUG-24...... 2
+    COMPLIANCE_CLEARANCE = 04-MAR-25...... 2
+    COMPLIANCE_CLEARANCE = 13-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 28-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 01-MAY-25...... 2
+    COMPLIANCE_CLEARANCE = 05-JUN-25...... 2
+    COMPLIANCE_CLEARANCE = 22-AUG-25...... 2
+    COMPLIANCE_CLEARANCE = 20-JUN-25...... 2
+    COMPLIANCE_CLEARANCE = 06-NOV-25...... 2
+    COMPLIANCE_CLEARANCE = 17-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 20-DEC-25...... 2
+    COMPLIANCE_CLEARANCE = 07-FEB-23...... 2
+    COMPLIANCE_CLEARANCE = 23-MAR-23...... 2
+    COMPLIANCE_CLEARANCE = 10-FEB-23...... 2
+    COMPLIANCE_CLEARANCE = 29-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 30-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 28-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 27-MAY-25...... 2
+    COMPLIANCE_CLEARANCE = 04-SEP-24...... 2
+    COMPLIANCE_CLEARANCE = 27-DEC-25...... 2
+    COMPLIANCE_CLEARANCE = 08-NOV-24...... 2
+    COMPLIANCE_CLEARANCE = 18-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 10-OCT-25...... 2
+    COMPLIANCE_CLEARANCE = 02-DEC-25...... 2
+    COMPLIANCE_CLEARANCE = 23-JAN-26...... 2
+    COMPLIANCE_CLEARANCE = 17-JAN-23...... 2
+    COMPLIANCE_CLEARANCE = 08-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 24-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 04-APR-23...... 2
+    COMPLIANCE_CLEARANCE = 30-DEC-22...... 2
+    COMPLIANCE_CLEARANCE = 06-FEB-23...... 2
+    COMPLIANCE_CLEARANCE = 26-APR-23...... 2
+    COMPLIANCE_CLEARANCE = 11-OCT-23...... 2
+    COMPLIANCE_CLEARANCE = 29-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 09-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 17-NOV-23...... 2
+    COMPLIANCE_CLEARANCE = 25-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 10-MAY-24...... 2
+    COMPLIANCE_CLEARANCE = 18-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 05-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 14-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 28-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 14-JAN-25...... 2
+    COMPLIANCE_CLEARANCE = 16-JUN-25...... 2
+    COMPLIANCE_CLEARANCE = 04-AUG-25...... 2
+    COMPLIANCE_CLEARANCE = 04-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 11-JUL-25...... 2
+    COMPLIANCE_CLEARANCE = 13-OCT-25...... 2
+    COMPLIANCE_CLEARANCE = 24-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 28-MAR-23...... 2
+    COMPLIANCE_CLEARANCE = 26-MAY-23...... 2
+    COMPLIANCE_CLEARANCE = 07-JUN-23...... 2
+    COMPLIANCE_CLEARANCE = 19-OCT-23...... 2
+    COMPLIANCE_CLEARANCE = 30-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 26-JAN-24...... 2
+    COMPLIANCE_CLEARANCE = 23-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 12-JUL-24...... 2
+    COMPLIANCE_CLEARANCE = 24-MAY-24...... 2
+    COMPLIANCE_CLEARANCE = 22-MAY-24...... 2
+    COMPLIANCE_CLEARANCE = 15-JUL-24...... 2
+    COMPLIANCE_CLEARANCE = 02-AUG-24...... 2
+    COMPLIANCE_CLEARANCE = 09-AUG-24...... 2
+    COMPLIANCE_CLEARANCE = 24-SEP-24...... 2
+    COMPLIANCE_CLEARANCE = 19-SEP-25...... 2
+    COMPLIANCE_CLEARANCE = 18-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 29-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 25-NOV-24...... 2
+    COMPLIANCE_CLEARANCE = 10-JAN-26...... 2
+    COMPLIANCE_CLEARANCE = 04-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 12-JUN-26...... 2
+    COMPLIANCE_CLEARANCE = 11-AUG-25...... 2
+    COMPLIANCE_CLEARANCE = 29-SEP-25...... 2
+    COMPLIANCE_CLEARANCE = 27-FEB-26...... 2
+    COMPLIANCE_CLEARANCE = 24-JAN-23...... 2
+    COMPLIANCE_CLEARANCE = 06-APR-23...... 2
+    COMPLIANCE_CLEARANCE = 13-MAR-23...... 2
+    COMPLIANCE_CLEARANCE = 17-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 03-MAY-23...... 2
+    COMPLIANCE_CLEARANCE = 18-SEP-23...... 2
+    COMPLIANCE_CLEARANCE = 21-DEC-23...... 2
+    COMPLIANCE_CLEARANCE = 18-DEC-23...... 2
+    COMPLIANCE_CLEARANCE = 11-DEC-23...... 2
+    COMPLIANCE_CLEARANCE = 24-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 21-MAY-25...... 2
+    COMPLIANCE_CLEARANCE = 16-APR-24...... 2
+    COMPLIANCE_CLEARANCE = 26-JUL-24...... 2
+    COMPLIANCE_CLEARANCE = 22-JUL-24...... 2
+    COMPLIANCE_CLEARANCE = 26-JUN-24...... 2
+    COMPLIANCE_CLEARANCE = 24-OCT-24...... 2
+    COMPLIANCE_CLEARANCE = 06-JAN-25...... 2
+    COMPLIANCE_CLEARANCE = 21-MAR-25...... 2
+    COMPLIANCE_CLEARANCE = 25-APR-25...... 2
+    COMPLIANCE_CLEARANCE = 25-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 08-OCT-24...... 1
+    COMPLIANCE_CLEARANCE = 26-SEP-24...... 1
+    COMPLIANCE_CLEARANCE = 27-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 09-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 17-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 07-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 02-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 03-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 11-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 02-MAY-25...... 1
+    COMPLIANCE_CLEARANCE = 22-MAY-26...... 1
+    COMPLIANCE_CLEARANCE = 26-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 28-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 28-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 20-OCT-25...... 1
+    COMPLIANCE_CLEARANCE = 16-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 20-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 05-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 06-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 10-FEB-26...... 1
+    COMPLIANCE_CLEARANCE = 23-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 16-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 10-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 20-JUN-26...... 1
+    COMPLIANCE_CLEARANCE = 29-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 17-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 18-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 07-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 05-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 12-FEB-26...... 1
+    COMPLIANCE_CLEARANCE = 04-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 02-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 27-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 08-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 23-JAN-23...... 1
+    COMPLIANCE_CLEARANCE = 16-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 10-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 25-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 30-MAY-23...... 1
+    COMPLIANCE_CLEARANCE = 19-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 01-APR-16...... 1
+    COMPLIANCE_CLEARANCE = 28-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 12-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 09-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 19-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 07-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 02-FEB-22...... 1
+    COMPLIANCE_CLEARANCE = 07-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 03-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 29-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 13-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 26-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 05-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 29-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 07-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 25-FEB-25...... 1
+    COMPLIANCE_CLEARANCE = 14-FEB-25...... 1
+    COMPLIANCE_CLEARANCE = 07-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 23-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 10-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 09-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 07-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 20-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 15-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 14-FEB-26...... 1
+    COMPLIANCE_CLEARANCE = 16-FEB-36...... 1
+    COMPLIANCE_CLEARANCE = 25-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 09-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 27-JAN-23...... 1
+    COMPLIANCE_CLEARANCE = 17-MAR-22...... 1
+    COMPLIANCE_CLEARANCE = 17-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 23-SEP-22...... 1
+    COMPLIANCE_CLEARANCE = 22-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 15-MAY-23...... 1
+    COMPLIANCE_CLEARANCE = 13-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 15-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 16-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 12-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 25-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 28-DEC-23...... 1
+    COMPLIANCE_CLEARANCE = 26-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 06-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 19-APR-24...... 1
+    COMPLIANCE_CLEARANCE = 02-APR-24...... 1
+    COMPLIANCE_CLEARANCE = 04-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 23-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 03-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 06-FEB-26...... 1
+    COMPLIANCE_CLEARANCE = 03-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 02-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 11-AUG-22...... 1
+    COMPLIANCE_CLEARANCE = 03-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 10-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 04-NOV-22...... 1
+    COMPLIANCE_CLEARANCE = 04-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 28-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 15-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 08-MAY-23...... 1
+    COMPLIANCE_CLEARANCE = 03-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 23-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 18-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 10-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 30-MAR-21...... 1
+    COMPLIANCE_CLEARANCE = 11-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 27-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 24-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 29-MAY-24...... 1
+    COMPLIANCE_CLEARANCE = 18-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 19-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 05-OCT-24...... 1
+    COMPLIANCE_CLEARANCE = 07-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 23-JUL-35...... 1
+    COMPLIANCE_CLEARANCE = 19-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 10-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 17-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 24-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 09-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 24-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 30-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 06-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 16-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 30-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 28-DEC-22...... 1
+    COMPLIANCE_CLEARANCE = 23-AUG-22...... 1
+    COMPLIANCE_CLEARANCE = 09-JAN-23...... 1
+    COMPLIANCE_CLEARANCE = 06-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 31-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 04-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 30-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 20-NOV-23...... 1
+    COMPLIANCE_CLEARANCE = 12-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 02-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 08-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 07-DEC-23...... 1
+    COMPLIANCE_CLEARANCE = 13-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 22-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 14-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 21-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 17-MAY-24...... 1
+    COMPLIANCE_CLEARANCE = 07-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 07-OCT-24...... 1
+    COMPLIANCE_CLEARANCE = 03-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 20-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 13-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 29-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 23-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 16-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 02-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 08-MAY-25...... 1
+    COMPLIANCE_CLEARANCE = 16-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 09-AUG-22...... 1
+    COMPLIANCE_CLEARANCE = 06-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 05-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 27-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 15-DEC-23...... 1
+    COMPLIANCE_CLEARANCE = 31-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 22-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 05-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 01-APR-24...... 1
+    COMPLIANCE_CLEARANCE = 13-MAY-25...... 1
+    COMPLIANCE_CLEARANCE = 16-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 02-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 05-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 07-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 05-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 15-OCT-24...... 1
+    COMPLIANCE_CLEARANCE = 12-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 21-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 11-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 01-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 24-FEB-25...... 1
+    COMPLIANCE_CLEARANCE = 09-MAY-25...... 1
+    COMPLIANCE_CLEARANCE = 30-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 08-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 29-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 14-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 08-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 09-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 16-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 05-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 24-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 23-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 22-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 26-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 06-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 13-DEC-22...... 1
+    COMPLIANCE_CLEARANCE = 03-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 23-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 21-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 16-JUN-23...... 1
+    COMPLIANCE_CLEARANCE = 25-OCT-23...... 1
+    COMPLIANCE_CLEARANCE = 22-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 06-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 23-NOV-23...... 1
+    COMPLIANCE_CLEARANCE = 25-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 04-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 22-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 19-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 15-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 27-MAY-24...... 1
+    COMPLIANCE_CLEARANCE = 09-OCT-24...... 1
+    COMPLIANCE_CLEARANCE = 04-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 05-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 16-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 31-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 14-NOV-23...... 1
+    COMPLIANCE_CLEARANCE = 23-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 14-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 09-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 23-AUG-25...... 1
+    COMPLIANCE_CLEARANCE = 07-JUL-35...... 1
+    COMPLIANCE_CLEARANCE = 24-JUL-35...... 1
+    COMPLIANCE_CLEARANCE = 17-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 25-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 13-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 09-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 26-JAN-23...... 1
+    COMPLIANCE_CLEARANCE = 29-MAY-23...... 1
+    COMPLIANCE_CLEARANCE = 07-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 08-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 21-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 27-DEC-23...... 1
+    COMPLIANCE_CLEARANCE = 16-NOV-23...... 1
+    COMPLIANCE_CLEARANCE = 03-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 12-APR-24...... 1
+    COMPLIANCE_CLEARANCE = 31-MAY-25...... 1
+    COMPLIANCE_CLEARANCE = 20-JUN-24...... 1
+    COMPLIANCE_CLEARANCE = 18-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 18-SEP-24...... 1
+    COMPLIANCE_CLEARANCE = 21-JAN-25...... 1
+    COMPLIANCE_CLEARANCE = 11-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 30-DEC-24...... 1
+    COMPLIANCE_CLEARANCE = 18-FEB-25...... 1
+    COMPLIANCE_CLEARANCE = 30-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 24-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 30-JUN-25...... 1
+    COMPLIANCE_CLEARANCE = 06-AUG-26...... 1
+    COMPLIANCE_CLEARANCE = 21-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 18-OCT-26...... 1
+    COMPLIANCE_CLEARANCE = 20-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 01-OCT-25...... 1
+    COMPLIANCE_CLEARANCE = 02-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 26-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 23-FEB-26...... 1
+    COMPLIANCE_CLEARANCE = 23-AUG-24...... 1
+    COMPLIANCE_CLEARANCE = 20-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 10-APR-26...... 1
+    COMPLIANCE_CLEARANCE = 19-APR-23...... 1
+    COMPLIANCE_CLEARANCE = 08-SEP-22...... 1
+    COMPLIANCE_CLEARANCE = 15-FEB-23...... 1
+    COMPLIANCE_CLEARANCE = 26-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 12-MAY-23...... 1
+    COMPLIANCE_CLEARANCE = 29-AUG-23...... 1
+    COMPLIANCE_CLEARANCE = 10-SEP-23...... 1
+    COMPLIANCE_CLEARANCE = 08-JAN-24...... 1
+    COMPLIANCE_CLEARANCE = 06-NOV-23...... 1
+    COMPLIANCE_CLEARANCE = 08-DEC-23...... 1
+    COMPLIANCE_CLEARANCE = 26-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 26-APR-25...... 1
+    COMPLIANCE_CLEARANCE = 26-FEB-24...... 1
+    COMPLIANCE_CLEARANCE = 08-MAR-24...... 1
+    COMPLIANCE_CLEARANCE = 25-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 01-JUL-24...... 1
+    COMPLIANCE_CLEARANCE = 02-SEP-25...... 1
+    COMPLIANCE_CLEARANCE = 21-NOV-24...... 1
+    COMPLIANCE_CLEARANCE = 02-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 22-JUL-25...... 1
+    COMPLIANCE_CLEARANCE = 16-NOV-25...... 1
+    COMPLIANCE_CLEARANCE = 07-OCT-25...... 1
+    COMPLIANCE_CLEARANCE = 04-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 07-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 19-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 12-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 04-MAR-26...... 1
+    COMPLIANCE_CLEARANCE = 15-JAN-26...... 1
+    COMPLIANCE_CLEARANCE = 28-DEC-25...... 1
+    COMPLIANCE_CLEARANCE = 29-MAR-23...... 1
+    COMPLIANCE_CLEARANCE = 04-MAR-23...... 1
+    BUSINESS_APPROVAL = .................. 22491
+    BUSINESS_APPROVAL = 28-NOV-24......... 8
+    BUSINESS_APPROVAL = 23-JAN-25......... 8
+    BUSINESS_APPROVAL = 26-SEP-23......... 7
+    BUSINESS_APPROVAL = 28-JAN-25......... 6
+    BUSINESS_APPROVAL = 20-FEB-25......... 6
+    BUSINESS_APPROVAL = 25-JAN-24......... 6
+    BUSINESS_APPROVAL = 23-FEB-23......... 6
+    BUSINESS_APPROVAL = 28-FEB-25......... 5
+    BUSINESS_APPROVAL = 04-JAN-23......... 5
+    BUSINESS_APPROVAL = 25-SEP-24......... 5
+    BUSINESS_APPROVAL = 14-NOV-24......... 5
+    BUSINESS_APPROVAL = 13-MAR-23......... 5
+    BUSINESS_APPROVAL = 18-JAN-24......... 5
+    BUSINESS_APPROVAL = 22-JAN-25......... 5
+    BUSINESS_APPROVAL = 05-MAY-25......... 5
+    BUSINESS_APPROVAL = 21-SEP-23......... 5
+    BUSINESS_APPROVAL = 10-JUN-24......... 5
+    BUSINESS_APPROVAL = 12-FEB-25......... 4
+    BUSINESS_APPROVAL = 18-MAR-19......... 4
+    BUSINESS_APPROVAL = 23-JUN-21......... 4
+    BUSINESS_APPROVAL = 22-APR-24......... 4
+    BUSINESS_APPROVAL = 09-JAN-23......... 4
+    BUSINESS_APPROVAL = 17-JUL-24......... 4
+    BUSINESS_APPROVAL = 16-FEB-23......... 4
+    BUSINESS_APPROVAL = 02-MAR-23......... 4
+    BUSINESS_APPROVAL = 03-APR-24......... 4
+    BUSINESS_APPROVAL = 25-MAY-23......... 4
+    BUSINESS_APPROVAL = 26-JAN-22......... 4
+    BUSINESS_APPROVAL = 24-JAN-24......... 4
+    BUSINESS_APPROVAL = 25-OCT-23......... 4
+    BUSINESS_APPROVAL = 22-NOV-24......... 4
+    BUSINESS_APPROVAL = 11-AUG-22......... 4
+    BUSINESS_APPROVAL = 06-SEP-21......... 4
+    BUSINESS_APPROVAL = 20-JUN-23......... 4
+    BUSINESS_APPROVAL = 05-JAN-24......... 4
+    BUSINESS_APPROVAL = 21-DEC-23......... 4
+    BUSINESS_APPROVAL = 13-MAY-25......... 4
+    BUSINESS_APPROVAL = 05-JAN-23......... 4
+    BUSINESS_APPROVAL = 21-SEP-22......... 4
+    BUSINESS_APPROVAL = 14-MAR-23......... 4
+    BUSINESS_APPROVAL = 08-JAN-24......... 4
+    BUSINESS_APPROVAL = 28-MAY-25......... 4
+    BUSINESS_APPROVAL = 25-OCT-22......... 4
+    BUSINESS_APPROVAL = 03-JAN-23......... 4
+    BUSINESS_APPROVAL = 15-MAR-23......... 4
+    BUSINESS_APPROVAL = 12-APR-24......... 4
+    BUSINESS_APPROVAL = 06-JUN-24......... 4
+    BUSINESS_APPROVAL = 29-JAN-25......... 4
+    BUSINESS_APPROVAL = 18-MAR-25......... 4
+    BUSINESS_APPROVAL = 04-AUG-21......... 3
+    BUSINESS_APPROVAL = 11-MAY-23......... 3
+    BUSINESS_APPROVAL = 22-AUG-22......... 3
+    BUSINESS_APPROVAL = 24-JAN-20......... 3
+    BUSINESS_APPROVAL = 15-JUN-23......... 3
+    BUSINESS_APPROVAL = 09-FEB-21......... 3
+    BUSINESS_APPROVAL = 21-FEB-24......... 3
+    BUSINESS_APPROVAL = 19-JAN-22......... 3
+    BUSINESS_APPROVAL = 31-OCT-23......... 3
+    BUSINESS_APPROVAL = 18-JUL-23......... 3
+    BUSINESS_APPROVAL = 29-FEB-24......... 3
+    BUSINESS_APPROVAL = 11-DEC-23......... 3
+    BUSINESS_APPROVAL = 12-JUN-24......... 3
+    BUSINESS_APPROVAL = 26-JUN-24......... 3
+    BUSINESS_APPROVAL = 26-JUL-24......... 3
+    BUSINESS_APPROVAL = 16-JAN-25......... 3
+    BUSINESS_APPROVAL = 28-MAR-24......... 3
+    BUSINESS_APPROVAL = 25-APR-25......... 3
+    BUSINESS_APPROVAL = 26-SEP-25......... 3
+    BUSINESS_APPROVAL = 15-JUL-22......... 3
+    BUSINESS_APPROVAL = 12-DEC-22......... 3
+    BUSINESS_APPROVAL = 16-SEP-21......... 3
+    BUSINESS_APPROVAL = 03-JAN-18......... 3
+    BUSINESS_APPROVAL = 24-JUN-20......... 3
+    BUSINESS_APPROVAL = 24-MAY-21......... 3
+    BUSINESS_APPROVAL = 19-APR-23......... 3
+    BUSINESS_APPROVAL = 28-JAN-19......... 3
+    BUSINESS_APPROVAL = 15-JUL-24......... 3
+    BUSINESS_APPROVAL = 17-MAR-25......... 3
+    BUSINESS_APPROVAL = 26-MAY-23......... 3
+    BUSINESS_APPROVAL = 27-MAR-25......... 3
+    BUSINESS_APPROVAL = 22-JUL-25......... 3
+    BUSINESS_APPROVAL = 08-OCT-25......... 3
+    BUSINESS_APPROVAL = 22-SEP-22......... 3
+    BUSINESS_APPROVAL = 22-JUL-22......... 3
+    BUSINESS_APPROVAL = 28-SEP-22......... 3
+    BUSINESS_APPROVAL = 20-JUN-22......... 3
+    BUSINESS_APPROVAL = 13-FEB-23......... 3
+    BUSINESS_APPROVAL = 14-JUL-17......... 3
+    BUSINESS_APPROVAL = 30-DEC-22......... 3
+    BUSINESS_APPROVAL = 09-FEB-23......... 3
+    BUSINESS_APPROVAL = 04-APR-23......... 3
+    BUSINESS_APPROVAL = 20-MAR-23......... 3
+    BUSINESS_APPROVAL = 04-AUG-22......... 3
+    BUSINESS_APPROVAL = 25-MAR-24......... 3
+    BUSINESS_APPROVAL = 25-FEB-20......... 3
+    BUSINESS_APPROVAL = 04-JUL-25......... 3
+    BUSINESS_APPROVAL = 01-OCT-25......... 3
+    BUSINESS_APPROVAL = 02-FEB-26......... 3
+    BUSINESS_APPROVAL = 15-MAR-22......... 3
+    BUSINESS_APPROVAL = 16-APR-19......... 3
+    BUSINESS_APPROVAL = 07-JUN-17......... 3
+    BUSINESS_APPROVAL = 12-MAR-25......... 3
+    BUSINESS_APPROVAL = 11-APR-25......... 3
+    BUSINESS_APPROVAL = 12-JUN-25......... 3
+    BUSINESS_APPROVAL = 02-MAY-24......... 3
+    BUSINESS_APPROVAL = 26-AUG-25......... 3
+    BUSINESS_APPROVAL = 09-NOV-23......... 3
+    BUSINESS_APPROVAL = 22-JAN-21......... 3
+    BUSINESS_APPROVAL = 25-FEB-22......... 3
+    BUSINESS_APPROVAL = 05-FEB-25......... 3
+    BUSINESS_APPROVAL = 24-APR-25......... 3
+    BUSINESS_APPROVAL = 15-SEP-25......... 3
+    BUSINESS_APPROVAL = 22-MAR-22......... 3
+    BUSINESS_APPROVAL = 27-AUG-18......... 3
+    BUSINESS_APPROVAL = 30-AUG-23......... 3
+    BUSINESS_APPROVAL = 24-APR-23......... 3
+    BUSINESS_APPROVAL = 27-JUL-23......... 3
+    BUSINESS_APPROVAL = 17-MAR-21......... 3
+    BUSINESS_APPROVAL = 16-MAY-24......... 3
+    BUSINESS_APPROVAL = 20-MAR-24......... 3
+    BUSINESS_APPROVAL = 12-JAN-24......... 3
+    BUSINESS_APPROVAL = 30-NOV-23......... 3
+    BUSINESS_APPROVAL = 29-SEP-22......... 3
+    BUSINESS_APPROVAL = 05-MAY-22......... 3
+    BUSINESS_APPROVAL = 07-AUG-24......... 3
+    BUSINESS_APPROVAL = 26-NOV-24......... 3
+    BUSINESS_APPROVAL = 24-JAN-25......... 3
+    BUSINESS_APPROVAL = 03-FEB-25......... 3
+    BUSINESS_APPROVAL = 20-MAR-25......... 3
+    BUSINESS_APPROVAL = 29-JUL-25......... 3
+    BUSINESS_APPROVAL = 18-SEP-25......... 3
+    BUSINESS_APPROVAL = 02-FEB-22......... 3
+    BUSINESS_APPROVAL = 13-JAN-21......... 3
+    BUSINESS_APPROVAL = 01-JUL-17......... 3
+    BUSINESS_APPROVAL = 11-JAN-21......... 3
+    BUSINESS_APPROVAL = 04-OCT-23......... 3
+    BUSINESS_APPROVAL = 23-JAN-19......... 3
+    BUSINESS_APPROVAL = 28-AUG-23......... 3
+    BUSINESS_APPROVAL = 04-OCT-22......... 3
+    BUSINESS_APPROVAL = 14-MAR-24......... 3
+    BUSINESS_APPROVAL = 13-MAY-24......... 3
+    BUSINESS_APPROVAL = 13-NOV-23......... 3
+    BUSINESS_APPROVAL = 10-DEC-24......... 3
+    BUSINESS_APPROVAL = 02-MAR-16......... 3
+    BUSINESS_APPROVAL = 27-JUN-24......... 3
+    BUSINESS_APPROVAL = 21-FEB-22......... 3
+    BUSINESS_APPROVAL = 07-FEB-23......... 3
+    BUSINESS_APPROVAL = 05-JUL-22......... 3
+    BUSINESS_APPROVAL = 03-JAN-22......... 3
+    BUSINESS_APPROVAL = 08-MAY-17......... 3
+    BUSINESS_APPROVAL = 25-SEP-23......... 3
+    BUSINESS_APPROVAL = 24-FEB-17......... 3
+    BUSINESS_APPROVAL = 20-OCT-22......... 3
+    BUSINESS_APPROVAL = 20-SEP-22......... 3
+    BUSINESS_APPROVAL = 09-AUG-23......... 3
+    BUSINESS_APPROVAL = 30-NOV-22......... 3
+    BUSINESS_APPROVAL = 05-JUL-23......... 3
+    BUSINESS_APPROVAL = 21-NOV-19......... 3
+    BUSINESS_APPROVAL = 23-NOV-23......... 3
+    BUSINESS_APPROVAL = 20-SEP-24......... 3
+    BUSINESS_APPROVAL = 31-JAN-25......... 3
+    BUSINESS_APPROVAL = 04-FEB-25......... 3
+    BUSINESS_APPROVAL = 09-JUL-25......... 3
+    BUSINESS_APPROVAL = 25-SEP-25......... 3
+    BUSINESS_APPROVAL = 10-MAY-19......... 3
+    BUSINESS_APPROVAL = 10-SEP-24......... 2
+    BUSINESS_APPROVAL = 22-JUN-23......... 2
+    BUSINESS_APPROVAL = 02-AUG-22......... 2
+    BUSINESS_APPROVAL = 22-MAY-25......... 2
+    BUSINESS_APPROVAL = 30-OCT-24......... 2
+    BUSINESS_APPROVAL = 28-MAR-25......... 2
+    BUSINESS_APPROVAL = 28-JUL-25......... 2
+    BUSINESS_APPROVAL = 15-MAR-25......... 2
+    BUSINESS_APPROVAL = 31-DEC-25......... 2
+    BUSINESS_APPROVAL = 01-NOV-23......... 2
+    BUSINESS_APPROVAL = 27-FEB-24......... 2
+    BUSINESS_APPROVAL = 23-JAN-23......... 2
+    BUSINESS_APPROVAL = 01-JUN-23......... 2
+    BUSINESS_APPROVAL = 19-JUN-23......... 2
+    BUSINESS_APPROVAL = 06-SEP-24......... 2
+    BUSINESS_APPROVAL = 07-JUN-24......... 2
+    BUSINESS_APPROVAL = 13-NOV-24......... 2
+    BUSINESS_APPROVAL = 14-FEB-25......... 2
+    BUSINESS_APPROVAL = 06-JAN-21......... 2
+    BUSINESS_APPROVAL = 27-APR-23......... 2
+    BUSINESS_APPROVAL = 21-JAN-26......... 2
+    BUSINESS_APPROVAL = 06-MAR-26......... 2
+    BUSINESS_APPROVAL = 09-FEB-26......... 2
+    BUSINESS_APPROVAL = 17-MAR-22......... 2
+    BUSINESS_APPROVAL = 31-MAR-20......... 2
+    BUSINESS_APPROVAL = 23-SEP-22......... 2
+    BUSINESS_APPROVAL = 23-FEB-10......... 2
+    BUSINESS_APPROVAL = 08-NOV-19......... 2
+    BUSINESS_APPROVAL = 20-JAN-22......... 2
+    BUSINESS_APPROVAL = 30-JUN-20......... 2
+    BUSINESS_APPROVAL = 27-JAN-23......... 2
+    BUSINESS_APPROVAL = 02-MAR-18......... 2
+    BUSINESS_APPROVAL = 01-DEC-22......... 2
+    BUSINESS_APPROVAL = 22-DEC-08......... 2
+    BUSINESS_APPROVAL = 17-APR-23......... 2
+    BUSINESS_APPROVAL = 12-OCT-23......... 2
+    BUSINESS_APPROVAL = 10-SEP-18......... 2
+    BUSINESS_APPROVAL = 21-JUL-22......... 2
+    BUSINESS_APPROVAL = 17-SEP-21......... 2
+    BUSINESS_APPROVAL = 28-JUN-21......... 2
+    BUSINESS_APPROVAL = 26-NOV-20......... 2
+    BUSINESS_APPROVAL = 30-APR-24......... 2
+    BUSINESS_APPROVAL = 10-AUG-22......... 2
+    BUSINESS_APPROVAL = 04-JUL-24......... 2
+    BUSINESS_APPROVAL = 23-JUL-24......... 2
+    BUSINESS_APPROVAL = 16-SEP-24......... 2
+    BUSINESS_APPROVAL = 30-AUG-24......... 2
+    BUSINESS_APPROVAL = 08-OCT-24......... 2
+    BUSINESS_APPROVAL = 06-FEB-25......... 2
+    BUSINESS_APPROVAL = 16-OCT-23......... 2
+    BUSINESS_APPROVAL = 19-JUL-24......... 2
+    BUSINESS_APPROVAL = 09-DEC-24......... 2
+    BUSINESS_APPROVAL = 17-JUL-23......... 2
+    BUSINESS_APPROVAL = 06-OCT-23......... 2
+    BUSINESS_APPROVAL = 12-OCT-20......... 2
+    BUSINESS_APPROVAL = 11-JAN-24......... 2
+    BUSINESS_APPROVAL = 14-JUN-24......... 2
+    BUSINESS_APPROVAL = 16-MAY-22......... 2
+    BUSINESS_APPROVAL = 07-JAN-25......... 2
+    BUSINESS_APPROVAL = 08-MAY-20......... 2
+    BUSINESS_APPROVAL = 16-NOV-21......... 2
+    BUSINESS_APPROVAL = 08-MAY-24......... 2
+    BUSINESS_APPROVAL = 20-DEC-24......... 2
+    BUSINESS_APPROVAL = 31-JUL-25......... 2
+    BUSINESS_APPROVAL = 18-OCT-21......... 2
+    BUSINESS_APPROVAL = 18-JAN-23......... 2
+    BUSINESS_APPROVAL = 16-DEC-22......... 2
+    BUSINESS_APPROVAL = 11-JAN-23......... 2
+    BUSINESS_APPROVAL = 31-MAY-22......... 2
+    BUSINESS_APPROVAL = 26-MAY-21......... 2
+    BUSINESS_APPROVAL = 23-SEP-14......... 2
+    BUSINESS_APPROVAL = 07-MAY-20......... 2
+    BUSINESS_APPROVAL = 08-DEC-21......... 2
+    BUSINESS_APPROVAL = 05-APR-22......... 2
+    BUSINESS_APPROVAL = 01-APR-16......... 2
+    BUSINESS_APPROVAL = 29-JUL-22......... 2
+    BUSINESS_APPROVAL = 13-JUN-23......... 2
+    BUSINESS_APPROVAL = 17-MAY-18......... 2
+    BUSINESS_APPROVAL = 01-JUN-21......... 2
+    BUSINESS_APPROVAL = 05-NOV-19......... 2
+    BUSINESS_APPROVAL = 03-FEB-23......... 2
+    BUSINESS_APPROVAL = 27-FEB-23......... 2
+    BUSINESS_APPROVAL = 29-NOV-22......... 2
+    BUSINESS_APPROVAL = 02-MAY-23......... 2
+    BUSINESS_APPROVAL = 11-JUN-19......... 2
+    BUSINESS_APPROVAL = 12-SEP-23......... 2
+    BUSINESS_APPROVAL = 19-SEP-23......... 2
+    BUSINESS_APPROVAL = 12-APR-21......... 2
+    BUSINESS_APPROVAL = 31-JUL-23......... 2
+    BUSINESS_APPROVAL = 13-NOV-20......... 2
+    BUSINESS_APPROVAL = 09-OCT-23......... 2
+    BUSINESS_APPROVAL = 20-OCT-21......... 2
+    BUSINESS_APPROVAL = 13-MAR-14......... 2
+    BUSINESS_APPROVAL = 14-FEB-24......... 2
+    BUSINESS_APPROVAL = 23-OCT-23......... 2
+    BUSINESS_APPROVAL = 25-NOV-19......... 2
+    BUSINESS_APPROVAL = 11-MAR-24......... 2
+    BUSINESS_APPROVAL = 23-APR-21......... 2
+    BUSINESS_APPROVAL = 31-JUL-24......... 2
+    BUSINESS_APPROVAL = 22-AUG-24......... 2
+    BUSINESS_APPROVAL = 21-OCT-22......... 2
+    BUSINESS_APPROVAL = 27-DEC-24......... 2
+    BUSINESS_APPROVAL = 04-MAR-25......... 2
+    BUSINESS_APPROVAL = 27-JAN-25......... 2
+    BUSINESS_APPROVAL = 25-AUG-20......... 2
+    BUSINESS_APPROVAL = 15-JAN-25......... 2
+    BUSINESS_APPROVAL = 08-JUN-23......... 2
+    BUSINESS_APPROVAL = 03-APR-25......... 2
+    BUSINESS_APPROVAL = 19-JUN-25......... 2
+    BUSINESS_APPROVAL = 26-JUN-25......... 2
+    BUSINESS_APPROVAL = 01-SEP-25......... 2
+    BUSINESS_APPROVAL = 17-FEB-26......... 2
+    BUSINESS_APPROVAL = 01-DEC-25......... 2
+    BUSINESS_APPROVAL = 10-FEB-23......... 2
+    BUSINESS_APPROVAL = 24-FEB-22......... 2
+    BUSINESS_APPROVAL = 03-MAY-17......... 2
+    BUSINESS_APPROVAL = 03-AUG-21......... 2
+    BUSINESS_APPROVAL = 18-NOV-20......... 2
+    BUSINESS_APPROVAL = 29-JUL-20......... 2
+    BUSINESS_APPROVAL = 25-MAY-21......... 2
+    BUSINESS_APPROVAL = 12-OCT-22......... 2
+    BUSINESS_APPROVAL = 29-APR-21......... 2
+    BUSINESS_APPROVAL = 01-AUG-18......... 2
+    BUSINESS_APPROVAL = 16-SEP-19......... 2
+    BUSINESS_APPROVAL = 06-OCT-22......... 2
+    BUSINESS_APPROVAL = 31-MAR-22......... 2
+    BUSINESS_APPROVAL = 16-MAR-23......... 2
+    BUSINESS_APPROVAL = 18-APR-23......... 2
+    BUSINESS_APPROVAL = 18-MAY-23......... 2
+    BUSINESS_APPROVAL = 22-MAY-23......... 2
+    BUSINESS_APPROVAL = 30-MAY-17......... 2
+    BUSINESS_APPROVAL = 07-SEP-21......... 2
+    BUSINESS_APPROVAL = 17-MAR-15......... 2
+    BUSINESS_APPROVAL = 11-APR-24......... 2
+    BUSINESS_APPROVAL = 03-OCT-22......... 2
+    BUSINESS_APPROVAL = 24-FEB-23......... 2
+    BUSINESS_APPROVAL = 21-MAR-22......... 2
+    BUSINESS_APPROVAL = 28-MAY-19......... 2
+    BUSINESS_APPROVAL = 13-DEC-13......... 2
+    BUSINESS_APPROVAL = 02-FEB-17......... 2
+    BUSINESS_APPROVAL = 28-AUG-19......... 2
+    BUSINESS_APPROVAL = 22-FEB-23......... 2
+    BUSINESS_APPROVAL = 14-NOV-23......... 2
+    BUSINESS_APPROVAL = 21-JUN-23......... 2
+    BUSINESS_APPROVAL = 14-DEC-23......... 2
+    BUSINESS_APPROVAL = 22-JAN-16......... 2
+    BUSINESS_APPROVAL = 28-APR-23......... 2
+    BUSINESS_APPROVAL = 04-APR-24......... 2
+    BUSINESS_APPROVAL = 06-MAY-20......... 2
+    BUSINESS_APPROVAL = 30-SEP-24......... 2
+    BUSINESS_APPROVAL = 19-NOV-21......... 2
+    BUSINESS_APPROVAL = 04-DEC-24......... 2
+    BUSINESS_APPROVAL = 03-MAR-25......... 2
+    BUSINESS_APPROVAL = 10-JUL-24......... 2
+    BUSINESS_APPROVAL = 25-NOV-25......... 2
+    BUSINESS_APPROVAL = 15-DEC-21......... 2
+    BUSINESS_APPROVAL = 09-DEC-22......... 2
+    BUSINESS_APPROVAL = 04-SEP-18......... 2
+    BUSINESS_APPROVAL = 16-SEP-15......... 2
+    BUSINESS_APPROVAL = 17-DEC-13......... 2
+    BUSINESS_APPROVAL = 05-JUL-19......... 2
+    BUSINESS_APPROVAL = 24-JAN-17......... 2
+    BUSINESS_APPROVAL = 06-MAY-15......... 2
+    BUSINESS_APPROVAL = 08-MAY-23......... 2
+    BUSINESS_APPROVAL = 22-FEB-22......... 2
+    BUSINESS_APPROVAL = 08-AUG-23......... 2
+    BUSINESS_APPROVAL = 07-AUG-23......... 2
+    BUSINESS_APPROVAL = 28-FEB-23......... 2
+    BUSINESS_APPROVAL = 28-JUL-23......... 2
+    BUSINESS_APPROVAL = 19-AUG-21......... 2
+    BUSINESS_APPROVAL = 11-JUL-23......... 2
+    BUSINESS_APPROVAL = 09-APR-24......... 2
+    BUSINESS_APPROVAL = 06-MAR-24......... 2
+    BUSINESS_APPROVAL = 04-AUG-23......... 2
+    BUSINESS_APPROVAL = 17-APR-24......... 2
+    BUSINESS_APPROVAL = 18-APR-24......... 2
+    BUSINESS_APPROVAL = 22-JUL-24......... 2
+    BUSINESS_APPROVAL = 24-APR-24......... 2
+    BUSINESS_APPROVAL = 28-JUN-24......... 2
+    BUSINESS_APPROVAL = 16-JUL-24......... 2
+    BUSINESS_APPROVAL = 08-DEC-22......... 2
+    BUSINESS_APPROVAL = 11-JUN-24......... 2
+    BUSINESS_APPROVAL = 21-AUG-24......... 2
+    BUSINESS_APPROVAL = 01-NOV-24......... 2
+    BUSINESS_APPROVAL = 26-FEB-25......... 2
+    BUSINESS_APPROVAL = 03-JUN-25......... 2
+    BUSINESS_APPROVAL = 24-FEB-25......... 2
+    BUSINESS_APPROVAL = 24-OCT-24......... 2
+    BUSINESS_APPROVAL = 21-MAR-25......... 2
+    BUSINESS_APPROVAL = 30-MAY-25......... 2
+    BUSINESS_APPROVAL = 08-APR-25......... 2
+    BUSINESS_APPROVAL = 17-JAN-25......... 2
+    BUSINESS_APPROVAL = 28-DEC-20......... 2
+    BUSINESS_APPROVAL = 06-NOV-24......... 2
+    BUSINESS_APPROVAL = 05-MAR-25......... 2
+    BUSINESS_APPROVAL = 05-NOV-25......... 2
+    BUSINESS_APPROVAL = 07-JAN-26......... 2
+    BUSINESS_APPROVAL = 13-JAN-26......... 2
+    BUSINESS_APPROVAL = 07-SEP-20......... 2
+    BUSINESS_APPROVAL = 06-MAR-23......... 2
+    BUSINESS_APPROVAL = 08-NOV-10......... 2
+    BUSINESS_APPROVAL = 03-MAR-22......... 2
+    BUSINESS_APPROVAL = 05-APR-21......... 2
+    BUSINESS_APPROVAL = 07-APR-22......... 2
+    BUSINESS_APPROVAL = 13-JUN-18......... 2
+    BUSINESS_APPROVAL = 15-JUL-20......... 2
+    BUSINESS_APPROVAL = 11-APR-14......... 2
+    BUSINESS_APPROVAL = 02-SEP-19......... 2
+    BUSINESS_APPROVAL = 22-MAR-23......... 2
+    BUSINESS_APPROVAL = 11-APR-23......... 2
+    BUSINESS_APPROVAL = 01-FEB-23......... 2
+    BUSINESS_APPROVAL = 25-JUL-24......... 2
+    BUSINESS_APPROVAL = 22-OCT-18......... 2
+    BUSINESS_APPROVAL = 05-JUL-18......... 2
+    BUSINESS_APPROVAL = 26-JUL-22......... 2
+    BUSINESS_APPROVAL = 06-NOV-23......... 2
+    BUSINESS_APPROVAL = 08-FEB-22......... 2
+    BUSINESS_APPROVAL = 07-MAR-23......... 2
+    BUSINESS_APPROVAL = 17-NOV-21......... 2
+    BUSINESS_APPROVAL = 20-FEB-24......... 2
+    BUSINESS_APPROVAL = 15-OCT-20......... 2
+    BUSINESS_APPROVAL = 19-OCT-23......... 2
+    BUSINESS_APPROVAL = 22-MAY-24......... 2
+    BUSINESS_APPROVAL = 24-SEP-24......... 2
+    BUSINESS_APPROVAL = 30-AUG-21......... 2
+    BUSINESS_APPROVAL = 07-FEB-25......... 2
+    BUSINESS_APPROVAL = 17-JAN-24......... 2
+    BUSINESS_APPROVAL = 15-NOV-24......... 2
+    BUSINESS_APPROVAL = 11-OCT-24......... 2
+    BUSINESS_APPROVAL = 17-OCT-23......... 2
+    BUSINESS_APPROVAL = 03-FEB-17......... 2
+    BUSINESS_APPROVAL = 29-SEP-25......... 2
+    BUSINESS_APPROVAL = 12-NOV-25......... 2
+    BUSINESS_APPROVAL = 09-OCT-25......... 2
+    BUSINESS_APPROVAL = 17-FEB-25......... 2
+    BUSINESS_APPROVAL = 17-OCT-16......... 2
+    BUSINESS_APPROVAL = 11-MAR-19......... 2
+    BUSINESS_APPROVAL = 24-MAR-23......... 2
+    BUSINESS_APPROVAL = 11-OCT-21......... 2
+    BUSINESS_APPROVAL = 02-NOV-22......... 2
+    BUSINESS_APPROVAL = 17-OCT-22......... 2
+    BUSINESS_APPROVAL = 07-DEC-22......... 2
+    BUSINESS_APPROVAL = 19-FEB-20......... 2
+    BUSINESS_APPROVAL = 27-JAN-22......... 2
+    BUSINESS_APPROVAL = 01-MAR-19......... 2
+    BUSINESS_APPROVAL = 01-SEP-22......... 2
+    BUSINESS_APPROVAL = 15-SEP-17......... 2
+    BUSINESS_APPROVAL = 29-MAR-23......... 2
+    BUSINESS_APPROVAL = 06-APR-23......... 2
+    BUSINESS_APPROVAL = 28-JUN-18......... 2
+    BUSINESS_APPROVAL = 20-SEP-21......... 2
+    BUSINESS_APPROVAL = 01-JUL-22......... 2
+    BUSINESS_APPROVAL = 23-MAR-22......... 2
+    BUSINESS_APPROVAL = 19-AUG-22......... 2
+    BUSINESS_APPROVAL = 05-FEB-20......... 2
+    BUSINESS_APPROVAL = 06-FEB-23......... 2
+    BUSINESS_APPROVAL = 07-FEB-22......... 2
+    BUSINESS_APPROVAL = 14-OCT-21......... 2
+    BUSINESS_APPROVAL = 03-MAY-19......... 2
+    BUSINESS_APPROVAL = 13-SEP-22......... 2
+    BUSINESS_APPROVAL = 06-JAN-12......... 2
+    BUSINESS_APPROVAL = 13-JUN-22......... 2
+    BUSINESS_APPROVAL = 30-JUN-22......... 2
+    BUSINESS_APPROVAL = 14-OCT-19......... 2
+    BUSINESS_APPROVAL = 21-DEC-22......... 2
+    BUSINESS_APPROVAL = 22-DEC-22......... 2
+    BUSINESS_APPROVAL = 28-MAR-22......... 2
+    BUSINESS_APPROVAL = 13-APR-23......... 2
+    BUSINESS_APPROVAL = 17-FEB-22......... 2
+    BUSINESS_APPROVAL = 10-JUN-20......... 2
+    BUSINESS_APPROVAL = 08-OCT-19......... 2
+    BUSINESS_APPROVAL = 31-AUG-22......... 2
+    BUSINESS_APPROVAL = 05-DEC-23......... 2
+    BUSINESS_APPROVAL = 05-MAR-21......... 2
+    BUSINESS_APPROVAL = 07-JUL-21......... 2
+    BUSINESS_APPROVAL = 01-NOV-21......... 2
+    BUSINESS_APPROVAL = 23-MAY-24......... 2
+    BUSINESS_APPROVAL = 18-JUN-24......... 2
+    BUSINESS_APPROVAL = 08-DEC-20......... 2
+    BUSINESS_APPROVAL = 26-JAN-23......... 2
+    BUSINESS_APPROVAL = 14-OCT-24......... 2
+    BUSINESS_APPROVAL = 10-JAN-25......... 2
+    BUSINESS_APPROVAL = 03-FEB-21......... 2
+    BUSINESS_APPROVAL = 30-JUL-25......... 2
+    BUSINESS_APPROVAL = 24-JUN-25......... 2
+    BUSINESS_APPROVAL = 04-AUG-25......... 2
+    BUSINESS_APPROVAL = 14-AUG-25......... 2
+    BUSINESS_APPROVAL = 21-JUL-25......... 2
+    BUSINESS_APPROVAL = 26-SEP-20......... 2
+    BUSINESS_APPROVAL = 23-DEC-09......... 2
+    BUSINESS_APPROVAL = 01-NOV-22......... 2
+    BUSINESS_APPROVAL = 04-DEC-07......... 2
+    BUSINESS_APPROVAL = 17-JAN-22......... 2
+    BUSINESS_APPROVAL = 27-JAN-21......... 2
+    BUSINESS_APPROVAL = 30-OCT-20......... 2
+    BUSINESS_APPROVAL = 28-JAN-09......... 2
+    BUSINESS_APPROVAL = 08-SEP-22......... 2
+    BUSINESS_APPROVAL = 28-FEB-18......... 1
+    BUSINESS_APPROVAL = 04-JAN-18......... 1
+    BUSINESS_APPROVAL = 14-AUG-22......... 1
+    BUSINESS_APPROVAL = 30-JAN-13......... 1
+    BUSINESS_APPROVAL = 04-SEP-20......... 1
+    BUSINESS_APPROVAL = 21-JAN-22......... 1
+    BUSINESS_APPROVAL = 27-JUN-18......... 1
+    BUSINESS_APPROVAL = 28-APR-17......... 1
+    BUSINESS_APPROVAL = 21-JAN-16......... 1
+    BUSINESS_APPROVAL = 14-APR-15......... 1
+    BUSINESS_APPROVAL = 13-DEC-19......... 1
+    BUSINESS_APPROVAL = 19-APR-11......... 1
+    BUSINESS_APPROVAL = 04-DEC-13......... 1
+    BUSINESS_APPROVAL = 06-MAR-07......... 1
+    BUSINESS_APPROVAL = 10-AUG-21......... 1
+    BUSINESS_APPROVAL = 31-MAY-21......... 1
+    BUSINESS_APPROVAL = 25-NOV-10......... 1
+    BUSINESS_APPROVAL = 20-JAN-14......... 1
+    BUSINESS_APPROVAL = 25-FEB-21......... 1
+    BUSINESS_APPROVAL = 29-JUN-18......... 1
+    BUSINESS_APPROVAL = 10-FEB-09......... 1
+    BUSINESS_APPROVAL = 29-APR-19......... 1
+    BUSINESS_APPROVAL = 24-JAN-19......... 1
+    BUSINESS_APPROVAL = 13-SEP-17......... 1
+    BUSINESS_APPROVAL = 02-SEP-21......... 1
+    BUSINESS_APPROVAL = 18-FEB-16......... 1
+    BUSINESS_APPROVAL = 29-MAY-23......... 1
+    BUSINESS_APPROVAL = 16-NOV-23......... 1
+    BUSINESS_APPROVAL = 07-SEP-23......... 1
+    BUSINESS_APPROVAL = 13-JAN-17......... 1
+    BUSINESS_APPROVAL = 23-FEB-12......... 1
+    BUSINESS_APPROVAL = 07-APR-17......... 1
+    BUSINESS_APPROVAL = 19-MAY-20......... 1
+    BUSINESS_APPROVAL = 06-SEP-17......... 1
+    BUSINESS_APPROVAL = 20-APR-10......... 1
+    BUSINESS_APPROVAL = 11-MAY-12......... 1
+    BUSINESS_APPROVAL = 21-JAN-13......... 1
+    BUSINESS_APPROVAL = 26-OCT-09......... 1
+    BUSINESS_APPROVAL = 27-JUL-20......... 1
+    BUSINESS_APPROVAL = 15-DEC-09......... 1
+    BUSINESS_APPROVAL = 12-FEB-19......... 1
+    BUSINESS_APPROVAL = 15-JAN-07......... 1
+    BUSINESS_APPROVAL = 22-OCT-21......... 1
+    BUSINESS_APPROVAL = 21-OCT-21......... 1
+    BUSINESS_APPROVAL = 12-JAN-23......... 1
+    BUSINESS_APPROVAL = 18-JUN-18......... 1
+    BUSINESS_APPROVAL = 10-NOV-23......... 1
+    BUSINESS_APPROVAL = 28-JAN-21......... 1
+    BUSINESS_APPROVAL = 27-JUN-88......... 1
+    BUSINESS_APPROVAL = 18-APR-22......... 1
+    BUSINESS_APPROVAL = 19-NOV-20......... 1
+    BUSINESS_APPROVAL = 30-JAN-20......... 1
+    BUSINESS_APPROVAL = 28-JUN-06......... 1
+    BUSINESS_APPROVAL = 19-FEB-24......... 1
+    BUSINESS_APPROVAL = 09-FEB-17......... 1
+    BUSINESS_APPROVAL = 14-JAN-19......... 1
+    BUSINESS_APPROVAL = 10-MAY-24......... 1
+    BUSINESS_APPROVAL = 04-MAY-22......... 1
+    BUSINESS_APPROVAL = 29-APR-23......... 1
+    BUSINESS_APPROVAL = 20-APR-23......... 1
+    BUSINESS_APPROVAL = 06-JUL-23......... 1
+    BUSINESS_APPROVAL = 04-JUN-24......... 1
+    BUSINESS_APPROVAL = 20-JUL-23......... 1
+    BUSINESS_APPROVAL = 20-JUN-24......... 1
+    BUSINESS_APPROVAL = 17-DEC-12......... 1
+    BUSINESS_APPROVAL = 13-FEB-20......... 1
+    BUSINESS_APPROVAL = 31-OCT-24......... 1
+    BUSINESS_APPROVAL = 27-NOV-24......... 1
+    BUSINESS_APPROVAL = 26-SEP-19......... 1
+    BUSINESS_APPROVAL = 25-APR-24......... 1
+    BUSINESS_APPROVAL = 19-FEB-21......... 1
+    BUSINESS_APPROVAL = 28-OCT-21......... 1
+    BUSINESS_APPROVAL = 21-DEC-15......... 1
+    BUSINESS_APPROVAL = 22-JUN-05......... 1
+    BUSINESS_APPROVAL = 06-MAY-22......... 1
+    BUSINESS_APPROVAL = 31-JAN-24......... 1
+    BUSINESS_APPROVAL = 24-OCT-17......... 1
+    BUSINESS_APPROVAL = 22-DEC-16......... 1
+    BUSINESS_APPROVAL = 22-FEB-16......... 1
+    BUSINESS_APPROVAL = 11-JUL-18......... 1
+    BUSINESS_APPROVAL = 14-JAN-20......... 1
+    BUSINESS_APPROVAL = 30-DEC-24......... 1
+    BUSINESS_APPROVAL = 12-AUG-20......... 1
+    BUSINESS_APPROVAL = 01-AUG-15......... 1
+    BUSINESS_APPROVAL = 13-SEP-21......... 1
+    BUSINESS_APPROVAL = 14-JAN-25......... 1
+    BUSINESS_APPROVAL = 27-JUL-10......... 1
+    BUSINESS_APPROVAL = 10-MAR-22......... 1
+    BUSINESS_APPROVAL = 18-FEB-21......... 1
+    BUSINESS_APPROVAL = 18-FEB-25......... 1
+    BUSINESS_APPROVAL = 23-MAY-13......... 1
+    BUSINESS_APPROVAL = 24-MAR-09......... 1
+    BUSINESS_APPROVAL = 08-FEB-05......... 1
+    BUSINESS_APPROVAL = 25-AUG-10......... 1
+    BUSINESS_APPROVAL = 27-JUN-25......... 1
+    BUSINESS_APPROVAL = 12-APR-18......... 1
+    BUSINESS_APPROVAL = 24-OCT-25......... 1
+    BUSINESS_APPROVAL = 27-JUL-22......... 1
+    BUSINESS_APPROVAL = 21-JUN-21......... 1
+    BUSINESS_APPROVAL = 11-DEC-24......... 1
+    BUSINESS_APPROVAL = 29-SEP-21......... 1
+    BUSINESS_APPROVAL = 22-JUL-10......... 1
+    BUSINESS_APPROVAL = 08-JUN-11......... 1
+    BUSINESS_APPROVAL = 19-AUG-25......... 1
+    BUSINESS_APPROVAL = 03-AUG-25......... 1
+    BUSINESS_APPROVAL = 11-OCT-23......... 1
+    BUSINESS_APPROVAL = 18-MAR-21......... 1
+    BUSINESS_APPROVAL = 07-SEP-25......... 1
+    BUSINESS_APPROVAL = 13-OCT-25......... 1
+    BUSINESS_APPROVAL = 21-APR-08......... 1
+    BUSINESS_APPROVAL = 29-APR-15......... 1
+    BUSINESS_APPROVAL = 21-JAN-25......... 1
+    BUSINESS_APPROVAL = 24-FEB-26......... 1
+    BUSINESS_APPROVAL = 10-APR-22......... 1
+    BUSINESS_APPROVAL = 16-JUN-25......... 1
+    BUSINESS_APPROVAL = 23-MAY-16......... 1
+    BUSINESS_APPROVAL = 25-FEB-26......... 1
+    BUSINESS_APPROVAL = 08-JAN-26......... 1
+    BUSINESS_APPROVAL = 04-NOV-14......... 1
+    BUSINESS_APPROVAL = 23-AUG-24......... 1
+    BUSINESS_APPROVAL = 13-DEC-21......... 1
+    BUSINESS_APPROVAL = 22-MAR-15......... 1
+    BUSINESS_APPROVAL = 30-OCT-17......... 1
+    BUSINESS_APPROVAL = 20-JAN-23......... 1
+    BUSINESS_APPROVAL = 15-DEC-05......... 1
+    BUSINESS_APPROVAL = 14-APR-16......... 1
+    BUSINESS_APPROVAL = 13-DEC-17......... 1
+    BUSINESS_APPROVAL = 25-NOV-20......... 1
+    BUSINESS_APPROVAL = 26-NOV-10......... 1
+    BUSINESS_APPROVAL = 18-FEB-19......... 1
+    BUSINESS_APPROVAL = 17-OCT-14......... 1
+    BUSINESS_APPROVAL = 28-JAN-22......... 1
+    BUSINESS_APPROVAL = 25-JAN-15......... 1
+    BUSINESS_APPROVAL = 07-SEP-22......... 1
+    BUSINESS_APPROVAL = 06-SEP-22......... 1
+    BUSINESS_APPROVAL = 23-MAY-22......... 1
+    BUSINESS_APPROVAL = 11-MAR-21......... 1
+    BUSINESS_APPROVAL = 25-JUN-19......... 1
+    BUSINESS_APPROVAL = 24-APR-03......... 1
+    BUSINESS_APPROVAL = 04-JAN-19......... 1
+    BUSINESS_APPROVAL = 09-APR-08......... 1
+    BUSINESS_APPROVAL = 22-AUG-14......... 1
+    BUSINESS_APPROVAL = 09-JAN-20......... 1
+    BUSINESS_APPROVAL = 16-DEC-14......... 1
+    BUSINESS_APPROVAL = 29-JUN-15......... 1
+    BUSINESS_APPROVAL = 24-NOV-20......... 1
+    BUSINESS_APPROVAL = 16-JUL-22......... 1
+    BUSINESS_APPROVAL = 27-FEB-18......... 1
+    BUSINESS_APPROVAL = 09-MAY-19......... 1
+    BUSINESS_APPROVAL = 06-JAN-08......... 1
+    BUSINESS_APPROVAL = 29-SEP-16......... 1
+    BUSINESS_APPROVAL = 28-MAR-11......... 1
+    BUSINESS_APPROVAL = 16-JUN-20......... 1
+    BUSINESS_APPROVAL = 28-MAR-23......... 1
+    BUSINESS_APPROVAL = 10-MAR-21......... 1
+    BUSINESS_APPROVAL = 15-SEP-22......... 1
+    BUSINESS_APPROVAL = 29-AUG-23......... 1
+    BUSINESS_APPROVAL = 29-JUN-20......... 1
+    BUSINESS_APPROVAL = 04-MAY-23......... 1
+    BUSINESS_APPROVAL = 05-MAY-20......... 1
+    BUSINESS_APPROVAL = 31-DEC-15......... 1
+    BUSINESS_APPROVAL = 15-FEB-23......... 1
+    BUSINESS_APPROVAL = 18-NOV-22......... 1
+    BUSINESS_APPROVAL = 05-AUG-22......... 1
+    BUSINESS_APPROVAL = 06-JUN-19......... 1
+    BUSINESS_APPROVAL = 15-JAN-15......... 1
+    BUSINESS_APPROVAL = 03-JAN-24......... 1
+    BUSINESS_APPROVAL = 12-MAY-23......... 1
+    BUSINESS_APPROVAL = 21-OCT-15......... 1
+    BUSINESS_APPROVAL = 26-AUG-23......... 1
+    BUSINESS_APPROVAL = 19-JUL-23......... 1
+    BUSINESS_APPROVAL = 17-MAY-19......... 1
+    BUSINESS_APPROVAL = 07-MAR-22......... 1
+    BUSINESS_APPROVAL = 03-MAR-11......... 1
+    BUSINESS_APPROVAL = 16-MAR-21......... 1
+    BUSINESS_APPROVAL = 19-DEC-90......... 1
+    BUSINESS_APPROVAL = 17-AUG-17......... 1
+    BUSINESS_APPROVAL = 17-JUL-14......... 1
+    BUSINESS_APPROVAL = 08-AUG-22......... 1
+    BUSINESS_APPROVAL = 30-JAN-24......... 1
+    BUSINESS_APPROVAL = 21-JUL-14......... 1
+    BUSINESS_APPROVAL = 28-MAY-20......... 1
+    BUSINESS_APPROVAL = 22-OCT-04......... 1
+    BUSINESS_APPROVAL = 09-MAY-24......... 1
+    BUSINESS_APPROVAL = 21-NOV-18......... 1
+    BUSINESS_APPROVAL = 30-NOV-21......... 1
+    BUSINESS_APPROVAL = 18-DEC-19......... 1
+    BUSINESS_APPROVAL = 24-AUG-22......... 1
+    BUSINESS_APPROVAL = 09-JUN-18......... 1
+    BUSINESS_APPROVAL = 27-NOV-20......... 1
+    BUSINESS_APPROVAL = 11-NOV-22......... 1
+    BUSINESS_APPROVAL = 09-SEP-20......... 1
+    BUSINESS_APPROVAL = 04-MAR-22......... 1
+    BUSINESS_APPROVAL = 19-APR-04......... 1
+    BUSINESS_APPROVAL = 28-FEB-22......... 1
+    BUSINESS_APPROVAL = 23-JUL-21......... 1
+    BUSINESS_APPROVAL = 13-JAN-23......... 1
+    BUSINESS_APPROVAL = 14-OCT-05......... 1
+    BUSINESS_APPROVAL = 01-FEB-24......... 1
+    BUSINESS_APPROVAL = 23-FEB-11......... 1
+    BUSINESS_APPROVAL = 30-JAN-25......... 1
+    BUSINESS_APPROVAL = 02-AUG-24......... 1
+    BUSINESS_APPROVAL = 24-MAY-05......... 1
+    BUSINESS_APPROVAL = 16-OCT-24......... 1
+    BUSINESS_APPROVAL = 20-JAN-17......... 1
+    BUSINESS_APPROVAL = 25-NOV-24......... 1
+    BUSINESS_APPROVAL = 01-MAR-18......... 1
+    BUSINESS_APPROVAL = 21-AUG-19......... 1
+    BUSINESS_APPROVAL = 01-SEP-20......... 1
+    BUSINESS_APPROVAL = 04-APR-19......... 1
+    BUSINESS_APPROVAL = 29-OCT-24......... 1
+    BUSINESS_APPROVAL = 04-MAY-21......... 1
+    BUSINESS_APPROVAL = 25-MAY-15......... 1
+    BUSINESS_APPROVAL = 08-APR-13......... 1
+    BUSINESS_APPROVAL = 15-FEB-25......... 1
+    BUSINESS_APPROVAL = 04-JUN-25......... 1
+    BUSINESS_APPROVAL = 04-APR-25......... 1
+    BUSINESS_APPROVAL = 26-MAR-24......... 1
+    BUSINESS_APPROVAL = 06-FEB-20......... 1
+    BUSINESS_APPROVAL = 21-NOV-11......... 1
+    BUSINESS_APPROVAL = 09-MAR-20......... 1
+    BUSINESS_APPROVAL = 14-FEB-23......... 1
+    BUSINESS_APPROVAL = 24-JUN-19......... 1
+    BUSINESS_APPROVAL = 26-JAN-24......... 1
+    BUSINESS_APPROVAL = 17-FEB-20......... 1
+    BUSINESS_APPROVAL = 19-SEP-25......... 1
+    BUSINESS_APPROVAL = 02-APR-19......... 1
+    BUSINESS_APPROVAL = 11-AUG-15......... 1
+    BUSINESS_APPROVAL = 25-AUG-05......... 1
+    BUSINESS_APPROVAL = 02-SEP-22......... 1
+    BUSINESS_APPROVAL = 02-JUL-25......... 1
+    BUSINESS_APPROVAL = 31-JAN-19......... 1
+    BUSINESS_APPROVAL = 19-JAN-26......... 1
+    BUSINESS_APPROVAL = 15-JAN-26......... 1
+    BUSINESS_APPROVAL = 05-DEC-06......... 1
+    BUSINESS_APPROVAL = 27-JAN-26......... 1
+    BUSINESS_APPROVAL = 02-SEP-25......... 1
+    BUSINESS_APPROVAL = 17-OCT-06......... 1
+    BUSINESS_APPROVAL = 09-MAY-23......... 1
+    BUSINESS_APPROVAL = 15-MAR-19......... 1
+    BUSINESS_APPROVAL = 04-MAR-26......... 1
+    BUSINESS_APPROVAL = 28-APR-14......... 1
+    BUSINESS_APPROVAL = 18-JUL-03......... 1
+    BUSINESS_APPROVAL = 23-JUL-09......... 1
+    BUSINESS_APPROVAL = 10-MAR-03......... 1
+    BUSINESS_APPROVAL = 24-JAN-23......... 1
+    BUSINESS_APPROVAL = 11-DEC-19......... 1
+    BUSINESS_APPROVAL = 10-JUN-15......... 1
+    BUSINESS_APPROVAL = 19-MAR-10......... 1
+    BUSINESS_APPROVAL = 27-JUN-15......... 1
+    BUSINESS_APPROVAL = 06-NOV-19......... 1
+    BUSINESS_APPROVAL = 21-JAN-21......... 1
+    BUSINESS_APPROVAL = 24-NOV-21......... 1
+    BUSINESS_APPROVAL = 25-APR-22......... 1
+    BUSINESS_APPROVAL = 17-DEC-20......... 1
+    BUSINESS_APPROVAL = 26-APR-22......... 1
+    BUSINESS_APPROVAL = 14-DEC-21......... 1
+    BUSINESS_APPROVAL = 02-OCT-19......... 1
+    BUSINESS_APPROVAL = 07-FEB-18......... 1
+    BUSINESS_APPROVAL = 22-APR-21......... 1
+    BUSINESS_APPROVAL = 20-APR-17......... 1
+    BUSINESS_APPROVAL = 10-OCT-22......... 1
+    BUSINESS_APPROVAL = 26-MAR-18......... 1
+    BUSINESS_APPROVAL = 19-JAN-21......... 1
+    BUSINESS_APPROVAL = 22-NOV-22......... 1
+    BUSINESS_APPROVAL = 05-FEB-21......... 1
+    BUSINESS_APPROVAL = 13-MAY-09......... 1
+    BUSINESS_APPROVAL = 16-MAR-20......... 1
+    BUSINESS_APPROVAL = 18-JAN-16......... 1
+    BUSINESS_APPROVAL = 22-JUN-06......... 1
+    BUSINESS_APPROVAL = 18-DEC-03......... 1
+    BUSINESS_APPROVAL = 06-JUL-20......... 1
+    BUSINESS_APPROVAL = 26-JUL-21......... 1
+    BUSINESS_APPROVAL = 09-SEP-15......... 1
+    BUSINESS_APPROVAL = 15-JUN-17......... 1
+    BUSINESS_APPROVAL = 01-APR-15......... 1
+    BUSINESS_APPROVAL = 06-APR-22......... 1
+    BUSINESS_APPROVAL = 16-FEB-17......... 1
+    BUSINESS_APPROVAL = 26-AUG-20......... 1
+    BUSINESS_APPROVAL = 08-JUL-22......... 1
+    BUSINESS_APPROVAL = 02-OCT-18......... 1
+    BUSINESS_APPROVAL = 06-DEC-20......... 1
+    BUSINESS_APPROVAL = 01-MAR-13......... 1
+    BUSINESS_APPROVAL = 15-NOV-23......... 1
+    BUSINESS_APPROVAL = 30-MAR-22......... 1
+    BUSINESS_APPROVAL = 16-DEC-05......... 1
+    BUSINESS_APPROVAL = 21-MAR-14......... 1
+    BUSINESS_APPROVAL = 09-JUL-20......... 1
+    BUSINESS_APPROVAL = 13-JAN-20......... 1
+    BUSINESS_APPROVAL = 14-MAR-19......... 1
+    BUSINESS_APPROVAL = 12-APR-12......... 1
+    BUSINESS_APPROVAL = 10-SEP-19......... 1
+    BUSINESS_APPROVAL = 21-FEB-18......... 1
+    BUSINESS_APPROVAL = 02-JUL-22......... 1
+    BUSINESS_APPROVAL = 19-JUN-15......... 1
+    BUSINESS_APPROVAL = 22-JUN-21......... 1
+    BUSINESS_APPROVAL = 26-DEC-23......... 1
+    BUSINESS_APPROVAL = 22-JAN-24......... 1
+    BUSINESS_APPROVAL = 03-JUL-23......... 1
+    BUSINESS_APPROVAL = 01-APR-22......... 1
+    BUSINESS_APPROVAL = 23-AUG-19......... 1
+    BUSINESS_APPROVAL = 28-FEB-24......... 1
+    BUSINESS_APPROVAL = 23-FEB-16......... 1
+    BUSINESS_APPROVAL = 03-JUN-16......... 1
+    BUSINESS_APPROVAL = 01-APR-24......... 1
+    BUSINESS_APPROVAL = 06-OCT-20......... 1
+    BUSINESS_APPROVAL = 07-JUN-07......... 1
+    BUSINESS_APPROVAL = 22-SEP-12......... 1
+    BUSINESS_APPROVAL = 24-AUG-85......... 1
+    BUSINESS_APPROVAL = 20-JUL-11......... 1
+    BUSINESS_APPROVAL = 15-NOV-12......... 1
+    BUSINESS_APPROVAL = 28-SEP-18......... 1
+    BUSINESS_APPROVAL = 04-JUN-96......... 1
+    BUSINESS_APPROVAL = 29-AUG-18......... 1
+    BUSINESS_APPROVAL = 07-JUL-02......... 1
+    BUSINESS_APPROVAL = 03-MAY-13......... 1
+    BUSINESS_APPROVAL = 14-APR-08......... 1
+    BUSINESS_APPROVAL = 21-JUL-23......... 1
+    BUSINESS_APPROVAL = 05-JUL-24......... 1
+    BUSINESS_APPROVAL = 23-JUL-20......... 1
+    BUSINESS_APPROVAL = 01-NOV-19......... 1
+    BUSINESS_APPROVAL = 16-JAN-20......... 1
+    BUSINESS_APPROVAL = 28-JUL-15......... 1
+    BUSINESS_APPROVAL = 04-NOV-24......... 1
+    BUSINESS_APPROVAL = 09-MAY-16......... 1
+    BUSINESS_APPROVAL = 22-FEB-21......... 1
+    BUSINESS_APPROVAL = 05-SEP-23......... 1
+    BUSINESS_APPROVAL = 06-DEC-24......... 1
+    BUSINESS_APPROVAL = 09-JAN-12......... 1
+    BUSINESS_APPROVAL = 09-SEP-93......... 1
+    BUSINESS_APPROVAL = 04-JUL-23......... 1
+    BUSINESS_APPROVAL = 02-APR-13......... 1
+    BUSINESS_APPROVAL = 29-NOV-18......... 1
+    BUSINESS_APPROVAL = 17-NOV-22......... 1
+    BUSINESS_APPROVAL = 02-JUL-24......... 1
+    BUSINESS_APPROVAL = 01-JUN-18......... 1
+    BUSINESS_APPROVAL = 13-APR-10......... 1
+    BUSINESS_APPROVAL = 03-MAR-21......... 1
+    BUSINESS_APPROVAL = 03-MAR-15......... 1
+    BUSINESS_APPROVAL = 12-AUG-24......... 1
+    BUSINESS_APPROVAL = 15-MAY-25......... 1
+    BUSINESS_APPROVAL = 21-NOV-16......... 1
+    BUSINESS_APPROVAL = 27-MAR-23......... 1
+    BUSINESS_APPROVAL = 30-APR-25......... 1
+    BUSINESS_APPROVAL = 22-FEB-10......... 1
+    BUSINESS_APPROVAL = 05-NOV-13......... 1
+    BUSINESS_APPROVAL = 20-AUG-19......... 1
+    BUSINESS_APPROVAL = 31-MAR-16......... 1
+    BUSINESS_APPROVAL = 15-NOV-16......... 1
+    BUSINESS_APPROVAL = 09-MAR-16......... 1
+    BUSINESS_APPROVAL = 05-FEB-18......... 1
+    BUSINESS_APPROVAL = 12-DEC-13......... 1
+    BUSINESS_APPROVAL = 08-NOV-22......... 1
+    BUSINESS_APPROVAL = 29-APR-25......... 1
+    BUSINESS_APPROVAL = 01-JAN-11......... 1
+    BUSINESS_APPROVAL = 01-AUG-25......... 1
+    BUSINESS_APPROVAL = 15-DEC-23......... 1
+    BUSINESS_APPROVAL = 03-OCT-19......... 1
+    BUSINESS_APPROVAL = 08-SEP-25......... 1
+    BUSINESS_APPROVAL = 13-SEP-25......... 1
+    BUSINESS_APPROVAL = 23-NOV-12......... 1
+    BUSINESS_APPROVAL = 09-MAY-25......... 1
+    BUSINESS_APPROVAL = 09-JAN-25......... 1
+    BUSINESS_APPROVAL = 04-SEP-25......... 1
+    BUSINESS_APPROVAL = 09-FEB-12......... 1
+    BUSINESS_APPROVAL = 14-AUG-12......... 1
+    BUSINESS_APPROVAL = 10-MAR-05......... 1
+    BUSINESS_APPROVAL = 08-JUN-16......... 1
+    BUSINESS_APPROVAL = 21-JUL-17......... 1
+    BUSINESS_APPROVAL = 09-AUG-22......... 1
+    BUSINESS_APPROVAL = 08-AUG-25......... 1
+    BUSINESS_APPROVAL = 09-DEC-25......... 1
+    BUSINESS_APPROVAL = 01-FEB-21......... 1
+    BUSINESS_APPROVAL = 29-JAN-19......... 1
+    BUSINESS_APPROVAL = 28-AUG-14......... 1
+    BUSINESS_APPROVAL = 13-FEB-19......... 1
+    BUSINESS_APPROVAL = 30-MAY-02......... 1
+    BUSINESS_APPROVAL = 24-SEP-22......... 1
+    BUSINESS_APPROVAL = 06-JUN-18......... 1
+    BUSINESS_APPROVAL = 10-OCT-07......... 1
+    BUSINESS_APPROVAL = 13-AUG-19......... 1
+    BUSINESS_APPROVAL = 13-JUL-10......... 1
+    BUSINESS_APPROVAL = 21-APR-22......... 1
+    BUSINESS_APPROVAL = 26-FEB-21......... 1
+    BUSINESS_APPROVAL = 04-MAY-15......... 1
+    BUSINESS_APPROVAL = 30-JAN-15......... 1
+    BUSINESS_APPROVAL = 08-JUN-15......... 1
+    BUSINESS_APPROVAL = 21-JAN-08......... 1
+    BUSINESS_APPROVAL = 05-AUG-10......... 1
+    BUSINESS_APPROVAL = 11-DEC-17......... 1
+    BUSINESS_APPROVAL = 17-NOV-20......... 1
+    BUSINESS_APPROVAL = 23-JAN-07......... 1
+    BUSINESS_APPROVAL = 29-DEC-22......... 1
+    BUSINESS_APPROVAL = 17-JAN-21......... 1
+    BUSINESS_APPROVAL = 28-APR-21......... 1
+    BUSINESS_APPROVAL = 03-MAR-23......... 1
+    BUSINESS_APPROVAL = 22-APR-23......... 1
+    BUSINESS_APPROVAL = 13-DEC-22......... 1
+    BUSINESS_APPROVAL = 25-MAR-13......... 1
+    BUSINESS_APPROVAL = 09-DEC-19......... 1
+    BUSINESS_APPROVAL = 30-AUG-22......... 1
+    BUSINESS_APPROVAL = 06-NOV-13......... 1
+    BUSINESS_APPROVAL = 03-MAY-21......... 1
+    BUSINESS_APPROVAL = 13-FEB-15......... 1
+    BUSINESS_APPROVAL = 15-NOV-21......... 1
+    BUSINESS_APPROVAL = 13-APR-21......... 1
+    BUSINESS_APPROVAL = 10-MAR-16......... 1
+    BUSINESS_APPROVAL = 26-MAR-97......... 1
+    BUSINESS_APPROVAL = 23-JUN-23......... 1
+    BUSINESS_APPROVAL = 15-JUN-21......... 1
+    BUSINESS_APPROVAL = 31-MAY-17......... 1
+    BUSINESS_APPROVAL = 23-JUL-19......... 1
+    BUSINESS_APPROVAL = 17-NOV-16......... 1
+    BUSINESS_APPROVAL = 07-DEC-17......... 1
+    BUSINESS_APPROVAL = 20-JAN-21......... 1
+    BUSINESS_APPROVAL = 20-JUL-20......... 1
+    BUSINESS_APPROVAL = 23-MAY-23......... 1
+    BUSINESS_APPROVAL = 28-APR-08......... 1
+    BUSINESS_APPROVAL = 07-APR-20......... 1
+    BUSINESS_APPROVAL = 21-NOV-23......... 1
+    BUSINESS_APPROVAL = 13-DEC-11......... 1
+    BUSINESS_APPROVAL = 26-NOV-96......... 1
+    BUSINESS_APPROVAL = 25-APR-07......... 1
+    BUSINESS_APPROVAL = 24-NOV-10......... 1
+    BUSINESS_APPROVAL = 15-NOV-22......... 1
+    BUSINESS_APPROVAL = 10-OCT-23......... 1
+    BUSINESS_APPROVAL = 15-JUL-97......... 1
+    BUSINESS_APPROVAL = 19-DEC-52......... 1
+    BUSINESS_APPROVAL = 16-JUN-23......... 1
+    BUSINESS_APPROVAL = 11-MAY-22......... 1
+    BUSINESS_APPROVAL = 08-JUN-18......... 1
+    BUSINESS_APPROVAL = 09-JUL-12......... 1
+    BUSINESS_APPROVAL = 29-MAR-22......... 1
+    BUSINESS_APPROVAL = 24-JUN-05......... 1
+    BUSINESS_APPROVAL = 19-APR-12......... 1
+    BUSINESS_APPROVAL = 26-FEB-19......... 1
+    BUSINESS_APPROVAL = 06-FEB-18......... 1
+    BUSINESS_APPROVAL = 12-OCT-21......... 1
+    BUSINESS_APPROVAL = 25-AUG-85......... 1
+    BUSINESS_APPROVAL = 22-NOV-13......... 1
+    BUSINESS_APPROVAL = 02-DEC-11......... 1
+    BUSINESS_APPROVAL = 01-NOV-14......... 1
+    BUSINESS_APPROVAL = 09-DEC-80......... 1
+    BUSINESS_APPROVAL = 06-JUL-18......... 1
+    BUSINESS_APPROVAL = 18-JAN-21......... 1
+    BUSINESS_APPROVAL = 01-JAN-17......... 1
+    BUSINESS_APPROVAL = 09-DEC-20......... 1
+    BUSINESS_APPROVAL = 06-FEB-24......... 1
+    BUSINESS_APPROVAL = 31-MAY-13......... 1
+    BUSINESS_APPROVAL = 18-DEC-18......... 1
+    BUSINESS_APPROVAL = 02-MAR-15......... 1
+    BUSINESS_APPROVAL = 13-JUL-22......... 1
+    BUSINESS_APPROVAL = 05-JUN-15......... 1
+    BUSINESS_APPROVAL = 28-JUL-20......... 1
+    BUSINESS_APPROVAL = 11-AUG-24......... 1
+    BUSINESS_APPROVAL = 19-DEC-13......... 1
+    BUSINESS_APPROVAL = 16-DEC-24......... 1
+    BUSINESS_APPROVAL = 25-MAR-10......... 1
+    BUSINESS_APPROVAL = 10-JUL-18......... 1
+    BUSINESS_APPROVAL = 17-APR-17......... 1
+    BUSINESS_APPROVAL = 02-APR-18......... 1
+    BUSINESS_APPROVAL = 25-AUG-16......... 1
+    BUSINESS_APPROVAL = 25-AUG-21......... 1
+    BUSINESS_APPROVAL = 06-SEP-10......... 1
+    BUSINESS_APPROVAL = 19-MAR-24......... 1
+    BUSINESS_APPROVAL = 08-OCT-20......... 1
+    BUSINESS_APPROVAL = 25-JAN-25......... 1
+    BUSINESS_APPROVAL = 05-DEC-24......... 1
+    BUSINESS_APPROVAL = 19-JUN-24......... 1
+    BUSINESS_APPROVAL = 19-AUG-13......... 1
+    BUSINESS_APPROVAL = 21-JAN-20......... 1
+    BUSINESS_APPROVAL = 26-NOV-09......... 1
+    BUSINESS_APPROVAL = 22-MAR-24......... 1
+    BUSINESS_APPROVAL = 29-OCT-15......... 1
+    BUSINESS_APPROVAL = 19-MAR-25......... 1
+    BUSINESS_APPROVAL = 02-AUG-16......... 1
+    BUSINESS_APPROVAL = 12-APR-23......... 1
+    BUSINESS_APPROVAL = 31-OCT-14......... 1
+    BUSINESS_APPROVAL = 19-FEB-25......... 1
+    BUSINESS_APPROVAL = 13-DEC-23......... 1
+    BUSINESS_APPROVAL = 14-APR-25......... 1
+    BUSINESS_APPROVAL = 28-MAY-21......... 1
+    BUSINESS_APPROVAL = 01-JUL-25......... 1
+    BUSINESS_APPROVAL = 22-FEB-12......... 1
+    BUSINESS_APPROVAL = 26-SEP-14......... 1
+    BUSINESS_APPROVAL = 25-JUL-25......... 1
+    BUSINESS_APPROVAL = 02-SEP-11......... 1
+    BUSINESS_APPROVAL = 09-AUG-12......... 1
+    BUSINESS_APPROVAL = 25-JUN-25......... 1
+    BUSINESS_APPROVAL = 26-MAY-25......... 1
+    BUSINESS_APPROVAL = 27-MAY-15......... 1
+    BUSINESS_APPROVAL = 11-NOV-25......... 1
+    BUSINESS_APPROVAL = 13-AUG-25......... 1
+    BUSINESS_APPROVAL = 08-JUN-22......... 1
+    BUSINESS_APPROVAL = 30-JUL-24......... 1
+    BUSINESS_APPROVAL = 23-MAY-17......... 1
+    BUSINESS_APPROVAL = 24-JUL-25......... 1
+    BUSINESS_APPROVAL = 29-APR-86......... 1
+    BUSINESS_APPROVAL = 08-DEC-25......... 1
+    BUSINESS_APPROVAL = 13-OCT-17......... 1
+    BUSINESS_APPROVAL = 27-MAY-24......... 1
+    BUSINESS_APPROVAL = 14-NOV-25......... 1
+    BUSINESS_APPROVAL = 15-JUL-13......... 1
+    BUSINESS_APPROVAL = 05-APR-23......... 1
+    BUSINESS_APPROVAL = 15-MAR-07......... 1
+    BUSINESS_APPROVAL = 19-NOV-25......... 1
+    BUSINESS_APPROVAL = 03-DEC-25......... 1
+    BUSINESS_APPROVAL = 17-JAN-12......... 1
+    BUSINESS_APPROVAL = 20-JAN-06......... 1
+    BUSINESS_APPROVAL = 20-JAN-10......... 1
+    BUSINESS_APPROVAL = 17-MAR-11......... 1
+    BUSINESS_APPROVAL = 23-DEC-16......... 1
+    BUSINESS_APPROVAL = 13-APR-18......... 1
+    BUSINESS_APPROVAL = 06-JUL-21......... 1
+    BUSINESS_APPROVAL = 11-AUG-21......... 1
+    BUSINESS_APPROVAL = 23-AUG-13......... 1
+    BUSINESS_APPROVAL = 03-NOV-21......... 1
+    BUSINESS_APPROVAL = 08-MAR-66......... 1
+    BUSINESS_APPROVAL = 26-SEP-18......... 1
+    BUSINESS_APPROVAL = 20-OCT-20......... 1
+    BUSINESS_APPROVAL = 20-SEP-13......... 1
+    BUSINESS_APPROVAL = 24-NOV-15......... 1
+    BUSINESS_APPROVAL = 18-AUG-18......... 1
+    BUSINESS_APPROVAL = 10-FEB-06......... 1
+    BUSINESS_APPROVAL = 04-OCT-17......... 1
+    BUSINESS_APPROVAL = 02-FEB-18......... 1
+    BUSINESS_APPROVAL = 10-JUL-19......... 1
+    BUSINESS_APPROVAL = 08-JUL-20......... 1
+    BUSINESS_APPROVAL = 30-APR-21......... 1
+    BUSINESS_APPROVAL = 09-NOV-16......... 1
+    BUSINESS_APPROVAL = 13-AUG-21......... 1
+    BUSINESS_APPROVAL = 30-APR-19......... 1
+    BUSINESS_APPROVAL = 03-APR-23......... 1
+    BUSINESS_APPROVAL = 16-JAN-23......... 1
+    BUSINESS_APPROVAL = 09-JUN-21......... 1
+    BUSINESS_APPROVAL = 30-JAN-14......... 1
+    BUSINESS_APPROVAL = 01-MAY-05......... 1
+    BUSINESS_APPROVAL = 11-NOV-04......... 1
+    BUSINESS_APPROVAL = 10-APR-23......... 1
+    BUSINESS_APPROVAL = 09-FEB-11......... 1
+    BUSINESS_APPROVAL = 25-JAN-21......... 1
+    BUSINESS_APPROVAL = 28-NOV-22......... 1
+    BUSINESS_APPROVAL = 25-MAR-22......... 1
+    BUSINESS_APPROVAL = 17-JUL-20......... 1
+    BUSINESS_APPROVAL = 11-APR-16......... 1
+    BUSINESS_APPROVAL = 16-FEB-22......... 1
+    BUSINESS_APPROVAL = 04-SEP-11......... 1
+    BUSINESS_APPROVAL = 29-MAY-22......... 1
+    BUSINESS_APPROVAL = 08-FEB-23......... 1
+    BUSINESS_APPROVAL = 08-NOV-17......... 1
+    BUSINESS_APPROVAL = 09-OCT-19......... 1
+    BUSINESS_APPROVAL = 01-DEC-23......... 1
+    BUSINESS_APPROVAL = 18-AUG-23......... 1
+    BUSINESS_APPROVAL = 14-SEP-21......... 1
+    BUSINESS_APPROVAL = 08-APR-21......... 1
+    BUSINESS_APPROVAL = 30-MAR-21......... 1
+    BUSINESS_APPROVAL = 07-APR-16......... 1
+    BUSINESS_APPROVAL = 16-OCT-96......... 1
+    BUSINESS_APPROVAL = 16-JAN-24......... 1
+    BUSINESS_APPROVAL = 08-SEP-98......... 1
+    BUSINESS_APPROVAL = 22-MAY-15......... 1
+    BUSINESS_APPROVAL = 08-JUN-21......... 1
+    BUSINESS_APPROVAL = 30-APR-14......... 1
+    BUSINESS_APPROVAL = 27-JUL-18......... 1
+    BUSINESS_APPROVAL = 26-APR-24......... 1
+    BUSINESS_APPROVAL = 10-FEB-16......... 1
+    BUSINESS_APPROVAL = 09-FEB-22......... 1
+    BUSINESS_APPROVAL = 14-MAY-24......... 1
+    BUSINESS_APPROVAL = 19-JAN-16......... 1
+    BUSINESS_APPROVAL = 20-OCT-14......... 1
+    BUSINESS_APPROVAL = 01-JUL-20......... 1
+    BUSINESS_APPROVAL = 05-MAR-16......... 1
+    BUSINESS_APPROVAL = 07-FEB-19......... 1
+    BUSINESS_APPROVAL = 02-AUG-23......... 1
+    BUSINESS_APPROVAL = 18-JUL-19......... 1
+    BUSINESS_APPROVAL = 22-AUG-05......... 1
+    BUSINESS_APPROVAL = 12-MAR-18......... 1
+    BUSINESS_APPROVAL = 29-MAY-24......... 1
+    BUSINESS_APPROVAL = 02-AUG-19......... 1
+    BUSINESS_APPROVAL = 02-OCT-24......... 1
+    BUSINESS_APPROVAL = 24-JUL-18......... 1
+    BUSINESS_APPROVAL = 04-JAN-17......... 1
+    BUSINESS_APPROVAL = 13-APR-22......... 1
+    BUSINESS_APPROVAL = 03-AUG-23......... 1
+    BUSINESS_APPROVAL = 07-NOV-17......... 1
+    BUSINESS_APPROVAL = 24-JUL-23......... 1
+    BUSINESS_APPROVAL = 12-NOV-12......... 1
+    BUSINESS_APPROVAL = 18-MAR-15......... 1
+    BUSINESS_APPROVAL = 23-JUN-22......... 1
+    BUSINESS_APPROVAL = 20-NOV-24......... 1
+    BUSINESS_APPROVAL = 14-JUL-16......... 1
+    BUSINESS_APPROVAL = 29-JUN-05......... 1
+    BUSINESS_APPROVAL = 03-SEP-21......... 1
+    BUSINESS_APPROVAL = 14-JUN-12......... 1
+    BUSINESS_APPROVAL = 18-FEB-09......... 1
+    BUSINESS_APPROVAL = 27-APR-22......... 1
+    BUSINESS_APPROVAL = 03-OCT-17......... 1
+    BUSINESS_APPROVAL = 06-DEC-23......... 1
+    BUSINESS_APPROVAL = 14-FEB-94......... 1
+    BUSINESS_APPROVAL = 16-AUG-98......... 1
+    BUSINESS_APPROVAL = 09-JUN-20......... 1
+    BUSINESS_APPROVAL = 10-APR-25......... 1
+    BUSINESS_APPROVAL = 30-MAY-24......... 1
+    BUSINESS_APPROVAL = 13-OCT-23......... 1
+    BUSINESS_APPROVAL = 11-JUL-19......... 1
+    BUSINESS_APPROVAL = 21-NOV-15......... 1
+    BUSINESS_APPROVAL = 28-APR-25......... 1
+    BUSINESS_APPROVAL = 28-SEP-10......... 1
+    BUSINESS_APPROVAL = 14-MAR-22......... 1
+    BUSINESS_APPROVAL = 29-OCT-20......... 1
+    BUSINESS_APPROVAL = 04-MAR-20......... 1
+    BUSINESS_APPROVAL = 27-FEB-07......... 1
+    BUSINESS_APPROVAL = 30-OCT-25......... 1
+    BUSINESS_APPROVAL = 06-NOV-25......... 1
+    BUSINESS_APPROVAL = 24-NOV-25......... 1
+    BUSINESS_APPROVAL = 13-OCT-20......... 1
+    BUSINESS_APPROVAL = 17-SEP-25......... 1
+    BUSINESS_APPROVAL = 09-SEP-22......... 1
+    BUSINESS_APPROVAL = 18-DEC-24......... 1
+    BUSINESS_APPROVAL = 04-MAR-19......... 1
+    BUSINESS_APPROVAL = 30-AUG-16......... 1
+    BUSINESS_APPROVAL = 10-NOV-25......... 1
+    BUSINESS_APPROVAL = 07-AUG-25......... 1
+    BUSINESS_APPROVAL = 22-MAY-09......... 1
+    BUSINESS_APPROVAL = 20-JUN-25......... 1
+    BUSINESS_APPROVAL = 17-DEC-25......... 1
+    BUSINESS_APPROVAL = 19-JUL-18......... 1
+    BUSINESS_APPROVAL = 29-JAN-16......... 1
+    BUSINESS_APPROVAL = 30-SEP-25......... 1
+    BUSINESS_APPROVAL = 24-DEC-25......... 1
+    BUSINESS_APPROVAL = 12-JAN-26......... 1
+    BUSINESS_APPROVAL = 19-DEC-25......... 1
+    BUSINESS_APPROVAL = 19-AUG-24......... 1
+    BUSINESS_APPROVAL = 19-NOV-24......... 1
+    BUSINESS_APPROVAL = 22-OCT-14......... 1
+    BUSINESS_APPROVAL = 29-JAN-18......... 1
+    BUSINESS_APPROVAL = 16-MAY-19......... 1
+    BUSINESS_APPROVAL = 21-SEP-21......... 1
+    BUSINESS_APPROVAL = 15-JUL-15......... 1
+    BUSINESS_APPROVAL = 05-JAN-21......... 1
+    BUSINESS_APPROVAL = 11-OCT-10......... 1
+    BUSINESS_APPROVAL = 01-JAN-23......... 1
+    BUSINESS_APPROVAL = 12-JUN-20......... 1
+    BUSINESS_APPROVAL = 19-DEC-22......... 1
+    BUSINESS_APPROVAL = 25-FEB-06......... 1
+    BUSINESS_APPROVAL = 27-FEB-22......... 1
+    BUSINESS_APPROVAL = 07-JAN-21......... 1
+    BUSINESS_APPROVAL = 20-MAR-14......... 1
+    BUSINESS_APPROVAL = 28-NOV-05......... 1
+    BUSINESS_APPROVAL = 19-SEP-18......... 1
+    BUSINESS_APPROVAL = 04-AUG-20......... 1
+    BUSINESS_APPROVAL = 08-APR-22......... 1
+    BUSINESS_APPROVAL = 15-JUN-22......... 1
+    BUSINESS_APPROVAL = 23-AUG-22......... 1
+    BUSINESS_APPROVAL = 11-MAR-15......... 1
+    BUSINESS_APPROVAL = 18-OCT-19......... 1
+    BUSINESS_APPROVAL = 28-OCT-17......... 1
+    BUSINESS_APPROVAL = 20-JUN-14......... 1
+    BUSINESS_APPROVAL = 07-OCT-21......... 1
+    BUSINESS_APPROVAL = 06-NOV-17......... 1
+    BUSINESS_APPROVAL = 27-JAN-10......... 1
+    BUSINESS_APPROVAL = 14-MAY-19......... 1
+    BUSINESS_APPROVAL = 29-JAN-22......... 1
+    BUSINESS_APPROVAL = 05-FEB-19......... 1
+    BUSINESS_APPROVAL = 23-OCT-14......... 1
+    BUSINESS_APPROVAL = 01-MAR-23......... 1
+    BUSINESS_APPROVAL = 03-DEC-20......... 1
+    BUSINESS_APPROVAL = 20-MAR-20......... 1
+    BUSINESS_APPROVAL = 16-MAY-23......... 1
+    BUSINESS_APPROVAL = 01-FEB-19......... 1
+    BUSINESS_APPROVAL = 02-FEB-15......... 1
+    BUSINESS_APPROVAL = 21-JUL-10......... 1
+    BUSINESS_APPROVAL = 28-SEP-23......... 1
+    BUSINESS_APPROVAL = 20-JAN-19......... 1
+    BUSINESS_APPROVAL = 17-SEP-20......... 1
+    BUSINESS_APPROVAL = 10-JAN-19......... 1
+    BUSINESS_APPROVAL = 22-AUG-19......... 1
+    BUSINESS_APPROVAL = 13-JUL-23......... 1
+    BUSINESS_APPROVAL = 23-APR-19......... 1
+    BUSINESS_APPROVAL = 23-FEB-17......... 1
+    BUSINESS_APPROVAL = 07-DEC-21......... 1
+    BUSINESS_APPROVAL = 21-APR-20......... 1
+    BUSINESS_APPROVAL = 17-FEB-23......... 1
+    BUSINESS_APPROVAL = 26-OCT-18......... 1
+    BUSINESS_APPROVAL = 23-DEC-20......... 1
+    BUSINESS_APPROVAL = 28-JUL-14......... 1
+    BUSINESS_APPROVAL = 25-MAR-11......... 1
+    BUSINESS_APPROVAL = 06-APR-21......... 1
+    BUSINESS_APPROVAL = 02-MAR-20......... 1
+    BUSINESS_APPROVAL = 14-FEB-18......... 1
+    BUSINESS_APPROVAL = 03-APR-00......... 1
+    BUSINESS_APPROVAL = 24-JUN-23......... 1
+    BUSINESS_APPROVAL = 16-NOV-18......... 1
+    BUSINESS_APPROVAL = 11-AUG-20......... 1
+    BUSINESS_APPROVAL = 01-JUL-16......... 1
+    BUSINESS_APPROVAL = 08-FEB-24......... 1
+    BUSINESS_APPROVAL = 06-APR-16......... 1
+    BUSINESS_APPROVAL = 15-JUN-16......... 1
+    BUSINESS_APPROVAL = 20-SEP-99......... 1
+    BUSINESS_APPROVAL = 29-MAR-21......... 1
+    BUSINESS_APPROVAL = 13-JUL-18......... 1
+    BUSINESS_APPROVAL = 07-DEC-23......... 1
+    BUSINESS_APPROVAL = 19-JAN-74......... 1
+    BUSINESS_APPROVAL = 04-SEP-23......... 1
+    BUSINESS_APPROVAL = 26-AUG-21......... 1
+    BUSINESS_APPROVAL = 20-AUG-20......... 1
+    BUSINESS_APPROVAL = 23-OCT-20......... 1
+    BUSINESS_APPROVAL = 25-FEB-24......... 1
+    BUSINESS_APPROVAL = 22-AUG-18......... 1
+    BUSINESS_APPROVAL = 25-NOV-21......... 1
+    BUSINESS_APPROVAL = 20-SEP-17......... 1
+    BUSINESS_APPROVAL = 12-FEB-16......... 1
+    BUSINESS_APPROVAL = 04-SEP-24......... 1
+    BUSINESS_APPROVAL = 10-AUG-17......... 1
+    BUSINESS_APPROVAL = 07-OCT-24......... 1
+    BUSINESS_APPROVAL = 30-OCT-23......... 1
+    BUSINESS_APPROVAL = 13-AUG-20......... 1
+    BUSINESS_APPROVAL = 01-FEB-94......... 1
+    BUSINESS_APPROVAL = 10-OCT-13......... 1
+    BUSINESS_APPROVAL = 23-FEB-24......... 1
+    BUSINESS_APPROVAL = 21-MAR-24......... 1
+    BUSINESS_APPROVAL = 08-MAY-25......... 1
+    BUSINESS_APPROVAL = 11-FEB-22......... 1
+    BUSINESS_APPROVAL = 14-OCT-14......... 1
+    BUSINESS_APPROVAL = 29-NOV-24......... 1
+    BUSINESS_APPROVAL = 21-DEC-21......... 1
+    BUSINESS_APPROVAL = 01-DEC-05......... 1
+    BUSINESS_APPROVAL = 22-MAR-19......... 1
+    BUSINESS_APPROVAL = 14-JUL-23......... 1
+    BUSINESS_APPROVAL = 30-MAR-23......... 1
+    BUSINESS_APPROVAL = 27-SEP-17......... 1
+    BUSINESS_APPROVAL = 13-JUN-16......... 1
+    BUSINESS_APPROVAL = 05-AUG-20......... 1
+    BUSINESS_APPROVAL = 09-JUN-23......... 1
+    BUSINESS_APPROVAL = 07-NOV-16......... 1
+    BUSINESS_APPROVAL = 27-SEP-19......... 1
+    BUSINESS_APPROVAL = 18-JUL-25......... 1
+    BUSINESS_APPROVAL = 23-MAR-23......... 1
+    BUSINESS_APPROVAL = 06-SEP-19......... 1
+    BUSINESS_APPROVAL = 10-OCT-18......... 1
+    BUSINESS_APPROVAL = 03-SEP-20......... 1
+    BUSINESS_APPROVAL = 13-OCT-10......... 1
+    BUSINESS_APPROVAL = 02-APR-25......... 1
+    BUSINESS_APPROVAL = 13-NOV-25......... 1
+    BUSINESS_APPROVAL = 09-MAR-06......... 1
+    BUSINESS_APPROVAL = 31-JAN-20......... 1
+    BUSINESS_APPROVAL = 23-NOV-10......... 1
+    BUSINESS_APPROVAL = 10-JUL-25......... 1
+    BUSINESS_APPROVAL = 02-DEC-25......... 1
+    BUSINESS_APPROVAL = 22-APR-22......... 1
+    BUSINESS_APPROVAL = 29-SEP-17......... 1
+    BUSINESS_APPROVAL = 27-MAY-25......... 1
+    BUSINESS_APPROVAL = 22-FEB-24......... 1
+    BUSINESS_APPROVAL = 11-JUN-25......... 1
+    BUSINESS_APPROVAL = 25-JUN-18......... 1
+    BUSINESS_APPROVAL = 21-OCT-25......... 1
+    BUSINESS_APPROVAL = 19-JUL-05......... 1
+    BUSINESS_APPROVAL = 29-JAN-24......... 1
+    BUSINESS_APPROVAL = 11-DEC-25......... 1
+    BUSINESS_APPROVAL = 25-MAR-19......... 1
+    BUSINESS_APPROVAL = 22-NOV-21......... 1
+    BUSINESS_APPROVAL = 03-NOV-25......... 1
+    BUSINESS_APPROVAL = 22-AUG-01......... 1
+    BUSINESS_APPROVAL = 15-MAY-24......... 1
+    BUSINESS_APPROVAL = 16-JUL-15......... 1
+    BUSINESS_APPROVAL = 17-SEP-14......... 1
+    BUSINESS_APPROVAL = 01-JAN-06......... 1
+    BUSINESS_APPROVAL = 17-OCT-13......... 1
+    BUSINESS_APPROVAL = 18-MAR-22......... 1
+    BUSINESS_APPROVAL = 29-DEC-14......... 1
+    BUSINESS_APPROVAL = 25-APR-03......... 1
+    BUSINESS_APPROVAL = 20-OCT-69......... 1
+    BUSINESS_APPROVAL = 22-MAY-20......... 1
+    BUSINESS_APPROVAL = 13-OCT-15......... 1
+    BUSINESS_APPROVAL = 12-SEP-22......... 1
+    BUSINESS_APPROVAL = 20-AUG-09......... 1
+    BUSINESS_APPROVAL = 12-OCT-16......... 1
+    BUSINESS_APPROVAL = 23-DEC-21......... 1
+    BUSINESS_APPROVAL = 08-MAR-06......... 1
+    BUSINESS_APPROVAL = 19-MAR-18......... 1
+    BUSINESS_APPROVAL = 30-JUN-14......... 1
+    BUSINESS_APPROVAL = 13-APR-16......... 1
+    BUSINESS_APPROVAL = 21-JUL-15......... 1
+    BUSINESS_APPROVAL = 17-MAY-22......... 1
+    BUSINESS_APPROVAL = 01-OCT-98......... 1
+    BUSINESS_APPROVAL = 27-JUN-22......... 1
+    BUSINESS_APPROVAL = 17-JUN-19......... 1
+    BUSINESS_APPROVAL = 02-OCT-15......... 1
+    BUSINESS_APPROVAL = 08-JUL-17......... 1
+    BUSINESS_APPROVAL = 26-OCT-21......... 1
+    BUSINESS_APPROVAL = 11-MAR-13......... 1
+    BUSINESS_APPROVAL = 19-JAN-23......... 1
+    BUSINESS_APPROVAL = 06-AUG-15......... 1
+    BUSINESS_APPROVAL = 31-OCT-19......... 1
+    BUSINESS_APPROVAL = 11-APR-21......... 1
+    BUSINESS_APPROVAL = 18-AUG-16......... 1
+    BUSINESS_APPROVAL = 05-JUN-14......... 1
+    BUSINESS_APPROVAL = 22-MAY-18......... 1
+    BUSINESS_APPROVAL = 09-NOV-21......... 1
+    BUSINESS_APPROVAL = 14-APR-22......... 1
+    BUSINESS_APPROVAL = 12-DEC-12......... 1
+    BUSINESS_APPROVAL = 06-JAN-22......... 1
+    BUSINESS_APPROVAL = 19-AUG-15......... 1
+    BUSINESS_APPROVAL = 28-JUN-11......... 1
+    BUSINESS_APPROVAL = 11-JUN-20......... 1
+    BUSINESS_APPROVAL = 10-FEB-21......... 1
+    BUSINESS_APPROVAL = 19-SEP-22......... 1
+    BUSINESS_APPROVAL = 11-JAN-22......... 1
+    BUSINESS_APPROVAL = 17-AUG-23......... 1
+    BUSINESS_APPROVAL = 29-SEP-18......... 1
+    BUSINESS_APPROVAL = 06-AUG-14......... 1
+    BUSINESS_APPROVAL = 31-AUG-21......... 1
+    BUSINESS_APPROVAL = 24-AUG-18......... 1
+    BUSINESS_APPROVAL = 24-AUG-23......... 1
+    BUSINESS_APPROVAL = 04-SEP-12......... 1
+    BUSINESS_APPROVAL = 17-MAY-13......... 1
+    BUSINESS_APPROVAL = 02-FEB-23......... 1
+    BUSINESS_APPROVAL = 03-JUN-20......... 1
+    BUSINESS_APPROVAL = 21-JUN-22......... 1
+    BUSINESS_APPROVAL = 24-MAY-22......... 1
+    BUSINESS_APPROVAL = 14-JUN-23......... 1
+    BUSINESS_APPROVAL = 20-JAN-00......... 1
+    BUSINESS_APPROVAL = 15-FEB-10......... 1
+    BUSINESS_APPROVAL = 22-AUG-11......... 1
+    BUSINESS_APPROVAL = 11-DEC-22......... 1
+    BUSINESS_APPROVAL = 12-NOV-10......... 1
+    BUSINESS_APPROVAL = 05-FEB-24......... 1
+    BUSINESS_APPROVAL = 06-MAR-17......... 1
+    BUSINESS_APPROVAL = 19-JAN-24......... 1
+    BUSINESS_APPROVAL = 03-JUN-22......... 1
+    BUSINESS_APPROVAL = 16-AUG-17......... 1
+    BUSINESS_APPROVAL = 10-MAR-23......... 1
+    BUSINESS_APPROVAL = 07-MAR-24......... 1
+    BUSINESS_APPROVAL = 07-NOV-23......... 1
+    BUSINESS_APPROVAL = 07-MAY-24......... 1
+    BUSINESS_APPROVAL = 29-JUN-23......... 1
+    BUSINESS_APPROVAL = 31-MAY-16......... 1
+    BUSINESS_APPROVAL = 07-MAR-13......... 1
+    BUSINESS_APPROVAL = 06-JUN-03......... 1
+    BUSINESS_APPROVAL = 31-OCT-22......... 1
+    BUSINESS_APPROVAL = 18-MAY-20......... 1
+    BUSINESS_APPROVAL = 10-JUN-22......... 1
+    BUSINESS_APPROVAL = 30-JUN-21......... 1
+    BUSINESS_APPROVAL = 06-FEB-19......... 1
+    BUSINESS_APPROVAL = 14-JAN-16......... 1
+    BUSINESS_APPROVAL = 03-SEP-24......... 1
+    BUSINESS_APPROVAL = 16-FEB-24......... 1
+    BUSINESS_APPROVAL = 13-AUG-24......... 1
+    BUSINESS_APPROVAL = 11-MAY-21......... 1
+    BUSINESS_APPROVAL = 08-JUL-24......... 1
+    BUSINESS_APPROVAL = 19-DEC-23......... 1
+    BUSINESS_APPROVAL = 22-OCT-24......... 1
+    BUSINESS_APPROVAL = 27-MAR-24......... 1
+    BUSINESS_APPROVAL = 11-SEP-23......... 1
+    BUSINESS_APPROVAL = 04-APR-12......... 1
+    BUSINESS_APPROVAL = 12-MAR-02......... 1
+    BUSINESS_APPROVAL = 16-APR-18......... 1
+    BUSINESS_APPROVAL = 03-FEB-22......... 1
+    BUSINESS_APPROVAL = 13-MAR-12......... 1
+    BUSINESS_APPROVAL = 13-OCT-09......... 1
+    BUSINESS_APPROVAL = 23-SEP-24......... 1
+    BUSINESS_APPROVAL = 07-MAR-18......... 1
+    BUSINESS_APPROVAL = 27-FEB-25......... 1
+    BUSINESS_APPROVAL = 27-MAR-20......... 1
+    BUSINESS_APPROVAL = 07-APR-25......... 1
+    BUSINESS_APPROVAL = 22-APR-25......... 1
+    BUSINESS_APPROVAL = 13-MAR-25......... 1
+    BUSINESS_APPROVAL = 03-NOV-17......... 1
+    BUSINESS_APPROVAL = 27-JAN-17......... 1
+    BUSINESS_APPROVAL = 19-DEC-24......... 1
+    BUSINESS_APPROVAL = 01-FEB-13......... 1
+    BUSINESS_APPROVAL = 03-OCT-14......... 1
+    BUSINESS_APPROVAL = 06-AUG-25......... 1
+    BUSINESS_APPROVAL = 25-JAN-22......... 1
+    BUSINESS_APPROVAL = 08-OCT-18......... 1
+    BUSINESS_APPROVAL = 17-DEC-15......... 1
+    BUSINESS_APPROVAL = 27-NOV-07......... 1
+    BUSINESS_APPROVAL = 29-SEP-23......... 1
+    BUSINESS_APPROVAL = 05-APR-06......... 1
+    BUSINESS_APPROVAL = 18-JUN-25......... 1
+    BUSINESS_APPROVAL = 23-JUL-25......... 1
+    BUSINESS_APPROVAL = 15-MAR-18......... 1
+    BUSINESS_APPROVAL = 06-OCT-25......... 1
+    BUSINESS_APPROVAL = 16-APR-86......... 1
+    BUSINESS_APPROVAL = 08-JUN-09......... 1
+    BUSINESS_APPROVAL = 26-MAY-04......... 1
+    BUSINESS_APPROVAL = 22-MAR-20......... 1
+    BUSINESS_APPROVAL = 06-DEC-18......... 1
+    BUSINESS_APPROVAL = 14-AUG-19......... 1
+    BUSINESS_APPROVAL = 21-FEB-17......... 1
+    BUSINESS_APPROVAL = 20-JAN-25......... 1
+    BUSINESS_APPROVAL = 09-JUN-25......... 1
+    BUSINESS_APPROVAL = 03-FEB-26......... 1
+    BUSINESS_APPROVAL = 04-JUL-16......... 1
+    BUSINESS_APPROVAL = 17-JAN-23......... 1
+    BUSINESS_APPROVAL = 15-DEC-25......... 1
+    BUSINESS_APPROVAL = 25-FEB-25......... 1
+    BUSINESS_APPROVAL = 25-OCT-24......... 1
+    BUSINESS_APPROVAL = 01-NOV-02......... 1
+    BUSINESS_APPROVAL = 25-JAN-23......... 1
+    BUSINESS_APPROVAL = 14-FEB-12......... 1
+    BUSINESS_APPROVAL = 28-SEP-17......... 1
+    BUSINESS_APPROVAL = 05-DEC-22......... 1
+    BUSINESS_APPROVAL = 20-APR-11......... 1
+    BUSINESS_APPROVAL = 17-AUG-21......... 1
+    BUSINESS_APPROVAL = 23-NOV-22......... 1
+    BUSINESS_APPROVAL = 07-JUL-03......... 1
+    BUSINESS_APPROVAL = 02-JUN-21......... 1
+    BUSINESS_APPROVAL = 06-MAR-20......... 1
+    BUSINESS_APPROVAL = 12-APR-14......... 1
+    BUSINESS_APPROVAL = 13-MAR-20......... 1
+    BUSINESS_APPROVAL = 23-SEP-19......... 1
+    BUSINESS_APPROVAL = 02-JUL-15......... 1
+    BUSINESS_APPROVAL = 30-DEC-20......... 1
+    BUSINESS_APPROVAL = 25-SEP-18......... 1
+    BUSINESS_APPROVAL = 18-FEB-20......... 1
+    BUSINESS_APPROVAL = 14-JUN-19......... 1
+    BUSINESS_APPROVAL = 12-JAN-18......... 1
+    BUSINESS_APPROVAL = 01-AUG-22......... 1
+    BUSINESS_APPROVAL = 05-MAY-23......... 1
+    BUSINESS_APPROVAL = 30-SEP-22......... 1
+    BUSINESS_APPROVAL = 05-FEB-10......... 1
+    BUSINESS_APPROVAL = 18-JUL-13......... 1
+    BUSINESS_APPROVAL = 06-MAY-23......... 1
+    BUSINESS_APPROVAL = 06-DEC-22......... 1
+    BUSINESS_APPROVAL = 27-JAN-15......... 1
+    BUSINESS_APPROVAL = 16-SEP-20......... 1
+    BUSINESS_APPROVAL = 20-OCT-17......... 1
+    BUSINESS_APPROVAL = 03-AUG-18......... 1
+    BUSINESS_APPROVAL = 13-MAY-21......... 1
+    BUSINESS_APPROVAL = 15-NOV-18......... 1
+    BUSINESS_APPROVAL = 09-AUG-21......... 1
+    BUSINESS_APPROVAL = 20-NOV-13......... 1
+    BUSINESS_APPROVAL = 19-JAN-17......... 1
+    BUSINESS_APPROVAL = 09-NOV-05......... 1
+    BUSINESS_APPROVAL = 05-DEC-16......... 1
+    BUSINESS_APPROVAL = 27-SEP-16......... 1
+    BUSINESS_APPROVAL = 07-OCT-04......... 1
+    BUSINESS_APPROVAL = 15-FEB-17......... 1
+    BUSINESS_APPROVAL = 10-AUG-18......... 1
+    BUSINESS_APPROVAL = 09-DEC-17......... 1
+    BUSINESS_APPROVAL = 10-FEB-22......... 1
+    BUSINESS_APPROVAL = 09-DEC-21......... 1
+    BUSINESS_APPROVAL = 18-OCT-23......... 1
+    BUSINESS_APPROVAL = 15-JAN-18......... 1
+    BUSINESS_APPROVAL = 28-DEC-12......... 1
+    BUSINESS_APPROVAL = 03-OCT-23......... 1
+    BUSINESS_APPROVAL = 20-DEC-11......... 1
+    BUSINESS_APPROVAL = 31-JUL-17......... 1
+    BUSINESS_APPROVAL = 29-AUG-22......... 1
+    BUSINESS_APPROVAL = 13-SEP-23......... 1
+    BUSINESS_APPROVAL = 02-OCT-23......... 1
+    BUSINESS_APPROVAL = 26-OCT-23......... 1
+    BUSINESS_APPROVAL = 22-MAR-18......... 1
+    BUSINESS_APPROVAL = 03-JUL-03......... 1
+    BUSINESS_APPROVAL = 07-JUN-22......... 1
+    BUSINESS_APPROVAL = 10-SEP-21......... 1
+    BUSINESS_APPROVAL = 27-FEB-06......... 1
+    BUSINESS_APPROVAL = 24-JAN-14......... 1
+    BUSINESS_APPROVAL = 07-JUL-23......... 1
+    BUSINESS_APPROVAL = 06-SEP-18......... 1
+    BUSINESS_APPROVAL = 10-JUN-19......... 1
+    BUSINESS_APPROVAL = 26-AUG-11......... 1
+    BUSINESS_APPROVAL = 03-DEC-18......... 1
+    BUSINESS_APPROVAL = 05-DEC-18......... 1
+    BUSINESS_APPROVAL = 31-OCT-18......... 1
+    BUSINESS_APPROVAL = 21-MAY-19......... 1
+    BUSINESS_APPROVAL = 08-APR-14......... 1
+    BUSINESS_APPROVAL = 25-JUN-24......... 1
+    BUSINESS_APPROVAL = 25-JUL-22......... 1
+    BUSINESS_APPROVAL = 28-JAN-16......... 1
+    BUSINESS_APPROVAL = 03-FEB-16......... 1
+    BUSINESS_APPROVAL = 10-OCT-24......... 1
+    BUSINESS_APPROVAL = 05-JUN-13......... 1
+    BUSINESS_APPROVAL = 31-JAN-08......... 1
+    BUSINESS_APPROVAL = 07-NOV-24......... 1
+    BUSINESS_APPROVAL = 08-JAN-25......... 1
+    BUSINESS_APPROVAL = 04-FEB-24......... 1
+    BUSINESS_APPROVAL = 30-JAN-19......... 1
+    BUSINESS_APPROVAL = 27-AUG-23......... 1
+    BUSINESS_APPROVAL = 25-JAN-18......... 1
+    BUSINESS_APPROVAL = 15-SEP-23......... 1
+    BUSINESS_APPROVAL = 04-FEB-19......... 1
+    BUSINESS_APPROVAL = 21-SEP-12......... 1
+    BUSINESS_APPROVAL = 26-JUN-19......... 1
+    BUSINESS_APPROVAL = 02-APR-24......... 1
+    BUSINESS_APPROVAL = 07-FEB-20......... 1
+    BUSINESS_APPROVAL = 12-JUL-23......... 1
+    BUSINESS_APPROVAL = 14-JUN-21......... 1
+    BUSINESS_APPROVAL = 18-MAR-20......... 1
+    BUSINESS_APPROVAL = 22-SEP-23......... 1
+    BUSINESS_APPROVAL = 02-JUN-25......... 1
+    BUSINESS_APPROVAL = 29-MAR-16......... 1
+    BUSINESS_APPROVAL = 03-DEC-24......... 1
+    BUSINESS_APPROVAL = 20-SEP-19......... 1
+    BUSINESS_APPROVAL = 05-JUN-04......... 1
+    BUSINESS_APPROVAL = 10-OCT-19......... 1
+    BUSINESS_APPROVAL = 02-OCT-13......... 1
+    BUSINESS_APPROVAL = 01-OCT-19......... 1
+    BUSINESS_APPROVAL = 12-NOV-19......... 1
+    BUSINESS_APPROVAL = 11-JAN-13......... 1
+    BUSINESS_APPROVAL = 14-MAY-25......... 1
+    BUSINESS_APPROVAL = 22-AUG-17......... 1
+    BUSINESS_APPROVAL = 17-DEC-24......... 1
+    BUSINESS_APPROVAL = 21-NOV-17......... 1
+    BUSINESS_APPROVAL = 18-JUL-18......... 1
+    BUSINESS_APPROVAL = 12-JUN-19......... 1
+    BUSINESS_APPROVAL = 17-JAN-18......... 1
+    BUSINESS_APPROVAL = 28-AUG-25......... 1
+    BUSINESS_APPROVAL = 17-JUL-25......... 1
+    BUSINESS_APPROVAL = 02-FEB-24......... 1
+    BUSINESS_APPROVAL = 18-NOV-25......... 1
+    BUSINESS_APPROVAL = 23-JAN-20......... 1
+    BUSINESS_APPROVAL = 15-OCT-25......... 1
+    BUSINESS_APPROVAL = 02-MAY-25......... 1
+    BUSINESS_APPROVAL = 14-AUG-24......... 1
+    BUSINESS_APPROVAL = 03-NOV-26......... 1
+    BUSINESS_APPROVAL = 04-NOV-11......... 1
+    BUSINESS_APPROVAL = 09-JAN-26......... 1
+    BUSINESS_APPROVAL = 16-MAR-22......... 1
+    BUSINESS_APPROVAL = 18-DEC-14......... 1
+    BUSINESS_APPROVAL = 20-OCT-25......... 1
+    BUSINESS_APPROVAL = 02-JAN-25......... 1
+    BUSINESS_APPROVAL = 05-DEC-25......... 1
+    BUSINESS_APPROVAL = 19-FEB-26......... 1
+    BUSINESS_APPROVAL = 27-NOV-25......... 1
+    BUSINESS_APPROVAL = 10-FEB-15......... 1
+    BUSINESS_APPROVAL = 04-MAR-21......... 1
+    BUSINESS_APPROVAL = 23-DEC-25......... 1
+
+    Sans TRADE_LICENCE_NO................. 21911
+    Avec TRADE_LICENCE_NO................. 2776
+
+    Sans INTRODUCER_DTL................... 22782
+    Avec INTRODUCER_DTL................... 1905
+
+  [Analyse AUDIT_DATE]
+    Sans AUDIT_DATE....................... 23890
+    AUDIT_DATE > 12 mois.................. 342
+
+  [LOCAL_ABROAD_BRN]
+    LOCAL_ABROAD_BRN = ................... 22121
+    LOCAL_ABROAD_BRN = 01................. 1167
+    LOCAL_ABROAD_BRN = 1.................. 368
+    LOCAL_ABROAD_BRN = NA................. 287
+    LOCAL_ABROAD_BRN = 0.................. 159
+    LOCAL_ABROAD_BRN = 2.................. 94
+    LOCAL_ABROAD_BRN = 10................. 81
+    LOCAL_ABROAD_BRN = LIMITED LIABILITY C 77
+    LOCAL_ABROAD_BRN = 02................. 70
+    LOCAL_ABROAD_BRN = SALES.............. 56
+    LOCAL_ABROAD_BRN = 3.................. 31
+    LOCAL_ABROAD_BRN = 05................. 27
+    LOCAL_ABROAD_BRN = 4.................. 24
+    LOCAL_ABROAD_BRN = ENTERPRISE......... 21
+    LOCAL_ABROAD_BRN = 5.................. 13
+    LOCAL_ABROAD_BRN = BUSINESS........... 11
+    LOCAL_ABROAD_BRN = 20................. 11
+    LOCAL_ABROAD_BRN = DOUALA CAMEROUN.... 6
+    LOCAL_ABROAD_BRN = 03................. 6
+    LOCAL_ABROAD_BRN = SOLE PROPRIETORSHIP 5
+    LOCAL_ABROAD_BRN = SA................. 5
+    LOCAL_ABROAD_BRN = 30................. 4
+    LOCAL_ABROAD_BRN = 25................. 3
+    LOCAL_ABROAD_BRN = S.A................ 3
+    LOCAL_ABROAD_BRN = CMR................ 3
+    LOCAL_ABROAD_BRN = SARL............... 2
+    LOCAL_ABROAD_BRN = SOCIETE LEADER EXPR 1
+    LOCAL_ABROAD_BRN = 6.................. 1
+    LOCAL_ABROAD_BRN = TALENT TALLY SARL.. 1
+    LOCAL_ABROAD_BRN = CIMENT DE L'AFRIQUE 1
+    LOCAL_ABROAD_BRN = AFRICAN BUILDING CO 1
+    LOCAL_ABROAD_BRN = GLOBALETHIX CENTRAL 1
+    LOCAL_ABROAD_BRN = KENGNE TABOPDA FRAN 1
+    LOCAL_ABROAD_BRN = CLUB OR SOCIETY.... 1
+    LOCAL_ABROAD_BRN = AFRIQ BRAIN CONSULT 1
+    LOCAL_ABROAD_BRN = 07................. 1
+    LOCAL_ABROAD_BRN = 50................. 1
+    LOCAL_ABROAD_BRN = 100................ 1
+    LOCAL_ABROAD_BRN = FRANCISCAM SARL.... 1
+    LOCAL_ABROAD_BRN = AKWA............... 1
+    LOCAL_ABROAD_BRN = MAELYS TRAVEL...... 1
+    LOCAL_ABROAD_BRN = 15................. 1
+    LOCAL_ABROAD_BRN = `4................. 1
+    LOCAL_ABROAD_BRN = MOVELT............. 1
+    LOCAL_ABROAD_BRN = ETS COSMOS INGINERI 1
+    LOCAL_ABROAD_BRN = 7.................. 1
+    LOCAL_ABROAD_BRN = 06................. 1
+    LOCAL_ABROAD_BRN = SOCIETE IMMOBILIERE 1
+    LOCAL_ABROAD_BRN = ENGINEERING SUPPLY  1
+    LOCAL_ABROAD_BRN = 04................. 1
+    LOCAL_ABROAD_BRN = NEXT + SARL........ 1
+    LOCAL_ABROAD_BRN = TRADING............ 1
+    LOCAL_ABROAD_BRN = HAN MAT............ 1
+    LOCAL_ABROAD_BRN = DOUALA BONABERI.... 1
+    LOCAL_ABROAD_BRN = ERTEC LTD.......... 1
+    LOCAL_ABROAD_BRN = LES SERVICES D IMPR 1
+    LOCAL_ABROAD_BRN = \NA................ 1
+    LOCAL_ABROAD_BRN = MATRIX TELECOMS S.A 1
+
+  [Top 10 GROUP_NAME]
+    Groupe : GLOBAL ASSET CAMEROON LTD.... 3
+    Groupe : IHS CAMEROON................. 2
+    Groupe : COFFEE ENTERTAINMENT SARL.... 2
+    Groupe : LEADER SARL.................. 2
+    Groupe : CENTRE DE FORMATION PROFESSIO 2
+    Groupe : ONYENGUBO.................... 2
+    Groupe : TSEM BUSINESS SERVICES SARL.. 2
+    Groupe : MOTHERLAND EMPIRE SARL....... 2
+    Groupe : FRANCISCAM SARL.............. 2
+    Groupe : DOUDOU BUSINESS MULTI-SERVICE 2
+
+  [KYC_AMTS_CCY Corporate]
+    KYC_AMTS_CCY = ....................... 21902
+    KYC_AMTS_CCY = XAF.................... 2785
+
+================================================================================
+>>> 9. ACTB_HISTORY — Historique des transactions (CRITIQUE AML)
+================================================================================
+  [Plage temporelle des transactions]
+    Transaction la plus ancienne.......... 23/05/2022
+    Transaction la plus récente........... 08/04/2026
+
+  [Répartition DRCR_IND (Débit/Crédit)]
+    DRCR_IND = C.......................... 2905679
+    DRCR_IND = D.......................... 2855260
+
+  [Statistiques montants (LCY_AMOUNT — monnaie locale)]
+    LCY_AMOUNT MIN........................ -27161437757.94
+    LCY_AMOUNT MAX........................ 430139176940
+    LCY_AMOUNT MOYEN...................... 15050872.43
+    LCY_AMOUNT TOTAL...................... 86707157968755.71
+
+  [Statistiques montants (FCY_AMOUNT — devise étrangère)]
+    FCY_AMOUNT MIN........................ -16966962.93
+    FCY_AMOUNT MAX........................ 655957000
+    FCY_AMOUNT MOYEN...................... 121590.23
+    Transactions en devise étrangère...... 35016
+
+  [Top 10 devises (AC_CCY)]
+    AC_CCY = XAF.......................... 5702926
+    AC_CCY = USD.......................... 31529
+    AC_CCY = EUR.......................... 25214
+    AC_CCY = GBP.......................... 823
+    AC_CCY = ZAR.......................... 190
+    AC_CCY = CAD.......................... 138
+    AC_CCY = JPY.......................... 50
+    AC_CCY = XOF.......................... 38
+    AC_CCY = CHF.......................... 19
+    AC_CCY = SGD.......................... 6
+
+  [Top 15 codes transaction (TRN_CODE)]
+    TRN_CODE = ACT........................ 713844
+    TRN_CODE = VAT........................ 597075
+    TRN_CODE = TRF........................ 535932
+    TRN_CODE = LNA........................ 517488
+    TRN_CODE = CTT........................ 494928
+    TRN_CODE = NIP........................ 445671
+    TRN_CODE = USD........................ 364372
+    TRN_CODE = IDC........................ 297492
+    TRN_CODE = CDP........................ 297072
+    TRN_CODE = NXG........................ 209666
+    TRN_CODE = IAC........................ 196036
+    TRN_CODE = CHW........................ 164878
+    TRN_CODE = CWU........................ 101406
+    TRN_CODE = FMB........................ 81522
+    TRN_CODE = GMC........................ 80998
+
+  [Top 10 modules (MODULE)]
+    MODULE = DE........................... 2180465
+    MODULE = FT........................... 1544006
+    MODULE = RT........................... 932844
+    MODULE = CL........................... 628571
+    MODULE = IC........................... 343317
+    MODULE = MM........................... 80820
+    MODULE = RE........................... 27626
+    MODULE = SI........................... 11154
+    MODULE = DD........................... 8054
+    MODULE = GL........................... 2848
+
+  [Top 10 produits (PRODUCT)]
+    PRODUCT = LBOT........................ 1023242
+    PRODUCT = MJKL........................ 684295
+    PRODUCT = ZTRF........................ 628383
+    PRODUCT = MNIP........................ 445671
+    PRODUCT = PRP1........................ 389940
+    PRODUCT = CHDP........................ 297072
+    PRODUCT = ZATM........................ 207620
+    PRODUCT = CHWL........................ 164878
+    PRODUCT = SVIE........................ 122974
+    PRODUCT = FEES........................ 106561
+
+  [Top 10 agences (AC_BRANCH)]
+    AC_BRANCH = 099....................... 2561239
+    AC_BRANCH = 001....................... 2134894
+    AC_BRANCH = 004....................... 450777
+    AC_BRANCH = 003....................... 311165
+    AC_BRANCH = 006....................... 98713
+    AC_BRANCH = 007....................... 82153
+    AC_BRANCH = 008....................... 73954
+    AC_BRANCH = 005....................... 48044
+
+  [Répartition TYPE]
+    TYPE = 6.............................. 3191016
+    TYPE = 4.............................. 2102593
+    TYPE = 5.............................. 353712
+    TYPE = 1.............................. 111778
+    TYPE = 3.............................. 1840
+
+  [Répartition CATEGORY]
+    CATEGORY = 1.......................... 5079707
+    CATEGORY = 3.......................... 552821
+    CATEGORY = 4.......................... 79179
+    CATEGORY = 8.......................... 18672
+    CATEGORY = 9.......................... 18668
+    CATEGORY = 5.......................... 9896
+    CATEGORY = 2.......................... 1996
+
+  [Répartition CUST_GL]
+    CUST_GL = G........................... 4490870
+    CUST_GL = A........................... 1270069
+
+  [AML_EXCEPTION]
+    AML_EXCEPTION = ...................... 5760939
+
+  [Volume transactions par année]
+    2022 — nb txns........................ 79888
+    2022 — total LCY...................... 1727307067797.14
+    2023 — nb txns........................ 391969
+    2023 — total LCY...................... 4454635705462.6
+    2024 — nb txns........................ 1184021
+    2024 — total LCY...................... 10527844210962.36
+    2025 — nb txns........................ 2925205
+    2025 — total LCY...................... 37330040690435.67
+    2026 — nb txns........................ 1179856
+    2026 — total LCY...................... 32667330294097.94
+
+  [Top 10 USER_ID (opérateurs)]
+    USER_ID : ADMINUSER1.................. 768301
+    USER_ID : USSDCMR..................... 527836
+    USER_ID : PRIMUSUSR................... 527509
+    USER_ID : SYSTEM...................... 475025
+    USER_ID : NEXTGENUSR.................. 318992
+    USER_ID : CHEICHEID059................ 275439
+    USER_ID : ACCESSAFRIK................. 207292
+    USER_ID : FLEXSWITCH.................. 179466
+    USER_ID : NDJOCKOS0067................ 160483
+    USER_ID : CHOHOS00066................. 145812
+
+    Transactions avec taux change != 1.... 41982
+
+  [Top 10 EVENT]
+    EVENT = INIT.......................... 4625302
+    EVENT = ACCR.......................... 555882
+    EVENT = ILIQ.......................... 222393
+    EVENT = ALIQ.......................... 127210
+    EVENT = IACR.......................... 120334
+    EVENT = CYPO.......................... 37262
+    EVENT = REVL.......................... 17702
+    EVENT = DSBR.......................... 15503
+    EVENT = SUXS.......................... 10626
+    EVENT = LIQD.......................... 8360
+
+    Avec RELATED_ACCOUNT.................. 3302413
+    Avec RELATED_CUSTOMER................. 3666052
+
+================================================================================
+>>> 10. STTM_ACCOUNT_CLASS — Référentiel classes de comptes
+================================================================================
+  [Répartition AC_CLASS_TYPE]
+    AC_CLASS_TYPE = U..................... 71
+    AC_CLASS_TYPE = S..................... 25
+    AC_CLASS_TYPE = Y..................... 8
+    AC_CLASS_TYPE = N..................... 4
+
+  [Facilités]
+    Avec OVERDRAFT_FACILITY............... 67
+    Avec CHEQUE_BOOK_FACILITY............. 80
+    Avec ATM_FACILITY..................... 57
+    Avec PASSBOOK_FACILITY................ 71
+
+  [Dormance et statut]
+    DORMANCY = 365........................ 62
+    DORMANCY = 360........................ 13
+    DORMANCY = 1095....................... 12
+    DORMANCY = ........................... 8
+    DORMANCY = 999........................ 7
+    DORMANCY = 180........................ 6
+    AUTH_STAT = A......................... 108
+
+  [Top 10 ACCOUNT_CLASS avec description]
+    005615................................ ETABLISSEMENTS DE MICROFINANCE
+    010001................................ CURRENT ACCOUNTS  FINANCIAL INSTIT. INTL AND SUB REGIONAL
+    010002................................ CURRENT ACCOUNT LIBERAL PROFESSIONS
+    010003................................ CURRENT ACCOUNT - SCHOOLS / PRIVATE UNIVERSITY
+    010004................................ CURRENT ACCOUNTS - OTHERS SCHOOLS AND UNIVERSITY
+    010005................................ CURRENT ACCOUNT - COMPANIES
+    010006................................ CURRENT ACCOUNTS  LCY - MORAL PERSON
+    010007................................ CURRENT ACCOUNTS  ASSOCIATIONS AND SIMILAR
+    010008................................ CURRENT ACCOUNTS  PUBLIC SECTOR & INSTITUTIONS
+    010009................................ CURRENT ACCOUNT  -PERSON PHY
+
+================================================================================
+>>> 11. STTM_CUSTOMER_CAT — Référentiel catégories clients
+================================================================================
+  [Liste complète des catégories]
+    1101.................................. BEAC
+    1102.................................. Autres Instituts d'Emission
+    1201.................................. Banques associées
+    1202.................................. Banques non associées
+    1301.................................. Etablissements financiers associés
+    1302.................................. Etablissements financiers non associés
+    1401.................................. Sociétés d'assurance
+    1402.................................. Sociétés de capitalisation
+    1501.................................. Etablissements de microfinance 1ère catégorie
+    1602.................................. Institutions financières internationales
+    1603.................................. Institutions financières spécialisées (BDEAC)
+    1701.................................. Caisses d’épargne postales et Chèques postaux
+    2101.................................. Administrations centrales
+    2102.................................. Administrations locales
+    2103.................................. Administrations de sécurité sociale
+    2201.................................. Sociétés non financières publiques
+    2202.................................. Autres Sociétés non financières
+    2203.................................. Entreprises individuelles
+    2301.................................. Institutions sans but lucratif au service des ménages (ISBLM)
+    2401.................................. Particuliers
+    ABWP.................................. ACCESS BANK CAMEROON WELCOME PACKAGE
+    BANK.................................. BANKS
+    BDC................................... BUREAU DE CHANGE (MSB)
+    CONSTRUCTN............................ CONSTRUCTION COMPANIES (DNFI)
+    CONSULTANC............................ CONSULTANTS, CONSULTING COMPANIES, CLEARING AND SETTLEMENTS COMPANIES (DNFI)
+    CORP.................................. CORPORATE
+    CRYPTRADE............................. CRYPTOCURRENCY TRADERS
+    CSE1.................................. CIVIL SERVANTS (LESS THAN XAF250,000)
+    CSE2.................................. CIVIL SERVANTS (ABOVE XAF250,000)
+    DISC.................................. DISCOUNT HOUSES
+    ECOMMERCE............................. E-COMMERCE/INTERNET BASED BUSINESS
+    ESC................................... COMMISSIONS MT940 E-Statement
+    FIN_INT............................... FINANCIAL INSTITUTE
+    FOREIGN............................... Foreign
+    FTZ................................... FREE TRADE ZONE ACCOUNTS
+    GAMING................................ CASINOS, POOL BETTING & OTHER LOTTERY BUSINESSES (DNFI)
+    GATEKEEPER............................ AUDIT FIRMS, TAX CONSULTANTS, NOTARIES, LAW & ACCOUNTING FIRMS (DNFI)
+    GOVT.................................. GOVERNMENT
+    GOVT INST............................. GOVT INSTITUTIONS
+    H..................................... JOINT ACCOUNT
+    H2H................................... HOST TO HOST SUBSCRIPTION CHARGE
+    HIGHVALUE............................. JEWELRY, LUXURY GOODS, PRECIOUS STONES & METALS (DNFI)
+    HNI................................... HNI (VIP BANKING)
+    HOSPITALIT............................ HOTELS AND OTHER HOSPITALITY (DNFI)
+    IMTO.................................. INTERNATIONAL MONEY TRANSFER OPERATORS (MSB)
+    INDV.................................. INDIVIDUAL
+    INSURANCE............................. Insurance Companies
+    LAWENFORCE............................ LAW ENFORCEMENT AGENCIES AND THEIR TOP LEVEL OFFICERS
+    MINORS................................ CHILDREN (0-18 YEARS)
+    MORT.................................. MORTGAGE INSTITUTIONS
+    NGOs.................................. Non-Government Organization
+    NRA1.................................. NON-RESIDENT CURRENT ACCOUNT
+    NRA2.................................. NON-RESIDENT SAVINGS ACCOUNT
+    OFI................................... Other Financial Institutions
+    OIL&GAS............................... OIL & GAS SECTOR
+    PEP/FEPS.............................. POLITICALLY/FINANCIALLY EXPOSED PERSONS(PEPS/FEPS)
+    PFBI.................................. SELF EMPLOYED (MONTHLY REVENUE ABOVE 1Mn)
+    PSC1.................................. PRIMUS+ SUBSCRIPTION CHARGE CLASSIC
+    PSC2.................................. PRIMUS+ SUBSCRIPTION CHARGE PREMIUM
+    PSC3.................................. PRIMUS+ SUBSCRIPTION CHARGE PLATINUM
+    PSE1.................................. PRIVATE SECTOR EMPLOYEES (LESS THAN XAF350,000)
+    PSE2.................................. PRIVATE SECTOR EMPLOYEES(XAF350,000-1Mn)
+    PSE3.................................. PRIVATE SECTOR EMPLOYEES(ABOVE 1Mn)
+    REALESTATE............................ ESTATE DEVELOPERS, ESTATE AGENTS, BROKERS, ESTATE SURVEYORS AND VALUERS (DNFI)
+    REFUGEES.............................. REFUGEES AND ASYLUM SEEKERS
+    REGULATORS............................ REGULATORY AGENCIES AND THEIR TOP LEVEL OFFICERS
+    REL................................... Religious Bodies
+    RSA................................... RELATED STAFF ACCOUNT
+    RSA1.................................. REGULAR SAVINGS ACCOUNT
+    SAL................................... Salary Earners
+    SENIORS............................... For Ages 60 and above
+    SME................................... Priority-SME
+    STAF.................................. STAFF MEMBERS
+    STUDENTS.............................. STUDENTS (19-28 YEARS)
+    TELECOMS.............................. TELECOMMUNICATION SECTOR
+    TRAVELAGEN............................ TRAVEL AGENCIES (DNFI)
+    UHNI.................................. Ultra High Networth Individual-Premium
+    UNKNOWN............................... WHEREABOUT UNKNOWN
+    VPFP.................................. PENSIONERS (CURRENT & SAVINGS)
+    WALKIN................................ WALKIN CUSTOMER
+    WATCH CUST............................ WATCHLISTED CUSTOMERS
+    WSFE.................................. WOMEN IN BUSINESS (ETS)
+    WSME.................................. WOMEN IN BUSINESS (SARL)
+
+    AUTH_STAT = A......................... 83
+
+================================================================================
+>>> 12. STTM_KYC_CORP_KEYPERSONS — Personnes clés (bénéficiaires effectifs)
+================================================================================
+    Nombre total de personnes clés........ 2430
+
+    Nombre de KYC Corporate avec keyperson 1891
+
+  [Nombre de keypersons par dossier KYC]
+    Dossiers avec 1 personne(s)........... 1485
+    Dossiers avec 2 personne(s)........... 315
+    Dossiers avec 3 personne(s)........... 68
+    Dossiers avec 4 personne(s)........... 10
+    Dossiers avec 5 personne(s)........... 8
+    Dossiers avec 6 personne(s)........... 4
+    Dossiers avec 7 personne(s)........... 1
+
+  [Top 10 RELATIONSHIP]
+    Relation : DIRECTOR................... 1417
+    Relation : CEO........................ 923
+    Relation : ........................... 90
+
+  [Top 10 NATIONALITY keypersons]
+    Nationalité : CMR..................... 2210
+    Nationalité : ........................ 58
+    Nationalité : NG...................... 22
+    Nationalité : IN...................... 18
+    Nationalité : FR...................... 17
+    Nationalité : CH...................... 15
+    Nationalité : UK...................... 10
+    Nationalité : CA...................... 9
+    Nationalité : CO...................... 8
+    Nationalité : US...................... 6
+
+  [Top 10 pays adresse (ADDRESS_COUNTRY)]
+    Pays : CMR............................ 2337
+    Pays : ............................... 24
+    Pays : UK............................. 12
+    Pays : FR............................. 11
+    Pays : CA............................. 8
+    Pays : KY............................. 6
+    Pays : NG............................. 4
+    Pays : US............................. 3
+    Pays : IN............................. 3
+    Pays : CO............................. 3
+
+  [Complétude SHARE_HOLDING]
+    Sans SHARE_HOLDING (NULL ou 0)........ 383
+    Avec SHARE_HOLDING > 0................ 2047
+    SHARE_HOLDING MIN..................... .1
+    SHARE_HOLDING MAX..................... 100
+    SHARE_HOLDING MOYEN................... 75.22
+
+    Sans TIN (Tax ID)..................... 178
+    Avec TIN (Tax ID)..................... 2252
+
+================================================================================
+>>> 13. COHERENCE INTER-TABLES
+================================================================================
+    Clients sans compte (STTM_CUST_ACCOUNT 8978
+    Clients indiv. sans données perso..... 0
+    AML requis MAIS sans KYC_REF_NO....... 0
+    KYC_REF_NO orphelins (pas dans MASTER) 0
+    Comptes sans entrée STTB_ACCOUNT...... 25773
+
+  [Cohérence KYC type vs tables détail]
+    KYC type I sans fiche RETAIL.......... 0
+    KYC type C sans fiche CORPORATE....... 0
+    KYC Corporate sans KEYPERSONS......... 22796
+
+  [Anomalies AML/KYC]
+    Clients GELÉS avec comptes NON gelés.. 0
+    Clients DÉCÉDÉS avec comptes actifs... 0
+    Comptes actifs (avec txn) sans KYC.... 562
+
+  [Doublons potentiels]
+    P_NATIONAL_ID en doublon (nb IDs)..... 386
+    PASSPORT_NO en doublon (nb passports). 2
+    UNIQUE_ID_VALUE en doublon (nb IDs)... 75
+
+================================================================================
+>>> EXPLORATION TERMINEE — 09/04/2026 07:26:14
+================================================================================
+
+
+PL/SQL procedure successfully completed.
+

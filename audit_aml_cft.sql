@@ -1397,6 +1397,86 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-402 : Fractionnement de transactions (Structuring)
+    -- ---------------------------------------------------------
+    p_test('AML-402', 'Fractionnement (structuring) : cumul journalier >= 5M FCFA par transactions < 5M');
+
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT CUST_AC_NO, TRUNC(TRAN_DT)
+        FROM ACTB_HISTORY
+        WHERE TRAN_DT >= SYSDATE - 90
+          AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+          AND LCY_AMOUNT >  500000
+          AND LCY_AMOUNT <  5000000
+        GROUP BY CUST_AC_NO, TRUNC(TRAN_DT)
+        HAVING COUNT(*) >= 3 AND SUM(LCY_AMOUNT) >= 5000000
+    );
+    p_kv('Journees suspectes (structuring)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM (
+        SELECT a.CUST_NO
+        FROM ACTB_HISTORY h
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+        WHERE h.TRAN_DT >= SYSDATE - 90
+          AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+          AND h.LCY_AMOUNT >  500000
+          AND h.LCY_AMOUNT <  5000000
+        GROUP BY a.CUST_NO, TRUNC(h.TRAN_DT)
+        HAVING COUNT(*) >= 3 AND SUM(h.LCY_AMOUNT) >= 5000000
+    );
+    p_kv('Clients distincts suspects', TO_CHAR(v_count2));
+
+    IF v_count > 0 THEN
+        p_finding('CRITIQUE', v_count || ' journees presentent un pattern de fractionnement potentiel.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 journees suspectes (structuring, tri par cumul) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28) || '|' || RPAD(' COMPTE',14)   || '|'
+            || RPAD(' NB TXN',6)     || '|' || RPAD(' CUMUL FCFA',18) || '|'
+            || RPAD(' DATE',12)      || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1, h.CUST_AC_NO,
+                       TRUNC(h.TRAN_DT)       jour,
+                       COUNT(*)               nb_txn,
+                       SUM(h.LCY_AMOUNT)      cumul_jour
+                FROM ACTB_HISTORY h
+                JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
+                WHERE h.TRAN_DT >= SYSDATE - 90
+                  AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+                  AND h.LCY_AMOUNT >  500000
+                  AND h.LCY_AMOUNT <  5000000
+                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, h.CUST_AC_NO, TRUNC(h.TRAN_DT)
+                HAVING COUNT(*) >= 3 AND SUM(h.LCY_AMOUNT) >= 5000000
+                ORDER BY SUM(h.LCY_AMOUNT) DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                             || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)          || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUST_AC_NO,1,12),''), 14)             || '|'
+                || LPAD(TO_CHAR(r.nb_txn), 5)                                     || ' |'
+                || LPAD(NVL(TO_CHAR(r.cumul_jour,'FM999G999G999G990'),'0'), 17)   || ' |'
+                || RPAD(' ' || NVL(TO_CHAR(r.jour,'DD/MM/YYYY'),'N/A'), 12)        || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

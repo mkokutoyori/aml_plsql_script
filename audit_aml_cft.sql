@@ -1287,5 +1287,123 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 3 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
+
+    -- =========================================================
+    -- SECTION 4 : MONITORING TRANSACTIONNEL
+    -- =========================================================
+    p_section('SECTION 4 : MONITORING TRANSACTIONNEL');
+
+    DBMS_OUTPUT.PUT_LINE('  Parametres d''analyse :');
+    p_kv('    Fenetre d''analyse', '90 jours glissants');
+    p_kv('    Seuil especes declarable (COBAC)', '5 000 000 FCFA');
+    p_kv('    Seuil surveillance renforcee virements', '10 000 000 FCFA');
+    DBMS_OUTPUT.PUT_LINE('');
+
+    SELECT COUNT(*) INTO v_count  FROM ACTB_HISTORY WHERE TRAN_DT >= SYSDATE - 90;
+    p_kv('Total transactions (90j)', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT CUST_AC_NO) INTO v_count2 FROM ACTB_HISTORY WHERE TRAN_DT >= SYSDATE - 90;
+    p_kv('Comptes actifs sur la periode', TO_CHAR(v_count2));
+    SELECT NVL(SUM(LCY_AMOUNT), 0) INTO v_total FROM ACTB_HISTORY
+    WHERE TRAN_DT >= SYSDATE - 90 AND DRCR_IND = 'C';
+    p_kv('Volume total credits (90j) FCFA', TO_CHAR(v_total, 'FM999G999G999G999G990'));
+
+
+    -- ---------------------------------------------------------
+    -- TEST AML-401 : Transactions en especes au-dessus du seuil legal
+    -- ---------------------------------------------------------
+    p_test('AML-401', 'Transactions en especes >= 5 000 000 FCFA (seuil declarable COBAC)');
+
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
+    WHERE TRAN_DT >= SYSDATE - 90
+      AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+      AND LCY_AMOUNT >= 5000000;
+    p_kv('Nb operations especes >= 5M FCFA (90j)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(LCY_AMOUNT), 0) INTO v_total FROM ACTB_HISTORY
+    WHERE TRAN_DT >= SYSDATE - 90
+      AND TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+      AND LCY_AMOUNT >= 5000000;
+    p_kv('Volume especes >= 5M FCFA', TO_CHAR(v_total, 'FM999G999G999G999G990') || ' FCFA');
+
+    SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count2
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+      AND h.LCY_AMOUNT >= 5000000;
+    p_kv('Clients distincts concernes', TO_CHAR(v_count2));
+
+    DBMS_OUTPUT.PUT_LINE('  Repartition credit / debit :');
+    FOR r IN (
+        SELECT h.DRCR_IND,
+               COUNT(*)                 nb,
+               NVL(SUM(h.LCY_AMOUNT),0) vol
+        FROM ACTB_HISTORY h
+        WHERE h.TRAN_DT >= SYSDATE - 90
+          AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+          AND h.LCY_AMOUNT >= 5000000
+        GROUP BY h.DRCR_IND
+        ORDER BY h.DRCR_IND
+    ) LOOP
+        p_kv('    ' || CASE r.DRCR_IND WHEN 'C' THEN 'Credit'
+                                        WHEN 'D' THEN 'Debit'
+                                        ELSE NVL(r.DRCR_IND,'?') END,
+             TO_CHAR(r.nb) || ' ops  —  '
+             || TO_CHAR(r.vol, 'FM999G999G999G999G990') || ' FCFA');
+    END LOOP;
+
+    IF v_count > 0 THEN
+        p_finding('CRITIQUE', v_count || ' operations especes depassent le seuil declarable COBAC.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 20 operations especes par montant (90j) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',4,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28)    || '|' || RPAD(' COMPTE',14)    || '|'
+            || RPAD(' S/D',4)            || '|' || RPAD(' MONTANT FCFA',18) || '|'
+            || RPAD(' DATE',12)          || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',4,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1,
+                       h.CUST_AC_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRAN_DT
+                FROM ACTB_HISTORY h
+                JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
+                WHERE h.TRAN_DT >= SYSDATE - 90
+                  AND h.TRN_CODE IN ('CASH','CASD','CAWT','CADT','CDEP','CWIT','CSHD','CSHC','CTLR')
+                  AND h.LCY_AMOUNT >= 5000000
+                ORDER BY h.LCY_AMOUNT DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                               || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)            || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUST_AC_NO,1,12),''), 14)               || '|'
+                || RPAD(' ' || NVL(r.DRCR_IND,''), 4)                               || '|'
+                || LPAD(NVL(TO_CHAR(r.LCY_AMOUNT,'FM999G999G999G990'),'0'), 17)     || ' |'
+                || RPAD(' ' || NVL(TO_CHAR(r.TRAN_DT,'DD/MM/YYYY'),'N/A'), 12)      || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',4,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',12,'-') || '+');
+    END IF;
+
+
+    -- =========================================================
+    -- FIN SECTION 4 (en cours)
+    -- =========================================================
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 4 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+
 END;
 /

@@ -1567,40 +1567,61 @@ BEGIN
     p_test('AML-404', 'Virements internationaux impliquant des pays a risque eleve (liste GAFI/COBAC)');
 
     -- Pays liste noire GAFI + liste grise elevee (codes ISO-2)
+    -- ACTB_HISTORY n'a pas de colonne pays ; on joint STTM_CUSTOMER
+    -- via le compte (c = titulaire) et via RELATED_CUSTOMER (rc = contrepartie).
     SELECT COUNT(*) INTO v_count
     FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.AC_NO
+    JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO  = a.CUST_NO
+    LEFT JOIN STTM_CUSTOMER rc ON rc.CUSTOMER_NO = h.RELATED_CUSTOMER
     WHERE h.TRN_DT >= SYSDATE - 90
       AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
-      AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
-           OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
+      AND (   c.COUNTRY  IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+           OR rc.COUNTRY IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
     p_kv('Transactions vers/depuis pays a risque (90j)', TO_CHAR(v_count));
 
     SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
     FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.AC_NO
+    JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO  = a.CUST_NO
+    LEFT JOIN STTM_CUSTOMER rc ON rc.CUSTOMER_NO = h.RELATED_CUSTOMER
     WHERE h.TRN_DT >= SYSDATE - 90
       AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
-      AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
-           OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
+      AND (   c.COUNTRY  IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+           OR rc.COUNTRY IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'));
     p_kv('Volume total (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
 
     DBMS_OUTPUT.PUT_LINE('  Repartition par pays (top 10) :');
     FOR r IN (
         SELECT * FROM (
-            SELECT NVL(h.CTRY_CODE, h.RELATED_CTRY_CODE) pays,
+            SELECT CASE
+                     WHEN c.COUNTRY IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                        'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+                          THEN c.COUNTRY
+                     ELSE rc.COUNTRY
+                   END pays,
                    COUNT(*)              nb,
                    NVL(SUM(h.LCY_AMOUNT),0) vol
             FROM ACTB_HISTORY h
+            JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.AC_NO
+            JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO  = a.CUST_NO
+            LEFT JOIN STTM_CUSTOMER rc ON rc.CUSTOMER_NO = h.RELATED_CUSTOMER
             WHERE h.TRN_DT >= SYSDATE - 90
               AND h.TRN_CODE IN ('FTRN','SWIFT','TT','RTGS','WIRE','FTTF','FTTR','TTIN','TTOT','IBFT')
-              AND (   h.CTRY_CODE         IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
-                   OR h.RELATED_CTRY_CODE IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
-                                              'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'))
-            GROUP BY NVL(h.CTRY_CODE, h.RELATED_CTRY_CODE)
+              AND (   c.COUNTRY  IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+                   OR rc.COUNTRY IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                      'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS'))
+            GROUP BY CASE
+                       WHEN c.COUNTRY IN ('IR','KP','SY','YE','LY','SO','SD','MM','AF','IQ',
+                                          'VE','ZW','CU','HT','LA','BI','ET','GN','CF','SS')
+                            THEN c.COUNTRY
+                       ELSE rc.COUNTRY
+                     END
             ORDER BY nb DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
@@ -1892,75 +1913,105 @@ BEGIN
     -- ---------------------------------------------------------
     p_test('AML-409', 'Alertes STR (Suspicious Transaction Report) non cloturees dans les delais COBAC');
 
-    -- Alertes ouvertes depassant le delai reglementaire de 72h
-    SELECT COUNT(*) INTO v_count2 FROM AAML_SIR_DETAILS
-    WHERE SIR_STATUS NOT IN ('CLOSED','FILED','REJECTED')
-      AND SIR_DATE < SYSDATE - 3;
-    p_kv('Alertes STR ouvertes > 72h (delai COBAC)', TO_CHAR(v_count2));
+    -- La table AAML_SIR_DETAILS (module AML Flexcube) peut ne pas exister.
+    -- On utilise du SQL dynamique pour eviter une erreur de compilation.
+    DECLARE
+        v_tbl_exists NUMBER := 0;
+        TYPE t_rc IS REF CURSOR;
+        c_rc     t_rc;
+        v_statut  VARCHAR2(200);
+        v_tranche VARCHAR2(200);
+        v_nb      NUMBER;
+    BEGIN
+        SELECT COUNT(*) INTO v_tbl_exists
+        FROM ALL_OBJECTS
+        WHERE OBJECT_NAME = 'AAML_SIR_DETAILS'
+          AND OBJECT_TYPE IN ('TABLE','VIEW')
+          AND ROWNUM = 1;
 
-    -- Alertes ouvertes depuis plus de 30 jours
-    SELECT COUNT(*) INTO v_count FROM AAML_SIR_DETAILS
-    WHERE SIR_STATUS NOT IN ('CLOSED','FILED','REJECTED')
-      AND SIR_DATE < SYSDATE - 30;
-    p_kv('Alertes STR ouvertes > 30 jours', TO_CHAR(v_count));
+        IF v_tbl_exists = 0 THEN
+            DBMS_OUTPUT.PUT_LINE('  [INFO] Table AAML_SIR_DETAILS absente du schema — test ignore.');
+            DBMS_OUTPUT.PUT_LINE('  [INFO] Ce test necessite le module AML de Flexcube (AAML).');
+        ELSE
+            -- Alertes ouvertes depassant le delai reglementaire de 72h
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM AAML_SIR_DETAILS'
+                || ' WHERE SIR_STATUS NOT IN (''CLOSED'',''FILED'',''REJECTED'')'
+                || ' AND SIR_DATE < SYSDATE - 3'
+            INTO v_count2;
+            p_kv('Alertes STR ouvertes > 72h (delai COBAC)', TO_CHAR(v_count2));
 
-    -- Volume total alertes 12 derniers mois
-    SELECT COUNT(*) INTO v_total FROM AAML_SIR_DETAILS
-    WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12);
-    p_kv('Total alertes STR (12 derniers mois)', TO_CHAR(v_total));
+            -- Alertes ouvertes depuis plus de 30 jours
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM AAML_SIR_DETAILS'
+                || ' WHERE SIR_STATUS NOT IN (''CLOSED'',''FILED'',''REJECTED'')'
+                || ' AND SIR_DATE < SYSDATE - 30'
+            INTO v_count;
+            p_kv('Alertes STR ouvertes > 30 jours', TO_CHAR(v_count));
 
-    DBMS_OUTPUT.PUT_LINE('  Repartition par statut (12 derniers mois) :');
-    FOR r IN (
-        SELECT NVL(SIR_STATUS,'NULL') statut, COUNT(*) nb
-        FROM AAML_SIR_DETAILS
-        WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12)
-        GROUP BY SIR_STATUS
-        ORDER BY nb DESC
-    ) LOOP
-        p_kv('    ' || r.statut, TO_CHAR(r.nb));
-    END LOOP;
+            -- Volume total alertes 12 derniers mois
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM AAML_SIR_DETAILS'
+                || ' WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12)'
+            INTO v_total;
+            p_kv('Total alertes STR (12 derniers mois)', TO_CHAR(v_total));
 
-    -- Delai moyen de traitement des alertes cloturees
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  Delais de traitement alertes cloturees (12 mois) :');
-    FOR r IN (
-        SELECT * FROM (
-            SELECT CASE
-                     WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN 'Dans les 72h (reglementaire)'
-                     WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN '4 a 7 jours'
-                     WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN '8 a 30 jours'
-                     ELSE 'Plus de 30 jours'
-                   END tranche,
-                   COUNT(*) nb
-            FROM AAML_SIR_DETAILS
-            WHERE SIR_STATUS IN ('CLOSED','FILED')
-              AND SIR_DATE  >= ADD_MONTHS(SYSDATE,-12)
-              AND CLOSE_DATE IS NOT NULL
-            GROUP BY
-                CASE
-                  WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN 'Dans les 72h (reglementaire)'
-                  WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN '4 a 7 jours'
-                  WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN '8 a 30 jours'
-                  ELSE 'Plus de 30 jours'
-                END
-        )
-        ORDER BY
-            CASE tranche
-              WHEN 'Dans les 72h (reglementaire)' THEN 1
-              WHEN '4 a 7 jours'                  THEN 2
-              WHEN '8 a 30 jours'                 THEN 3
-              ELSE 4
-            END
-    ) LOOP
-        p_kv('    ' || r.tranche, TO_CHAR(r.nb));
-    END LOOP;
+            -- Repartition par statut
+            DBMS_OUTPUT.PUT_LINE('  Repartition par statut (12 derniers mois) :');
+            OPEN c_rc FOR
+                'SELECT NVL(SIR_STATUS,''NULL'') statut, COUNT(*) nb'
+                || ' FROM AAML_SIR_DETAILS'
+                || ' WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12)'
+                || ' GROUP BY SIR_STATUS'
+                || ' ORDER BY COUNT(*) DESC';
+            LOOP
+                FETCH c_rc INTO v_statut, v_nb;
+                EXIT WHEN c_rc%NOTFOUND;
+                p_kv('    ' || v_statut, TO_CHAR(v_nb));
+            END LOOP;
+            CLOSE c_rc;
 
-    IF v_count2 > 0 THEN
-        p_finding('CRITIQUE', v_count2 || ' alertes STR depassent le delai reglementaire COBAC de 72h.');
-    END IF;
-    IF v_count > 0 THEN
-        p_finding('CRITIQUE', v_count || ' alertes STR sont ouvertes depuis plus de 30 jours sans resolution.');
-    END IF;
+            -- Delai moyen de traitement des alertes cloturees
+            DBMS_OUTPUT.PUT_LINE('');
+            DBMS_OUTPUT.PUT_LINE('  Delais de traitement alertes cloturees (12 mois) :');
+            OPEN c_rc FOR
+                'SELECT tranche, nb FROM ('
+                || '  SELECT CASE'
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN ''Dans les 72h (reglementaire)'''
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN ''4 a 7 jours'''
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN ''8 a 30 jours'''
+                || '    ELSE ''Plus de 30 jours'''
+                || '  END tranche, COUNT(*) nb'
+                || '  FROM AAML_SIR_DETAILS'
+                || '  WHERE SIR_STATUS IN (''CLOSED'',''FILED'')'
+                || '    AND SIR_DATE  >= ADD_MONTHS(SYSDATE,-12)'
+                || '    AND CLOSE_DATE IS NOT NULL'
+                || '  GROUP BY CASE'
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN ''Dans les 72h (reglementaire)'''
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN ''4 a 7 jours'''
+                || '    WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN ''8 a 30 jours'''
+                || '    ELSE ''Plus de 30 jours'''
+                || '  END'
+                || ') ORDER BY CASE tranche'
+                || '  WHEN ''Dans les 72h (reglementaire)'' THEN 1'
+                || '  WHEN ''4 a 7 jours''                  THEN 2'
+                || '  WHEN ''8 a 30 jours''                 THEN 3'
+                || '  ELSE 4 END';
+            LOOP
+                FETCH c_rc INTO v_tranche, v_nb;
+                EXIT WHEN c_rc%NOTFOUND;
+                p_kv('    ' || v_tranche, TO_CHAR(v_nb));
+            END LOOP;
+            CLOSE c_rc;
+
+            IF v_count2 > 0 THEN
+                p_finding('CRITIQUE', v_count2 || ' alertes STR depassent le delai reglementaire COBAC de 72h.');
+            END IF;
+            IF v_count > 0 THEN
+                p_finding('CRITIQUE', v_count || ' alertes STR sont ouvertes depuis plus de 30 jours sans resolution.');
+            END IF;
+        END IF;
+    END;
 
 
     -- ---------------------------------------------------------

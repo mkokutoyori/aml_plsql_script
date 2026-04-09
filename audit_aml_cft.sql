@@ -531,5 +531,369 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 1 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
+
+    -- =========================================================
+    -- SECTION 2 : PEP & CLIENTS HAUT RISQUE (EDD)
+    -- =========================================================
+    p_section('SECTION 2 : PEP & CLIENTS HAUT RISQUE (Enhanced Due Diligence)');
+
+    -- ---------------------------------------------------------
+    -- TEST AML-201 : Inventaire des PEP
+    -- ---------------------------------------------------------
+    p_test('AML-201', 'Inventaire des Personnes Politiquement Exposées (PEP)');
+
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL WHERE PEP = 'Y';
+    SELECT COUNT(*) INTO v_total FROM STTM_KYC_RETAIL;
+    p_pct('Total PEP déclarés', v_count, v_total);
+
+    -- PEP avec comptes actifs
+    SELECT COUNT(*) INTO v_count2 FROM STTM_KYC_RETAIL kr
+    JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = kr.KYC_REF_NO
+    WHERE kr.PEP = 'Y'
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  PEP avec comptes actifs', TO_CHAR(v_count2));
+
+    IF v_count2 > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Liste des PEP avec comptes actifs (tri par solde) :');
+
+        -- En-tête spécifique PEP
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 8, '-')  || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+' || RPAD('-', 12, '-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#', 4) || '|'
+            || RPAD(' CIF', 13)         || '|' || RPAD(' NOM CLIENT', 28)       || '|'
+            || RPAD(' CAT', 8)          || '|' || RPAD(' NATIONALITE', 14)      || '|'
+            || RPAD(' CPT.A', 7)        || '|' || RPAD(' SOLDE TOTAL', 18)      || '|'
+            || RPAD(' DERN.TXN', 12)    || '|' || RPAD(' PEP_REMARKS', 12)      || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 8, '-')  || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+' || RPAD('-', 12, '-') || '+');
+
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                       kr.NATIONALITY, kr.PEP_REMARKS,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn
+                FROM STTM_KYC_RETAIL kr
+                JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = kr.KYC_REF_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE kr.PEP = 'Y'
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 25
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+                || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 26), ''), 28) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_CATEGORY, 1, 6), ''), 8) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.NATIONALITY, 1, 12), ''), 14) || '|'
+                || LPAD(NVL(TO_CHAR(r.nb_cpt), '0'), 5) || '  |'
+                || LPAD(NVL(TO_CHAR(r.solde_total, 'FM999G999G999G990'), '0'), 17) || ' |'
+                || RPAD(' ' || CASE WHEN r.last_txn = DATE '1900-01-01' THEN 'N/A'
+                                    ELSE TO_CHAR(r.last_txn, 'DD/MM/YYYY') END, 12) || '|'
+                || RPAD(' ' || CASE WHEN r.PEP_REMARKS IS NOT NULL AND r.PEP_REMARKS != ' '
+                                    THEN 'OUI' ELSE 'NON' END, 12) || '|');
+        END LOOP;
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 28, '-') || '+'
+            || RPAD('-', 8, '-')  || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+' || RPAD('-', 12, '-') || '+');
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-202 : PEP sans documentation (PEP_REMARKS)
+    -- ---------------------------------------------------------
+    p_test('AML-202', 'PEP sans documentation justificative (PEP_REMARKS vide)');
+
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL
+    WHERE PEP = 'Y' AND (PEP_REMARKS IS NULL OR PEP_REMARKS = ' ');
+    p_kv('PEP sans PEP_REMARKS', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', v_count || ' PEP n''ont aucune remarque documentée.');
+        DBMS_OUTPUT.PUT_LINE('');
+        p_tbl_header;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn, ac.first_open
+                FROM STTM_KYC_RETAIL kr
+                JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = kr.KYC_REF_NO
+                LEFT JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn,
+                           MIN(AC_OPEN_DATE) first_open
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE kr.PEP = 'Y' AND (kr.PEP_REMARKS IS NULL OR kr.PEP_REMARKS = ' ')
+                ORDER BY NVL(ac.solde_total, 0) DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+                      r.CUSTOMER_CATEGORY, NVL(r.nb_cpt, 0), NVL(r.solde_total, 0),
+                      CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
+                      r.first_open);
+        END LOOP;
+        p_tbl_line;
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-203 : Clients Haut Risque (Level3) avec comptes actifs
+    -- ---------------------------------------------------------
+    p_test('AML-203', 'Clients classés Haut Risque (Level3) avec comptes actifs');
+
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_MASTER WHERE RISK_LEVEL = 'Level3';
+    p_kv('Total clients Level3', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM STTM_KYC_MASTER m
+    JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = m.KYC_REF_NO
+    WHERE m.RISK_LEVEL = 'Level3'
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  Dont avec comptes actifs', TO_CHAR(v_count2));
+
+    -- Répartition par type de client
+    DBMS_OUTPUT.PUT_LINE('  Répartition Level3 par type KYC :');
+    FOR r IN (
+        SELECT m.KYC_CUST_TYPE, COUNT(*) nb
+        FROM STTM_KYC_MASTER m WHERE m.RISK_LEVEL = 'Level3'
+        GROUP BY m.KYC_CUST_TYPE ORDER BY nb DESC
+    ) LOOP
+        p_kv('    KYC_CUST_TYPE = ' || r.KYC_CUST_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+
+    IF v_count2 > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 20 clients Level3 avec comptes actifs (par solde) :');
+        p_tbl_header;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn, ac.first_open
+                FROM STTM_KYC_MASTER m
+                JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = m.KYC_REF_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn,
+                           MIN(AC_OPEN_DATE) first_open
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE m.RISK_LEVEL = 'Level3'
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+                      r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
+                      CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
+                      r.first_open);
+        END LOOP;
+        p_tbl_line;
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-204 : Non-résidents avec comptes actifs
+    -- ---------------------------------------------------------
+    p_test('AML-204', 'Clients non-résidents avec comptes actifs');
+
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL WHERE RESIDENT = 'N';
+    p_kv('Total non-résidents (KYC Retail)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL WHERE RESIDENT_STATUS = 'N';
+    p_kv('Total non-résidents (CUST_PERSONAL)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM STTM_KYC_RETAIL kr
+    JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = kr.KYC_REF_NO
+    WHERE kr.RESIDENT = 'N'
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  Non-résidents avec comptes actifs', TO_CHAR(v_count2));
+
+    -- Nationalités des non-résidents
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  Top 10 nationalités non-résidents (KYC) :');
+    FOR r IN (
+        SELECT NATIONALITY, nb FROM (
+            SELECT kr.NATIONALITY, COUNT(*) nb FROM STTM_KYC_RETAIL kr
+            WHERE kr.RESIDENT = 'N' AND kr.NATIONALITY IS NOT NULL AND kr.NATIONALITY != ' '
+            GROUP BY kr.NATIONALITY ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('    ' || r.NATIONALITY, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- Top non-résidents par solde
+    IF v_count2 > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 non-résidents avec comptes actifs (par solde) :');
+        p_tbl_header;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE, c.CUSTOMER_CATEGORY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn, ac.first_open
+                FROM STTM_KYC_RETAIL kr
+                JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = kr.KYC_REF_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn,
+                           MIN(AC_OPEN_DATE) first_open
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE kr.RESIDENT = 'N'
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_tbl_row(ROWNUM, r.CUSTOMER_NO, r.CUSTOMER_NAME1, r.CUSTOMER_TYPE,
+                      r.CUSTOMER_CATEGORY, r.nb_cpt, r.solde_total,
+                      CASE WHEN r.last_txn = DATE '1900-01-01' THEN NULL ELSE r.last_txn END,
+                      r.first_open);
+        END LOOP;
+        p_tbl_line;
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-205 : Procuration (Power of Attorney) — risque de prête-nom
+    -- ---------------------------------------------------------
+    p_test('AML-205', 'Comptes avec procuration (Power of Attorney) — risque prête-nom');
+
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL WHERE PA_GIVEN = 'Y';
+    p_kv('PA_GIVEN = Y (KYC Retail)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL WHERE PA_ISSUED = 'Y';
+    p_kv('PA_ISSUED = Y (CUST_PERSONAL)', TO_CHAR(v_count));
+
+    -- Avec comptes actifs
+    SELECT COUNT(*) INTO v_count2 FROM STTM_CUST_PERSONAL p
+    WHERE p.PA_ISSUED = 'Y'
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_NO = p.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    p_kv('  PA_ISSUED avec comptes actifs', TO_CHAR(v_count2));
+
+    IF v_count2 > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        -- Tableau spécifique avec nom du mandataire
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 24, '-') || '+'
+            || RPAD('-', 24, '-') || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#', 4) || '|'
+            || RPAD(' CIF', 13)          || '|' || RPAD(' TITULAIRE', 24)     || '|'
+            || RPAD(' MANDATAIRE (PA)', 24) || '|' || RPAD(' NATIONALITE', 14) || '|'
+            || RPAD(' CPT.A', 7)         || '|' || RPAD(' SOLDE TOTAL', 18)   || '|'
+            || RPAD(' DERN.TXN', 12)     || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 24, '-') || '+'
+            || RPAD('-', 24, '-') || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+
+        FOR r IN (
+            SELECT * FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                       p.PA_HOLDER_NAME, p.PA_HOLDER_NATIONALTY,
+                       ac.nb_cpt, ac.solde_total, ac.last_txn
+                FROM STTM_CUST_PERSONAL p
+                JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = p.CUSTOMER_NO
+                JOIN (
+                    SELECT CUST_NO, COUNT(*) nb_cpt, SUM(ACY_CURR_BALANCE) solde_total,
+                           GREATEST(MAX(NVL(DATE_LAST_CR_ACTIVITY, DATE '1900-01-01')),
+                                    MAX(NVL(DATE_LAST_DR_ACTIVITY, DATE '1900-01-01'))) last_txn
+                    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' GROUP BY CUST_NO
+                ) ac ON ac.CUST_NO = c.CUSTOMER_NO
+                WHERE p.PA_ISSUED = 'Y'
+                ORDER BY ac.solde_total DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(ROWNUM), 3) || ' |'
+                || RPAD(' ' || NVL(r.CUSTOMER_NO, ''), 13) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1, 1, 22), ''), 24) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.PA_HOLDER_NAME, 1, 22), 'N/A'), 24) || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.PA_HOLDER_NATIONALTY, 1, 12), ''), 14) || '|'
+                || LPAD(NVL(TO_CHAR(r.nb_cpt), '0'), 5) || '  |'
+                || LPAD(NVL(TO_CHAR(r.solde_total, 'FM999G999G999G990'), '0'), 17) || ' |'
+                || RPAD(' ' || CASE WHEN r.last_txn = DATE '1900-01-01' THEN 'N/A'
+                                    ELSE TO_CHAR(r.last_txn, 'DD/MM/YYYY') END, 12) || '|');
+        END LOOP;
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 4, '-') || '+'
+            || RPAD('-', 13, '-') || '+' || RPAD('-', 24, '-') || '+'
+            || RPAD('-', 24, '-') || '+' || RPAD('-', 14, '-') || '+'
+            || RPAD('-', 7, '-')  || '+' || RPAD('-', 18, '-') || '+'
+            || RPAD('-', 12, '-') || '+');
+    END IF;
+
+    -- ---------------------------------------------------------
+    -- TEST AML-206 : Catégories client à risque élevé
+    -- ---------------------------------------------------------
+    p_test('AML-206', 'Catégories clients à surveillance renforcée');
+
+    DBMS_OUTPUT.PUT_LINE('  Catégories sensibles identifiées dans le référentiel :');
+    DBMS_OUTPUT.PUT_LINE('');
+
+    DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 18, '-') || '+'
+        || RPAD('-', 50, '-') || '+' || RPAD('-', 10, '-') || '+'
+        || RPAD('-', 14, '-') || '+');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' CODE', 18) || '|'
+        || RPAD(' DESCRIPTION', 50) || '|'
+        || RPAD(' NB CLIENTS', 10) || '|'
+        || RPAD(' AVEC CPT ACT', 14) || '|');
+    DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 18, '-') || '+'
+        || RPAD('-', 50, '-') || '+' || RPAD('-', 10, '-') || '+'
+        || RPAD('-', 14, '-') || '+');
+
+    FOR r IN (
+        SELECT cat.CUST_CAT, cat.CUST_CAT_DESC,
+               NVL(cnt.nb, 0) nb_clients,
+               NVL(cnt.nb_actif, 0) nb_actif
+        FROM STTM_CUSTOMER_CAT cat
+        LEFT JOIN (
+            SELECT c.CUSTOMER_CATEGORY,
+                   COUNT(*) nb,
+                   COUNT(CASE WHEN EXISTS (
+                       SELECT 1 FROM STTM_CUST_ACCOUNT a
+                       WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+                   ) THEN 1 END) nb_actif
+            FROM STTM_CUSTOMER c
+            GROUP BY c.CUSTOMER_CATEGORY
+        ) cnt ON cnt.CUSTOMER_CATEGORY = cat.CUST_CAT
+        WHERE cat.CUST_CAT IN ('PEP/FEPS', 'BDC', 'FOREIGN', 'NRA1', 'NRA2',
+                                'WALKIN', 'GATEKEEPER', 'WATCH CUST', 'GAMING',
+                                'ECOMMERCE', 'CRYPTRADE', 'HIGHVALUE',
+                                'IMTO', 'FTZ', 'UNKNOWN')
+        ORDER BY NVL(cnt.nb, 0) DESC
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' ' || r.CUST_CAT, 18) || '|'
+            || RPAD(' ' || NVL(SUBSTR(r.CUST_CAT_DESC, 1, 48), ''), 50) || '|'
+            || LPAD(TO_CHAR(r.nb_clients), 9) || ' |'
+            || LPAD(TO_CHAR(r.nb_actif), 13) || ' |');
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-', 18, '-') || '+'
+        || RPAD('-', 50, '-') || '+' || RPAD('-', 10, '-') || '+'
+        || RPAD('-', 14, '-') || '+');
+
+
+    -- =========================================================
+    -- FIN SECTION 2
+    -- =========================================================
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('>>> FIN SECTION 2 — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+
 END;
 /

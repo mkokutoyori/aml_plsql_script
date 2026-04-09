@@ -1963,8 +1963,94 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-410 : Clients PEP et haut risque avec flux importants
+    -- ---------------------------------------------------------
+    p_test('AML-410', 'Clients PEP et haut risque (Level3) : flux transactionnels recents >= 1M FCFA');
+
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO  = h.CUST_AC_NO
+    JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
+    JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
+    WHERE kr.PEP = 'Y'
+      AND h.TRAN_DT    >= SYSDATE - 90
+      AND h.LCY_AMOUNT >= 1000000;
+    p_kv('Transactions PEP >= 1M FCFA (90j)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO  = h.CUST_AC_NO
+    JOIN STTM_CUSTOMER     c ON c.CUSTOMER_NO = a.CUST_NO
+    JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
+    WHERE kr.PEP = 'Y'
+      AND h.TRAN_DT    >= SYSDATE - 90
+      AND h.LCY_AMOUNT >= 1000000;
+    p_kv('Volume PEP >= 1M FCFA (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
+
+    SELECT COUNT(*) INTO v_count2
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.CUST_AC_NO
+    JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
+    JOIN STTM_KYC_MASTER   km ON km.KYC_REF_NO = c.KYC_REF_NO
+    WHERE km.RISK_LEVEL = 'Level3'
+      AND h.TRAN_DT     >= SYSDATE - 90
+      AND h.LCY_AMOUNT  >= 5000000;
+    p_kv('Transactions Level3 >= 5M FCFA (90j)', TO_CHAR(v_count2));
+
+    IF v_count + v_count2 > 0 THEN
+        p_finding('FOCUS', 'Clients PEP / haut risque actifs sur transactions importantes.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 PEP et Level3 par volume transactionnel (90j) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28)   || '|' || RPAD(' PROFIL',8)       || '|'
+            || RPAD(' NB TXN',6)        || '|' || RPAD(' VOL.90J FCFA',18) || '|'
+            || RPAD(' RISK_LEVEL',13)   || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1,
+                       CASE WHEN NVL(kr.PEP,'N') = 'Y' THEN 'PEP' ELSE '' END profil_pep,
+                       NVL(km.RISK_LEVEL,'N/A') risk_level,
+                       COUNT(*)          nb_txn,
+                       SUM(h.LCY_AMOUNT) vol_total
+                FROM ACTB_HISTORY h
+                JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
+                LEFT JOIN STTM_KYC_RETAIL  kr ON kr.KYC_REF_NO = c.KYC_REF_NO
+                LEFT JOIN STTM_KYC_MASTER  km ON km.KYC_REF_NO = c.KYC_REF_NO
+                WHERE h.TRAN_DT    >= SYSDATE - 90
+                  AND h.LCY_AMOUNT >= 1000000
+                  AND (NVL(kr.PEP,'N') = 'Y' OR NVL(km.RISK_LEVEL,'N/A') = 'Level3')
+                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, kr.PEP, km.RISK_LEVEL
+                ORDER BY SUM(h.LCY_AMOUNT) DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                             || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)          || '|'
+                || RPAD(' ' || NVL(r.profil_pep,''), 8)                            || '|'
+                || LPAD(TO_CHAR(r.nb_txn), 5)                                      || ' |'
+                || LPAD(NVL(TO_CHAR(r.vol_total,'FM999G999G999G990'),'0'), 17)     || ' |'
+                || RPAD(' ' || NVL(r.risk_level,'N/A'), 13)                        || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',6,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',13,'-') || '+');
+    END IF;
+
+
     -- =========================================================
-    -- FIN SECTION 4 (en cours)
+    -- FIN SECTION 4
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);

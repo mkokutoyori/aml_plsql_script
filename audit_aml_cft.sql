@@ -1887,6 +1887,82 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-409 : Alertes AML / STR non cloturees dans les delais
+    -- ---------------------------------------------------------
+    p_test('AML-409', 'Alertes STR (Suspicious Transaction Report) non cloturees dans les delais COBAC');
+
+    -- Alertes ouvertes depassant le delai reglementaire de 72h
+    SELECT COUNT(*) INTO v_count2 FROM AAML_SIR_DETAILS
+    WHERE SIR_STATUS NOT IN ('CLOSED','FILED','REJECTED')
+      AND SIR_DATE < SYSDATE - 3;
+    p_kv('Alertes STR ouvertes > 72h (delai COBAC)', TO_CHAR(v_count2));
+
+    -- Alertes ouvertes depuis plus de 30 jours
+    SELECT COUNT(*) INTO v_count FROM AAML_SIR_DETAILS
+    WHERE SIR_STATUS NOT IN ('CLOSED','FILED','REJECTED')
+      AND SIR_DATE < SYSDATE - 30;
+    p_kv('Alertes STR ouvertes > 30 jours', TO_CHAR(v_count));
+
+    -- Volume total alertes 12 derniers mois
+    SELECT COUNT(*) INTO v_total FROM AAML_SIR_DETAILS
+    WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12);
+    p_kv('Total alertes STR (12 derniers mois)', TO_CHAR(v_total));
+
+    DBMS_OUTPUT.PUT_LINE('  Repartition par statut (12 derniers mois) :');
+    FOR r IN (
+        SELECT NVL(SIR_STATUS,'NULL') statut, COUNT(*) nb
+        FROM AAML_SIR_DETAILS
+        WHERE SIR_DATE >= ADD_MONTHS(SYSDATE,-12)
+        GROUP BY SIR_STATUS
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('    ' || r.statut, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- Delai moyen de traitement des alertes cloturees
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  Delais de traitement alertes cloturees (12 mois) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT CASE
+                     WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN 'Dans les 72h (reglementaire)'
+                     WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN '4 a 7 jours'
+                     WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN '8 a 30 jours'
+                     ELSE 'Plus de 30 jours'
+                   END tranche,
+                   COUNT(*) nb
+            FROM AAML_SIR_DETAILS
+            WHERE SIR_STATUS IN ('CLOSED','FILED')
+              AND SIR_DATE  >= ADD_MONTHS(SYSDATE,-12)
+              AND CLOSE_DATE IS NOT NULL
+            GROUP BY
+                CASE
+                  WHEN (CLOSE_DATE - SIR_DATE) <= 3  THEN 'Dans les 72h (reglementaire)'
+                  WHEN (CLOSE_DATE - SIR_DATE) <= 7  THEN '4 a 7 jours'
+                  WHEN (CLOSE_DATE - SIR_DATE) <= 30 THEN '8 a 30 jours'
+                  ELSE 'Plus de 30 jours'
+                END
+        )
+        ORDER BY
+            CASE tranche
+              WHEN 'Dans les 72h (reglementaire)' THEN 1
+              WHEN '4 a 7 jours'                  THEN 2
+              WHEN '8 a 30 jours'                 THEN 3
+              ELSE 4
+            END
+    ) LOOP
+        p_kv('    ' || r.tranche, TO_CHAR(r.nb));
+    END LOOP;
+
+    IF v_count2 > 0 THEN
+        p_finding('CRITIQUE', v_count2 || ' alertes STR depassent le delai reglementaire COBAC de 72h.');
+    END IF;
+    IF v_count > 0 THEN
+        p_finding('CRITIQUE', v_count || ' alertes STR sont ouvertes depuis plus de 30 jours sans resolution.');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

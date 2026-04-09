@@ -9,6 +9,8 @@
 -- Résultats : comptage + échantillon des cas les plus critiques.
 -- ============================================================
 
+SET ECHO OFF
+SET DEFINE OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED;
 
 DECLARE

@@ -550,19 +550,19 @@ BEGIN
     FOR r IN (SELECT AUTH_STAT, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
         print_kv('  AUTH_STAT = ' || r.AUTH_STAT, TO_CHAR(r.nb));
     END LOOP;
-    FOR r IN (SELECT RECORD_STAT, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY RECORD_STAT ORDER BY nb DESC) LOOP
-        print_kv('  RECORD_STAT = ' || r.RECORD_STAT, TO_CHAR(r.nb));
+    FOR r IN (SELECT AC_GL_REC_STATUS, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY AC_GL_REC_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  AC_GL_REC_STATUS = ' || r.AC_GL_REC_STATUS, TO_CHAR(r.nb));
     END LOOP;
 
     -- *** ENRICHISSEMENT : Top devises ***
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Top 10 devises (CCY)]');
+    DBMS_OUTPUT.PUT_LINE('  [Top 10 devises (AC_GL_CCY)]');
     FOR r IN (
-        SELECT CCY, nb FROM (
-            SELECT CCY, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY CCY ORDER BY nb DESC
+        SELECT AC_GL_CCY, nb FROM (
+            SELECT AC_GL_CCY, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY AC_GL_CCY ORDER BY nb DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
-        print_kv('  CCY = ' || r.CCY, TO_CHAR(r.nb));
+        print_kv('  AC_GL_CCY = ' || r.AC_GL_CCY, TO_CHAR(r.nb));
     END LOOP;
 
     -- *** ENRICHISSEMENT : Top branches ***
@@ -576,21 +576,11 @@ BEGIN
         print_kv('  Agence : ' || r.BRANCH_CODE, TO_CHAR(r.nb));
     END LOOP;
 
-    -- *** ENRICHISSEMENT : Soldes STTB ***
+    -- *** ENRICHISSEMENT : Type classe GL ***
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Statistiques soldes STTB (ACY_CURR_BALANCE)]');
-    FOR r IN (
-        SELECT
-            ROUND(MIN(ACY_CURR_BALANCE),2) bal_min,
-            ROUND(MAX(ACY_CURR_BALANCE),2) bal_max,
-            ROUND(AVG(ACY_CURR_BALANCE),2) bal_avg,
-            ROUND(SUM(ACY_CURR_BALANCE),2) bal_sum
-        FROM STTB_ACCOUNT
-    ) LOOP
-        print_kv('  Solde MIN', TO_CHAR(r.bal_min));
-        print_kv('  Solde MAX', TO_CHAR(r.bal_max));
-        print_kv('  Solde MOYEN', TO_CHAR(r.bal_avg));
-        print_kv('  Solde TOTAL (SUM)', TO_CHAR(r.bal_sum));
+    DBMS_OUTPUT.PUT_LINE('  [Répartition GL_ACLASS_TYPE]');
+    FOR r IN (SELECT GL_ACLASS_TYPE, COUNT(*) nb FROM STTB_ACCOUNT GROUP BY GL_ACLASS_TYPE ORDER BY nb DESC) LOOP
+        print_kv('  GL_ACLASS_TYPE = ' || r.GL_ACLASS_TYPE, TO_CHAR(r.nb));
     END LOOP;
 
 

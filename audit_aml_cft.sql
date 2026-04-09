@@ -1477,6 +1477,90 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-403 : Comptes dormants soudainement reactives
+    -- ---------------------------------------------------------
+    p_test('AML-403', 'Comptes dormants (inactifs > 12 mois) redevenus actifs dans les 30 derniers jours');
+
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND (a.DATE_LAST_CR_ACTIVITY IS NULL OR a.DATE_LAST_CR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+      AND (a.DATE_LAST_DR_ACTIVITY IS NULL OR a.DATE_LAST_DR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+      AND EXISTS (
+          SELECT 1 FROM ACTB_HISTORY h
+          WHERE h.CUST_AC_NO = a.CUST_AC_NO
+            AND h.TRAN_DT   >= SYSDATE - 30
+      );
+    p_kv('Comptes dormants redevenus actifs (30j)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 30
+      AND h.CUST_AC_NO IN (
+          SELECT a.CUST_AC_NO FROM STTM_CUST_ACCOUNT a
+          WHERE a.RECORD_STAT = 'O'
+            AND (a.DATE_LAST_CR_ACTIVITY IS NULL OR a.DATE_LAST_CR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+            AND (a.DATE_LAST_DR_ACTIVITY IS NULL OR a.DATE_LAST_DR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+      );
+    p_kv('Volume transactions sur ces comptes (30j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
+
+    IF v_count > 0 THEN
+        p_finding('ELEVEE', v_count || ' comptes dormants ont repris de l''activite recemment.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 comptes dormants reactives (par volume 30j) :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',12,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',6,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28)    || '|' || RPAD(' COMPTE',14)        || '|'
+            || RPAD(' DERN.AVANT',12)    || '|' || RPAD(' VOL.30J FCFA',18)  || '|'
+            || RPAD(' NB TXN',6)         || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',12,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',6,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1, a.CUST_AC_NO,
+                       GREATEST(NVL(a.DATE_LAST_CR_ACTIVITY, DATE '1900-01-01'),
+                                NVL(a.DATE_LAST_DR_ACTIVITY, DATE '1900-01-01')) dern_avant,
+                       NVL(act.vol_30j, 0)  vol_30j,
+                       NVL(act.nb_txn,  0)  nb_txn
+                FROM STTM_CUST_ACCOUNT a
+                JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+                JOIN (
+                    SELECT h.CUST_AC_NO,
+                           SUM(h.LCY_AMOUNT) vol_30j,
+                           COUNT(*)          nb_txn
+                    FROM ACTB_HISTORY h
+                    WHERE h.TRAN_DT >= SYSDATE - 30
+                    GROUP BY h.CUST_AC_NO
+                ) act ON act.CUST_AC_NO = a.CUST_AC_NO
+                WHERE a.RECORD_STAT = 'O'
+                  AND (a.DATE_LAST_CR_ACTIVITY IS NULL OR a.DATE_LAST_CR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+                  AND (a.DATE_LAST_DR_ACTIVITY IS NULL OR a.DATE_LAST_DR_ACTIVITY < ADD_MONTHS(SYSDATE,-12))
+                ORDER BY vol_30j DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                             || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)          || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUST_AC_NO,1,12),''), 14)             || '|'
+                || RPAD(' ' || CASE WHEN r.dern_avant = DATE '1900-01-01' THEN 'JAMAIS'
+                                    ELSE TO_CHAR(r.dern_avant,'DD/MM/YYYY') END, 12) || '|'
+                || LPAD(NVL(TO_CHAR(r.vol_30j,'FM999G999G999G990'),'0'), 17)      || ' |'
+                || LPAD(TO_CHAR(r.nb_txn), 5)                                     || ' |');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',14,'-') || '+' || RPAD('-',12,'-') || '+'
+            || RPAD('-',18,'-') || '+' || RPAD('-',6,'-') || '+');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

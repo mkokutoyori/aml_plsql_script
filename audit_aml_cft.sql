@@ -1667,6 +1667,78 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-406 : Transactions a montants ronds repetes
+    -- ---------------------------------------------------------
+    p_test('AML-406', 'Transactions a montants ronds repetes (multiples exacts de 1 000 000 FCFA, >= 5 occurrences/client)');
+
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND h.LCY_AMOUNT >= 1000000
+      AND MOD(h.LCY_AMOUNT, 1000000) = 0;
+    p_kv('Total transactions montant rond >= 1M (90j)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count2 FROM (
+        SELECT a.CUST_NO
+        FROM ACTB_HISTORY h
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+        WHERE h.TRAN_DT >= SYSDATE - 90
+          AND h.LCY_AMOUNT >= 1000000
+          AND MOD(h.LCY_AMOUNT, 1000000) = 0
+        GROUP BY a.CUST_NO
+        HAVING COUNT(*) >= 5
+    );
+    p_kv('Clients avec >= 5 montants ronds (90j)', TO_CHAR(v_count2));
+
+    IF v_count2 > 0 THEN
+        p_finding('ELEVEE', v_count2 || ' clients presentent une frequence elevee de transactions a montants ronds.');
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  Top 15 clients par frequence de montants ronds :');
+
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',13,'-') || '+');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM CLIENT',28) || '|' || RPAD(' NB RONDS',8) || '|'
+            || RPAD(' TOTAL FCFA',18) || '|' || RPAD(' RISK_LEVEL',13) || '|');
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',13,'-') || '+');
+
+        v_row_num := 0;
+        FOR r IN (
+            SELECT * FROM (
+                SELECT a.CUST_NO, c.CUSTOMER_NAME1,
+                       COUNT(*)           nb_ronds,
+                       SUM(h.LCY_AMOUNT)  total_ronds,
+                       km.RISK_LEVEL
+                FROM ACTB_HISTORY h
+                JOIN STTM_CUST_ACCOUNT a  ON a.CUST_AC_NO  = h.CUST_AC_NO
+                JOIN STTM_CUSTOMER     c  ON c.CUSTOMER_NO = a.CUST_NO
+                LEFT JOIN STTM_KYC_MASTER km ON km.KYC_REF_NO = c.KYC_REF_NO
+                WHERE h.TRAN_DT >= SYSDATE - 90
+                  AND h.LCY_AMOUNT >= 1000000
+                  AND MOD(h.LCY_AMOUNT, 1000000) = 0
+                GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, km.RISK_LEVEL
+                HAVING COUNT(*) >= 5
+                ORDER BY COUNT(*) DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(TO_CHAR(v_row_num),3) || ' |'
+                || RPAD(' ' || NVL(r.CUST_NO,''), 13)                             || '|'
+                || RPAD(' ' || NVL(SUBSTR(r.CUSTOMER_NAME1,1,26),''), 28)          || '|'
+                || LPAD(TO_CHAR(r.nb_ronds), 7)                                    || ' |'
+                || LPAD(NVL(TO_CHAR(r.total_ronds,'FM999G999G999G990'),'0'), 17)   || ' |'
+                || RPAD(' ' || NVL(r.RISK_LEVEL,'N/A'), 13)                        || '|');
+        END LOOP;
+        DBMS_OUTPUT.PUT_LINE('  +' || RPAD('-',4,'-') || '+' || RPAD('-',13,'-') || '+'
+            || RPAD('-',28,'-') || '+' || RPAD('-',8,'-') || '+' || RPAD('-',18,'-') || '+'
+            || RPAD('-',13,'-') || '+');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

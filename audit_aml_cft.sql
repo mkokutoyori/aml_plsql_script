@@ -1614,6 +1614,59 @@ BEGIN
     END IF;
 
 
+    -- ---------------------------------------------------------
+    -- TEST AML-405 : Transactions hors heures ouvrables
+    -- ---------------------------------------------------------
+    p_test('AML-405', 'Transactions hors heures ouvrables (22h00-06h00) >= 500 000 FCFA');
+
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) < 6)
+      AND h.LCY_AMOUNT >= 500000;
+    p_kv('Transactions nocturnes >= 500K FCFA (90j)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(h.LCY_AMOUNT), 0) INTO v_total
+    FROM ACTB_HISTORY h
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) < 6)
+      AND h.LCY_AMOUNT >= 500000;
+    p_kv('Volume nocturne (90j)', TO_CHAR(v_total,'FM999G999G999G999G990') || ' FCFA');
+
+    DBMS_OUTPUT.PUT_LINE('  Repartition par tranche horaire :');
+    FOR r IN (
+        SELECT TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) heure,
+               COUNT(*)              nb,
+               NVL(SUM(h.LCY_AMOUNT),0) vol
+        FROM ACTB_HISTORY h
+        WHERE h.TRAN_DT >= SYSDATE - 90
+          AND (TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) >= 22
+               OR TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) < 6)
+          AND h.LCY_AMOUNT >= 500000
+        GROUP BY TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24'))
+        ORDER BY heure
+    ) LOOP
+        p_kv('    ' || LPAD(TO_CHAR(r.heure),2,'0') || 'h00',
+             TO_CHAR(r.nb) || ' ops  —  '
+             || TO_CHAR(r.vol,'FM999G999G999G990') || ' FCFA');
+    END LOOP;
+
+    SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count2
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.CUST_AC_NO
+    WHERE h.TRAN_DT >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(h.TRAN_DT,'HH24')) < 6)
+      AND h.LCY_AMOUNT >= 500000;
+    p_kv('Clients distincts concernes', TO_CHAR(v_count2));
+
+    IF v_count > 0 THEN
+        p_finding('MOYENNE', v_count || ' transactions significatives effectuees hors heures ouvrables.');
+    END IF;
+
+
     -- =========================================================
     -- FIN SECTION 4 (en cours)
     -- =========================================================

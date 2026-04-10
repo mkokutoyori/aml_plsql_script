@@ -601,8 +601,123 @@ BEGIN
     END IF;
 
     -- =========================================================
-    -- FIN PROVISOIRE
+    -- 7. COHERENCE KYC / RISQUE / INTEGRITE REFERENTIELLE
     -- =========================================================
+    print_section('7. COHERENCE KYC / RISQUE / INTEGRITE REFERENTIELLE');
+
+    -- 7.1 KYC_REF_NO dans STTM_CUSTOMER mais absent de KYC_MASTER
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.KYC_REF_NO IS NOT NULL AND TRIM(c.KYC_REF_NO) IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM STTM_KYC_MASTER m WHERE m.KYC_REF_NO = c.KYC_REF_NO
+      );
+    print_test('KYC_REF_NO orphelins (absent de MASTER)', v_count);
+
+    -- 7.2 KYC_MASTER non référencé par aucun client
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_MASTER m
+    WHERE NOT EXISTS (
+        SELECT 1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO = m.KYC_REF_NO
+    );
+    print_test('KYC_MASTER sans client associé', v_count);
+
+    -- 7.3 AML_REQUIRED=Y mais sans KYC
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.AML_REQUIRED = 'Y'
+      AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
+    print_test('AML_REQUIRED=Y mais sans KYC_REF_NO', v_count);
+
+    -- 7.4 KYC_DETAILS=V (vérifié) mais KYC_REF_NO absent
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.KYC_DETAILS = 'V'
+      AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
+    print_test('KYC_DETAILS=V mais sans KYC_REF_NO', v_count);
+
+    -- 7.5 KYC Review dépassée (Retail)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_RETAIL r
+    WHERE r.KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND r.KYC_NXT_REVIEW_DATE < SYSDATE;
+    print_test('KYC Retail : review date dépassée', v_count);
+
+    -- 7.6 KYC Review dépassée (Corporate)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_CORPORATE k
+    WHERE k.KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND k.KYC_NXT_REVIEW_DATE < SYSDATE;
+    print_test('KYC Corporate : review date dépassée', v_count);
+
+    -- 7.7 PEP=Y mais pas de PEP_REMARKS
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_RETAIL r
+    WHERE r.PEP = 'Y'
+      AND (r.PEP_REMARKS IS NULL OR TRIM(r.PEP_REMARKS) IS NULL);
+    print_test('PEP=Y mais PEP_REMARKS vide', v_count);
+
+    -- 7.8 Clients avec compte mais sans entrée STTM_CUSTOMER
+    SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE NOT EXISTS (
+        SELECT 1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO = a.CUST_NO
+    );
+    print_test('Comptes avec CUST_NO absent de CUSTOMER', v_count);
+
+    -- 7.9 Doublons : même P_NATIONAL_ID pour des clients différents
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT P_NATIONAL_ID FROM STTM_CUST_PERSONAL
+        WHERE P_NATIONAL_ID IS NOT NULL AND TRIM(P_NATIONAL_ID) IS NOT NULL
+        GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
+    );
+    print_test('P_NATIONAL_ID en doublon (nb IDs)', v_count);
+
+    -- 7.10 Doublons : même UNIQUE_ID_VALUE pour des clients différents
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT UNIQUE_ID_VALUE FROM STTM_CUSTOMER
+        WHERE UNIQUE_ID_VALUE IS NOT NULL AND TRIM(UNIQUE_ID_VALUE) IS NOT NULL
+        GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+    );
+    print_test('UNIQUE_ID_VALUE en doublon (nb IDs)', v_count);
+
+    -- 7.11 Client DECEASED=Y avec des comptes non bloqués
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.DECEASED = 'Y'
+      AND EXISTS (
+          SELECT 1 FROM STTM_CUST_ACCOUNT a
+          WHERE a.CUST_NO = c.CUSTOMER_NO
+            AND a.AC_STAT_BLOCK != 'Y'
+            AND a.AC_STAT_FROZEN != 'Y'
+      );
+    print_test('Client DECEASED avec comptes non bloqués', v_count);
+
+    -- 7.12 Comptes avec transactions mais client sans KYC
+    SELECT COUNT(DISTINCT h.AC_NO) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+    JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+    WHERE (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
+    print_test('Comptes actifs (txn) sans KYC client', v_count);
+
+    -- 7.13 Maker = Checker sur les dossiers KYC (ségrégation)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_MASTER
+    WHERE MAKER_ID IS NOT NULL AND CHECKER_ID IS NOT NULL
+      AND MAKER_ID = CHECKER_ID
+      AND MAKER_ID != 'MIGRATION';
+    print_test('KYC Maker=Checker (hors MIGRATION)', v_count);
+
+    -- =========================================================
+    -- FIN
+    -- =========================================================
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);
+    DBMS_OUTPUT.PUT_LINE('   TESTS AVEC ANOMALIES : ' || v_anomalies);
+    DBMS_OUTPUT.PUT_LINE('   FIN — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);

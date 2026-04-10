@@ -40,7 +40,8 @@ BEGIN
             SELECT 'ACTB_HISTORY',        8 FROM DUAL UNION ALL
             SELECT 'STTM_ACCOUNT_CLASS',  9 FROM DUAL UNION ALL
             SELECT 'STTM_CUSTOMER_CAT',  10 FROM DUAL UNION ALL
-            SELECT 'STTM_KYC_CORP_KEYPERSONS', 11 FROM DUAL
+            SELECT 'STTM_KYC_CORP_KEYPERSONS', 11 FROM DUAL UNION ALL
+            SELECT 'CSTM_FUNCTION_USERDEF_FIELDS', 12 FROM DUAL
         ) ORDER BY ord
     ) LOOP
         EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ' || t.table_name INTO v_count;
@@ -1399,6 +1400,390 @@ BEGIN
         GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
     );
     print_kv('  UNIQUE_ID_VALUE en doublon (nb IDs)', TO_CHAR(v_count));
+
+    -- =========================================================
+    -- 14. CSTM_FUNCTION_USERDEF_FIELDS — Champs personnalisés
+    -- =========================================================
+    print_section('14. CSTM_FUNCTION_USERDEF_FIELDS — Champs personnalisés (UDF)');
+
+    -- Volumétrie par FUNCTION_ID
+    DBMS_OUTPUT.PUT_LINE('  [Volumétrie par FUNCTION_ID]');
+    FOR r IN (
+        SELECT function_id, COUNT(*) nb
+        FROM cstm_function_userdef_fields
+        GROUP BY function_id
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ' || r.function_id, TO_CHAR(r.nb) || ' lignes');
+    END LOOP;
+
+    -- 14.1 GEDCOLLT — Collatéraux
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.1 GEDCOLLT — Collatéraux]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS collateral_id,
+                field_val_1 AS coll_address,
+                field_val_2 AS coll_state,
+                field_val_3 AS collateral_status,
+                field_val_4 AS collateral_value_mgr_est,
+                field_val_5 AS collateral_value_omv,
+                field_val_6 AS collateral_value_fsv,
+                field_val_7 AS perfection_status,
+                field_val_8 AS valuers,
+                field_val_9 AS insurer,
+                field_val_10 AS od_creation_type,
+                field_val_11 AS od_facility_type,
+                field_val_12 AS collateral_owner,
+                field_val_13 AS crms_ref_no,
+                field_val_14 AS charge_type,
+                field_val_15 AS documentation_status,
+                field_val_16 AS perfection_status_new,
+                field_val_17 AS revaluation_date,
+                field_val_18 AS valuation_date,
+                field_val_19 AS valuer_name
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'GEDCOLLT'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Collateral ID: ' || r.collateral_id || ' ---');
+        print_kv('    Adresse', r.coll_address);
+        print_kv('    État', r.coll_state);
+        print_kv('    Statut collatéral', r.collateral_status);
+        print_kv('    Valeur MGR Est.', r.collateral_value_mgr_est);
+        print_kv('    Valeur OMV', r.collateral_value_omv);
+        print_kv('    Valeur FSV', r.collateral_value_fsv);
+        print_kv('    Statut perfection', r.perfection_status);
+        print_kv('    Évaluateurs', r.valuers);
+        print_kv('    Assureur', r.insurer);
+        print_kv('    Type création OD', r.od_creation_type);
+        print_kv('    Type facilité OD', r.od_facility_type);
+        print_kv('    Propriétaire', r.collateral_owner);
+        print_kv('    Réf CRMS', r.crms_ref_no);
+        print_kv('    Type charge', r.charge_type);
+        print_kv('    Statut documentation', r.documentation_status);
+        print_kv('    Statut perfection (new)', r.perfection_status_new);
+        print_kv('    Date réévaluation', r.revaluation_date);
+        print_kv('    Date évaluation', r.valuation_date);
+        print_kv('    Nom évaluateur', r.valuer_name);
+    END LOOP;
+
+    -- 14.2 GEDFACLT — Facilités
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.2 GEDFACLT — Facilités]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS facility_id,
+                field_val_1 AS irr_value,
+                field_val_2 AS facility_collaterized
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'GEDFACLT'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Facility ID: ' || r.facility_id || ' ---');
+        print_kv('    Valeur IRR', r.irr_value);
+        print_kv('    Facilité collatéralisée', r.facility_collaterized);
+    END LOOP;
+
+    -- 14.3 GEDMLIAB — Engagements (Liabilities)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.3 GEDMLIAB — Engagements (Liabilities)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS liability_no,
+                field_val_1 AS or_rating,
+                field_val_2 AS customer_credit_rating
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'GEDMLIAB'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Liability No: ' || r.liability_no || ' ---');
+        print_kv('    OR Rating', r.or_rating);
+        print_kv('    Customer Credit Rating', r.customer_credit_rating);
+    END LOOP;
+
+    -- 14.4 GLDCHACC — Comptes GL (ownership)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.4 GLDCHACC — Comptes GL (ownership)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS gl_code,
+                field_val_1 AS gl_ownership
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'GLDCHACC'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- GL Code: ' || r.gl_code || ' ---');
+        print_kv('    GL Ownership', r.gl_ownership);
+    END LOOP;
+
+    -- 14.5 SMDROLDF — Rôles utilisateurs
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.5 SMDROLDF — Rôles utilisateurs]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                rec_key,
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS role_id,
+                field_val_1 AS privilege_acclass_list,
+                field_val_2 AS privilege_role
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'SMDROLDF'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Role ID: ' || r.role_id || ' (rec_key: ' || r.rec_key || ') ---');
+        print_kv('    Privilege AC Class List', r.privilege_acclass_list);
+        print_kv('    Privilege Role', r.privilege_role);
+    END LOOP;
+
+    -- 14.6 SMDUSRDF — Utilisateurs
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.6 SMDUSRDF — Utilisateurs]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                rec_key,
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS user_id,
+                field_val_1 AS email_address,
+                field_val_2 AS staff_id
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'SMDUSRDF'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- User ID: ' || r.user_id || ' (rec_key: ' || r.rec_key || ') ---');
+        print_kv('    Email', r.email_address);
+        print_kv('    Staff ID', r.staff_id);
+    END LOOP;
+
+    -- 14.7 STDACCLS — Classes de comptes (privilège)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.7 STDACCLS — Classes de comptes (privilège)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                rec_key,
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS account_class,
+                field_val_1 AS privilege
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDACCLS'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Account Class: ' || r.account_class || ' (rec_key: ' || r.rec_key || ') ---');
+        print_kv('    Privilège', r.privilege);
+    END LOOP;
+
+    -- 14.8 STDBRANC — Agences (téléphone)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.8 STDBRANC — Agences (téléphone)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS branch_code,
+                field_val_1 AS branch_phone_no
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDBRANC'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Branch Code: ' || r.branch_code || ' ---');
+        print_kv('    Téléphone agence', r.branch_phone_no);
+    END LOOP;
+
+    -- 14.9 STDCIF — Fiche client (UDF enrichis)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.9 STDCIF — Fiche client (UDF enrichis)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS customer_no,
+                field_val_1 AS profession,
+                field_val_2 AS religion,
+                field_val_3 AS income_band,
+                field_val_4 AS second_nationality,
+                field_val_5 AS wedding_anniversary,
+                field_val_6 AS tax_id_number,
+                field_val_7 AS id_expiry_date,
+                field_val_8 AS customer_old_name,
+                field_val_9 AS customer_risk_rating,
+                field_val_10 AS id_required,
+                field_val_11 AS id_type,
+                field_val_12 AS id_number,
+                field_val_13 AS issuing_authority,
+                field_val_14 AS issuing_authority_np,
+                field_val_15 AS issue_date,
+                field_val_16 AS expiry_date,
+                field_val_17 AS revalidation_req,
+                field_val_18 AS compliance_watchlist,
+                field_val_19 AS compliance_watchlist_reason,
+                field_val_20 AS director_1_name,
+                field_val_21 AS director_2_name,
+                field_val_22 AS director_3_name,
+                field_val_23 AS director_4_name,
+                field_val_24 AS director_5_name,
+                field_val_25 AS alternative_email,
+                field_val_26 AS aml_cft_risk_rating,
+                field_val_27 AS broker_id,
+                field_val_28 AS aml_cft_risk_score,
+                field_val_29 AS mothers_maiden_name,
+                field_val_30 AS ins_relat,
+                field_val_31 AS sector_of_activity
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDCIF'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Customer No: ' || r.customer_no || ' ---');
+        print_kv('    Profession', r.profession);
+        print_kv('    Religion', r.religion);
+        print_kv('    Tranche revenus', r.income_band);
+        print_kv('    2e nationalité', r.second_nationality);
+        print_kv('    Anniversaire mariage', r.wedding_anniversary);
+        print_kv('    NIF (Tax ID)', r.tax_id_number);
+        print_kv('    Date expiration ID', r.id_expiry_date);
+        print_kv('    Ancien nom client', r.customer_old_name);
+        print_kv('    Rating risque client', r.customer_risk_rating);
+        print_kv('    ID requis', r.id_required);
+        print_kv('    Type ID', r.id_type);
+        print_kv('    Numéro ID', r.id_number);
+        print_kv('    Autorité émettrice', r.issuing_authority);
+        print_kv('    Autorité émettrice NP', r.issuing_authority_np);
+        print_kv('    Date émission', r.issue_date);
+        print_kv('    Date expiration', r.expiry_date);
+        print_kv('    Revalidation requise', r.revalidation_req);
+        print_kv('    Watchlist compliance', r.compliance_watchlist);
+        print_kv('    Raison watchlist', r.compliance_watchlist_reason);
+        print_kv('    Directeur 1', r.director_1_name);
+        print_kv('    Directeur 2', r.director_2_name);
+        print_kv('    Directeur 3', r.director_3_name);
+        print_kv('    Directeur 4', r.director_4_name);
+        print_kv('    Directeur 5', r.director_5_name);
+        print_kv('    Email alternatif', r.alternative_email);
+        print_kv('    Rating AML/CFT', r.aml_cft_risk_rating);
+        print_kv('    Broker ID', r.broker_id);
+        print_kv('    Score AML/CFT', r.aml_cft_risk_score);
+        print_kv('    Nom jeune fille mère', r.mothers_maiden_name);
+        print_kv('    Relation assurance', r.ins_relat);
+        print_kv('    Secteur activité', r.sector_of_activity);
+    END LOOP;
+
+    -- 14.10 STDCUSAC — Comptes clients (UDF)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.10 STDCUSAC — Comptes clients (UDF)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                rec_key,
+                SUBSTR(rec_key, INSTR(rec_key, '~', 1, 1) + 1,
+                       INSTR(rec_key, '~', 1, 2) - INSTR(rec_key, '~', 1, 1) - 1) AS account_no,
+                field_val_1 AS registration_number,
+                field_val_2 AS wedding_anniversary_date,
+                field_val_3 AS account_old_name,
+                field_val_4 AS card_required,
+                field_val_5 AS source_of_closure_request,
+                field_val_6 AS reason_for_closure,
+                field_val_7 AS mode_of_close_out_withdrawal,
+                field_val_8 AS branch_of_account_closure,
+                field_val_9 AS correlation_id,
+                field_val_10 AS customer_ibu,
+                field_val_11 AS ibu_status
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDCUSAC'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- Account No: ' || r.account_no || ' (rec_key: ' || r.rec_key || ') ---');
+        print_kv('    N° enregistrement', r.registration_number);
+        print_kv('    Date anniversaire mariage', r.wedding_anniversary_date);
+        print_kv('    Ancien nom compte', r.account_old_name);
+        print_kv('    Carte requise', r.card_required);
+        print_kv('    Source demande fermeture', r.source_of_closure_request);
+        print_kv('    Raison fermeture', r.reason_for_closure);
+        print_kv('    Mode retrait clôture', r.mode_of_close_out_withdrawal);
+        print_kv('    Agence fermeture', r.branch_of_account_closure);
+        print_kv('    Correlation ID', r.correlation_id);
+        print_kv('    Customer IBU', r.customer_ibu);
+        print_kv('    Statut IBU', r.ibu_status);
+    END LOOP;
+
+    -- 14.11 STDKYCMN — KYC Master (PEP, source revenu)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.11 STDKYCMN — KYC Master (PEP, source revenu)]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                SUBSTR(rec_key, 1, LENGTH(rec_key) - 1) AS kyc_ref_no,
+                field_val_1 AS pep_status,
+                field_val_2 AS pep_status_others,
+                field_val_3 AS pep_office,
+                field_val_4 AS pep_relationship,
+                field_val_5 AS pep_relationship_others,
+                field_val_6 AS corp_ac_name_assoc_pep,
+                field_val_7 AS corp_ac_sign_or_director,
+                field_val_8 AS source_of_income_on_kyc_form
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDKYCMN'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- KYC Ref No: ' || r.kyc_ref_no || ' ---');
+        print_kv('    Statut PEP', r.pep_status);
+        print_kv('    PEP autres', r.pep_status_others);
+        print_kv('    Fonction PEP', r.pep_office);
+        print_kv('    Relation PEP', r.pep_relationship);
+        print_kv('    Relation PEP autres', r.pep_relationship_others);
+        print_kv('    Nom corp. associé PEP', r.corp_ac_name_assoc_pep);
+        print_kv('    Signataire/Directeur', r.corp_ac_sign_or_director);
+        print_kv('    Source revenu (KYC)', r.source_of_income_on_kyc_form);
+    END LOOP;
+
+    -- 14.12 STDSTCHN — Changements de statut comptes
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.12 STDSTCHN — Changements de statut comptes]');
+    DBMS_OUTPUT.PUT_LINE('  Échantillon (Top 5) :');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT
+                rec_key,
+                SUBSTR(rec_key, 1, INSTR(rec_key, '~', 1, 1) - 1) AS ac_no,
+                SUBSTR(rec_key, INSTR(rec_key, '~', 1, 1) + 1,
+                       INSTR(rec_key, '~', 1, 2) - INSTR(rec_key, '~', 1, 1) - 1) AS branch_code,
+                SUBSTR(rec_key, INSTR(rec_key, '~', 1, 2) + 1,
+                       INSTR(rec_key, '~', 1, 3) - INSTR(rec_key, '~', 1, 2) - 1) AS trans_date,
+                field_val_1 AS status_change_reason,
+                field_val_2 AS reason_pnd,
+                field_val_3 AS status_write_off_reason
+            FROM cstm_function_userdef_fields
+            WHERE function_id = 'STDSTCHN'
+            ORDER BY rec_key
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('    --- AC No: ' || r.ac_no || ' | Agence: ' || r.branch_code || ' | Date: ' || r.trans_date || ' ---');
+        print_kv('    Raison changement statut', r.status_change_reason);
+        print_kv('    Raison PND', r.reason_pnd);
+        print_kv('    Raison write-off', r.status_write_off_reason);
+    END LOOP;
 
     -- =========================================================
     -- FIN

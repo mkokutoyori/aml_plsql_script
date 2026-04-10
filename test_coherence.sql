@@ -60,10 +60,30 @@ BEGIN
     FROM STTM_CUSTOMER c
     JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
     JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE p.DATE_OF_BIRTH IS NOT NULL
-      AND r.BIRTH_DATE IS NOT NULL
+    WHERE p.DATE_OF_BIRTH IS NOT NULL AND r.BIRTH_DATE IS NOT NULL
       AND p.DATE_OF_BIRTH != r.BIRTH_DATE;
     print_test('Date naissance PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TO_CHAR(p.DATE_OF_BIRTH,'DD/MM/YYYY') AS val_personal,
+                   TO_CHAR(r.BIRTH_DATE,'DD/MM/YYYY') AS val_kyc,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.DATE_OF_BIRTH IS NOT NULL AND r.BIRTH_DATE IS NOT NULL
+              AND p.DATE_OF_BIRTH != r.BIRTH_DATE
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.2 Pays de naissance
     SELECT COUNT(*) INTO v_count
@@ -74,6 +94,27 @@ BEGIN
       AND r.BIRTH_COUNTRY IS NOT NULL AND TRIM(r.BIRTH_COUNTRY) IS NOT NULL
       AND TRIM(p.BIRTH_COUNTRY) != TRIM(r.BIRTH_COUNTRY);
     print_test('Pays naissance PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(p.BIRTH_COUNTRY) AS val_personal, TRIM(r.BIRTH_COUNTRY) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.BIRTH_COUNTRY IS NOT NULL AND TRIM(p.BIRTH_COUNTRY) IS NOT NULL
+              AND r.BIRTH_COUNTRY IS NOT NULL AND TRIM(r.BIRTH_COUNTRY) IS NOT NULL
+              AND TRIM(p.BIRTH_COUNTRY) != TRIM(r.BIRTH_COUNTRY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.3 Lieu de naissance
     SELECT COUNT(*) INTO v_count
@@ -84,6 +125,28 @@ BEGIN
       AND r.BIRTH_PLACE IS NOT NULL AND TRIM(r.BIRTH_PLACE) IS NOT NULL
       AND UPPER(TRIM(p.PLACE_OF_BIRTH)) != UPPER(TRIM(r.BIRTH_PLACE));
     print_test('Lieu naissance PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   SUBSTR(TRIM(p.PLACE_OF_BIRTH),1,20) AS val_personal,
+                   SUBSTR(TRIM(r.BIRTH_PLACE),1,20) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.PLACE_OF_BIRTH IS NOT NULL AND TRIM(p.PLACE_OF_BIRTH) IS NOT NULL
+              AND r.BIRTH_PLACE IS NOT NULL AND TRIM(r.BIRTH_PLACE) IS NOT NULL
+              AND UPPER(TRIM(p.PLACE_OF_BIRTH)) != UPPER(TRIM(r.BIRTH_PLACE))
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.4 Numéro de passeport
     SELECT COUNT(*) INTO v_count
@@ -94,16 +157,57 @@ BEGIN
       AND r.PASSPORT_NO IS NOT NULL AND TRIM(r.PASSPORT_NO) IS NOT NULL
       AND TRIM(p.PASSPORT_NO) != TRIM(r.PASSPORT_NO);
     print_test('N° passeport PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(p.PASSPORT_NO) AS val_personal, TRIM(r.PASSPORT_NO) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.PASSPORT_NO IS NOT NULL AND TRIM(p.PASSPORT_NO) IS NOT NULL
+              AND r.PASSPORT_NO IS NOT NULL AND TRIM(r.PASSPORT_NO) IS NOT NULL
+              AND TRIM(p.PASSPORT_NO) != TRIM(r.PASSPORT_NO)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.5 Date expiration passeport
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c
     JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
     JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE p.PPT_EXP_DATE IS NOT NULL
-      AND r.PASSPORT_EXPIRY_DATE IS NOT NULL
+    WHERE p.PPT_EXP_DATE IS NOT NULL AND r.PASSPORT_EXPIRY_DATE IS NOT NULL
       AND p.PPT_EXP_DATE != r.PASSPORT_EXPIRY_DATE;
     print_test('Expiration passeport PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TO_CHAR(p.PPT_EXP_DATE,'DD/MM/YYYY') AS val_personal,
+                   TO_CHAR(r.PASSPORT_EXPIRY_DATE,'DD/MM/YYYY') AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.PPT_EXP_DATE IS NOT NULL AND r.PASSPORT_EXPIRY_DATE IS NOT NULL
+              AND p.PPT_EXP_DATE != r.PASSPORT_EXPIRY_DATE
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.6 Statut résident US (FATCA)
     SELECT COUNT(*) INTO v_count
@@ -114,6 +218,27 @@ BEGIN
       AND r.US_RES_STATUS IS NOT NULL AND TRIM(r.US_RES_STATUS) IS NOT NULL
       AND TRIM(p.US_RES_STATUS) != TRIM(r.US_RES_STATUS);
     print_test('US_RES_STATUS PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(p.US_RES_STATUS) AS val_personal, TRIM(r.US_RES_STATUS) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.US_RES_STATUS IS NOT NULL AND TRIM(p.US_RES_STATUS) IS NOT NULL
+              AND r.US_RES_STATUS IS NOT NULL AND TRIM(r.US_RES_STATUS) IS NOT NULL
+              AND TRIM(p.US_RES_STATUS) != TRIM(r.US_RES_STATUS)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.7 Procuration (PA) émise vs donnée
     SELECT COUNT(*) INTO v_count
@@ -124,6 +249,27 @@ BEGIN
       AND r.PA_GIVEN IS NOT NULL AND TRIM(r.PA_GIVEN) IS NOT NULL
       AND TRIM(p.PA_ISSUED) != TRIM(r.PA_GIVEN);
     print_test('Procuration PA_ISSUED vs PA_GIVEN', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(p.PA_ISSUED) AS val_personal, TRIM(r.PA_GIVEN) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.PA_ISSUED IS NOT NULL AND TRIM(p.PA_ISSUED) IS NOT NULL
+              AND r.PA_GIVEN IS NOT NULL AND TRIM(r.PA_GIVEN) IS NOT NULL
+              AND TRIM(p.PA_ISSUED) != TRIM(r.PA_GIVEN)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PA_ISSUED=' || d.val_personal || ' vs PA_GIVEN=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.8 Nom du détenteur de la procuration
     SELECT COUNT(*) INTO v_count
@@ -134,9 +280,30 @@ BEGIN
       AND r.PA_HOLDER_NAME IS NOT NULL AND TRIM(r.PA_HOLDER_NAME) IS NOT NULL
       AND UPPER(TRIM(p.PA_HOLDER_NAME)) != UPPER(TRIM(r.PA_HOLDER_NAME));
     print_test('PA_HOLDER_NAME PERSONAL vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   SUBSTR(TRIM(p.PA_HOLDER_NAME),1,20) AS val_personal,
+                   SUBSTR(TRIM(r.PA_HOLDER_NAME),1,20) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.PA_HOLDER_NAME IS NOT NULL AND TRIM(p.PA_HOLDER_NAME) IS NOT NULL
+              AND r.PA_HOLDER_NAME IS NOT NULL AND TRIM(r.PA_HOLDER_NAME) IS NOT NULL
+              AND UPPER(TRIM(p.PA_HOLDER_NAME)) != UPPER(TRIM(r.PA_HOLDER_NAME))
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | PERSONAL=' || d.val_personal || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.9 Statut résidence (PERSONAL.RESIDENT_STATUS vs KYC_RETAIL.RESIDENT)
-    -- RESIDENT_STATUS: R/N, RESIDENT: Y/N — R correspond à Y, N correspond à N
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c
     JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
@@ -148,6 +315,28 @@ BEGIN
           OR (TRIM(p.RESIDENT_STATUS) = 'N' AND TRIM(r.RESIDENT) != 'N')
       );
     print_test('Résidence PERSONAL(R/N) vs KYC_RETAIL(Y/N)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(p.RESIDENT_STATUS) AS val_personal, TRIM(r.RESIDENT) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.RESIDENT_STATUS IS NOT NULL AND TRIM(p.RESIDENT_STATUS) IS NOT NULL
+              AND r.RESIDENT IS NOT NULL AND TRIM(r.RESIDENT) IS NOT NULL
+              AND ((TRIM(p.RESIDENT_STATUS) = 'R' AND TRIM(r.RESIDENT) != 'Y')
+                   OR (TRIM(p.RESIDENT_STATUS) = 'N' AND TRIM(r.RESIDENT) != 'N'))
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | RES_STATUS=' || d.val_personal || ' vs RESIDENT=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 1.10 Nationalité STTM_CUSTOMER vs KYC_RETAIL
     SELECT COUNT(*) INTO v_count
@@ -157,6 +346,26 @@ BEGIN
       AND r.NATIONALITY IS NOT NULL AND TRIM(r.NATIONALITY) IS NOT NULL
       AND TRIM(c.NATIONALITY) != TRIM(r.NATIONALITY);
     print_test('Nationalité CUSTOMER vs KYC_RETAIL', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   TRIM(c.NATIONALITY) AS val_customer, TRIM(r.NATIONALITY) AS val_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.NATIONALITY IS NOT NULL AND TRIM(c.NATIONALITY) IS NOT NULL
+              AND r.NATIONALITY IS NOT NULL AND TRIM(r.NATIONALITY) IS NOT NULL
+              AND TRIM(c.NATIONALITY) != TRIM(r.NATIONALITY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
+                || ' | CUSTOMER=' || d.val_customer || ' vs KYC=' || d.val_kyc
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00')
+                || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- =========================================================
     -- 2. COHERENCE TYPE CLIENT vs TABLES DE DETAIL

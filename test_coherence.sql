@@ -1114,6 +1114,24 @@ BEGIN
       AND p.D_COUNTRY IS NOT NULL AND TRIM(p.D_COUNTRY) IS NOT NULL
       AND TRIM(c.COUNTRY) != TRIM(p.D_COUNTRY);
     print_test('COUNTRY(CUSTOMER) vs D_COUNTRY(PERSONAL)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(c.COUNTRY) AS country_cust, TRIM(p.D_COUNTRY) AS d_country_pers,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            WHERE c.COUNTRY IS NOT NULL AND TRIM(c.COUNTRY) IS NOT NULL
+              AND p.D_COUNTRY IS NOT NULL AND TRIM(p.D_COUNTRY) IS NOT NULL
+              AND TRIM(c.COUNTRY) != TRIM(p.D_COUNTRY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | COUNTRY=' || d.country_cust || ' D_COUNTRY=' || d.d_country_pers
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.2 COUNTRY (STTM_CUSTOMER) vs LOCAL_ADDR_COUNTRY (KYC_RETAIL)
     SELECT COUNT(*) INTO v_count
@@ -1123,6 +1141,24 @@ BEGIN
       AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
       AND TRIM(c.COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
     print_test('COUNTRY(CUSTOMER) vs LOCAL_ADDR(KYC_RETAIL)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(c.COUNTRY) AS country_cust, TRIM(r.LOCAL_ADDR_COUNTRY) AS local_addr,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.COUNTRY IS NOT NULL AND TRIM(c.COUNTRY) IS NOT NULL
+              AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
+              AND TRIM(c.COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | COUNTRY=' || d.country_cust || ' LOCAL_ADDR=' || d.local_addr
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.3 D_COUNTRY (PERSONAL) vs LOCAL_ADDR_COUNTRY (KYC_RETAIL)
     SELECT COUNT(*) INTO v_count
@@ -1133,6 +1169,25 @@ BEGIN
       AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
       AND TRIM(p.D_COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
     print_test('D_COUNTRY(PERSONAL) vs LOCAL_ADDR(KYC)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(p.D_COUNTRY) AS d_country, TRIM(r.LOCAL_ADDR_COUNTRY) AS local_addr,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.D_COUNTRY IS NOT NULL AND TRIM(p.D_COUNTRY) IS NOT NULL
+              AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
+              AND TRIM(p.D_COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | D_COUNTRY=' || d.d_country || ' LOCAL_ADDR=' || d.local_addr
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.4 P_COUNTRY (PERSONAL) vs HOME_ADDR_COUNTRY (KYC_RETAIL)
     SELECT COUNT(*) INTO v_count
@@ -1143,6 +1198,25 @@ BEGIN
       AND r.HOME_ADDR_COUNTRY IS NOT NULL AND TRIM(r.HOME_ADDR_COUNTRY) IS NOT NULL
       AND TRIM(p.P_COUNTRY) != TRIM(r.HOME_ADDR_COUNTRY);
     print_test('P_COUNTRY(PERSONAL) vs HOME_ADDR(KYC)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(p.P_COUNTRY) AS p_country, TRIM(r.HOME_ADDR_COUNTRY) AS home_addr,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+            WHERE p.P_COUNTRY IS NOT NULL AND TRIM(p.P_COUNTRY) IS NOT NULL
+              AND r.HOME_ADDR_COUNTRY IS NOT NULL AND TRIM(r.HOME_ADDR_COUNTRY) IS NOT NULL
+              AND TRIM(p.P_COUNTRY) != TRIM(r.HOME_ADDR_COUNTRY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | P_COUNTRY=' || d.p_country || ' HOME_ADDR=' || d.home_addr
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.5 Non-résident mais pays = CMR
     SELECT COUNT(*) INTO v_count
@@ -1151,6 +1225,22 @@ BEGIN
     WHERE p.RESIDENT_STATUS = 'N'
       AND c.COUNTRY = 'CMR';
     print_test('Non-résident mais COUNTRY = CMR', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, c.NATIONALITY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            WHERE p.RESIDENT_STATUS = 'N' AND c.COUNTRY = 'CMR'
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | NonRés COUNTRY=CMR Cat=' || d.CUSTOMER_CATEGORY || ' Nat=' || NVL(d.NATIONALITY,'-')
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.6 Catégorie NRA (non-résident) mais résident dans PERSONAL
     SELECT COUNT(*) INTO v_count
@@ -1159,6 +1249,22 @@ BEGIN
     WHERE c.CUSTOMER_CATEGORY IN ('NRA1', 'NRA2')
       AND p.RESIDENT_STATUS = 'R';
     print_test('Catégorie NRA mais RESIDENT_STATUS = R', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, c.COUNTRY, c.NATIONALITY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            WHERE c.CUSTOMER_CATEGORY IN ('NRA1', 'NRA2') AND p.RESIDENT_STATUS = 'R'
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | Cat=' || d.CUSTOMER_CATEGORY || ' RES=R Pays=' || NVL(d.COUNTRY,'-') || ' Nat=' || NVL(d.NATIONALITY,'-')
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 5.7 Catégorie FOREIGN mais NATIONALITY = CMR
     SELECT COUNT(*) INTO v_count
@@ -1166,6 +1272,21 @@ BEGIN
     WHERE c.CUSTOMER_CATEGORY = 'FOREIGN'
       AND c.NATIONALITY = 'CMR';
     print_test('Catégorie FOREIGN mais nationalité = CMR', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.COUNTRY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            WHERE c.CUSTOMER_CATEGORY = 'FOREIGN' AND c.NATIONALITY = 'CMR'
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | FOREIGN Nat=CMR Pays=' || NVL(d.COUNTRY,'-')
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- =========================================================
     -- 6. COHERENCE UDF (CSTM_FUNCTION_USERDEF_FIELDS) vs TABLES

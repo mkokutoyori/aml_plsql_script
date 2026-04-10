@@ -241,6 +241,146 @@ BEGIN
     print_test('PEP=Y (KYC) mais catégorie != PEP/FEPS', v_count);
 
     -- =========================================================
+    -- 3. COHERENCE CATEGORIE CLIENT vs AGE / REVENUS
+    --    Basé sur les définitions STTM_CUSTOMER_CAT :
+    --    MINORS = 0-18 ans, STUDENTS = 19-28, SENIORS = 60+
+    --    CSE1 < 250K, CSE2 > 250K (fonctionnaires)
+    --    PSE1 < 350K, PSE2 = 350K-1M, PSE3 > 1M (secteur privé)
+    --    PFBI > 1M mensuel (indépendants)
+    -- =========================================================
+    print_section('3. COHERENCE CATEGORIE CLIENT vs AGE / REVENUS');
+
+    -- 3.1 Catégorie MINORS mais âge >= 18
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY = 'MINORS'
+      AND p.DATE_OF_BIRTH IS NOT NULL
+      AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 >= 18;
+    print_test('MINORS mais âge >= 18 ans', v_count);
+
+    -- 3.2 Catégorie MINORS mais MINOR != Y
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY = 'MINORS'
+      AND (p.MINOR IS NULL OR p.MINOR != 'Y');
+    print_test('MINORS mais MINOR != Y (PERSONAL)', v_count);
+
+    -- 3.3 MINOR=Y mais catégorie != MINORS
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE p.MINOR = 'Y'
+      AND c.CUSTOMER_CATEGORY != 'MINORS';
+    print_test('MINOR=Y mais catégorie != MINORS', v_count);
+
+    -- 3.4 Catégorie SENIORS mais âge < 60
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY = 'SENIORS'
+      AND p.DATE_OF_BIRTH IS NOT NULL
+      AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 < 60;
+    print_test('SENIORS mais âge < 60 ans', v_count);
+
+    -- 3.5 Catégorie STUDENTS mais âge hors 19-28
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY = 'STUDENTS'
+      AND p.DATE_OF_BIRTH IS NOT NULL
+      AND (MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 < 19
+           OR MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 > 28);
+    print_test('STUDENTS mais âge hors [19-28] ans', v_count);
+
+    -- 3.6 CSE1 (fonctionnaires < 250K) mais revenu >= 250000
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'CSE1'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND r.TOTAL_INCOME >= 250000;
+    print_test('CSE1 (< 250K) mais TOTAL_INCOME >= 250K', v_count);
+
+    -- 3.7 CSE2 (fonctionnaires > 250K) mais revenu < 250000
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'CSE2'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND r.TOTAL_INCOME < 250000;
+    print_test('CSE2 (> 250K) mais TOTAL_INCOME < 250K', v_count);
+
+    -- 3.8 PSE1 (secteur privé < 350K) mais revenu >= 350000
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'PSE1'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND r.TOTAL_INCOME >= 350000;
+    print_test('PSE1 (< 350K) mais TOTAL_INCOME >= 350K', v_count);
+
+    -- 3.9 PSE2 (secteur privé 350K-1M) mais revenu hors fourchette
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'PSE2'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND (r.TOTAL_INCOME < 350000 OR r.TOTAL_INCOME > 1000000);
+    print_test('PSE2 (350K-1M) mais TOTAL_INCOME hors range', v_count);
+
+    -- 3.10 PSE3 (secteur privé > 1M) mais revenu <= 1000000
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'PSE3'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND r.TOTAL_INCOME <= 1000000;
+    print_test('PSE3 (> 1M) mais TOTAL_INCOME <= 1M', v_count);
+
+    -- 3.11 PFBI (indépendants > 1M mensuel) mais revenu annuel <= 12M
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'PFBI'
+      AND r.TOTAL_INCOME IS NOT NULL
+      AND r.TOTAL_INCOME > 0
+      AND r.TOTAL_INCOME <= 12000000;
+    print_test('PFBI (rev mensuel>1M) mais annuel <= 12M', v_count);
+
+    -- 3.12 Catégorie VPFP (pensionnés) mais âge < 50
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY = 'VPFP'
+      AND p.DATE_OF_BIRTH IS NOT NULL
+      AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH) / 12 < 50;
+    print_test('VPFP (pensionnés) mais âge < 50 ans', v_count);
+
+    -- 3.13 Catégorie individuelle (INDV, MINORS, STUDENTS, etc.) mais CUSTOMER_TYPE != I
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER
+    WHERE CUSTOMER_CATEGORY IN ('INDV', 'MINORS', 'STUDENTS', 'SENIORS',
+          'CSE1', 'CSE2', 'PSE1', 'PSE2', 'PSE3', 'PFBI', 'VPFP',
+          'SAL', 'STAF', 'RSA', 'RSA1', 'ABWP', 'PEP/FEPS', 'NRA1', 'NRA2')
+      AND CUSTOMER_TYPE != 'I';
+    print_test('Catégorie individuelle mais TYPE != I', v_count);
+
+    -- 3.14 Catégorie corporate (CORP, SME, etc.) mais CUSTOMER_TYPE != C
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER
+    WHERE CUSTOMER_CATEGORY IN ('CORP', 'SME', 'NGOs', 'GOVT', 'GOVT INST',
+          'INSURANCE', 'CONSTRUCTN', 'HOSPITALIT', 'OIL&GAS', 'FIN_INT')
+      AND CUSTOMER_TYPE != 'C';
+    print_test('Catégorie corporate mais TYPE != C', v_count);
+
+    -- =========================================================
     -- FIN PROVISOIRE
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

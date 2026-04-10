@@ -1450,6 +1450,22 @@ BEGIN
           SELECT 1 FROM STTM_KYC_MASTER m WHERE m.KYC_REF_NO = c.KYC_REF_NO
       );
     print_test('KYC_REF_NO orphelins (absent de MASTER)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.KYC_REF_NO, c.CUSTOMER_CATEGORY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            WHERE c.KYC_REF_NO IS NOT NULL AND TRIM(c.KYC_REF_NO) IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM STTM_KYC_MASTER m WHERE m.KYC_REF_NO = c.KYC_REF_NO)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | KYC=' || d.KYC_REF_NO || ' Cat=' || d.CUSTOMER_CATEGORY
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 7.2 KYC_MASTER non référencé par aucun client
     SELECT COUNT(*) INTO v_count
@@ -1458,6 +1474,18 @@ BEGIN
         SELECT 1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO = m.KYC_REF_NO
     );
     print_test('KYC_MASTER sans client associé', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (premiers KYC_REF_NO) :');
+        FOR d IN (SELECT * FROM (
+            SELECT m.KYC_REF_NO, m.KYC_TYPE, NVL(m.MAKER_ID,'-') AS maker, NVL(TO_CHAR(m.MAKER_DT_STAMP,'DD/MM/YYYY'),'-') AS dt
+            FROM STTM_KYC_MASTER m
+            WHERE NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO = m.KYC_REF_NO)
+            ORDER BY m.KYC_REF_NO
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    KYC=' || d.KYC_REF_NO || ' | Type=' || NVL(d.KYC_TYPE,'-')
+                || ' | Maker=' || d.maker || ' | Date=' || d.dt);
+        END LOOP;
+    END IF;
 
     -- 7.3 AML_REQUIRED=Y mais sans KYC
     SELECT COUNT(*) INTO v_count
@@ -1465,6 +1493,21 @@ BEGIN
     WHERE c.AML_REQUIRED = 'Y'
       AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
     print_test('AML_REQUIRED=Y mais sans KYC_REF_NO', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            WHERE c.AML_REQUIRED = 'Y' AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | AML=Y KYC=NULL Cat=' || d.CUSTOMER_CATEGORY
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 7.4 KYC_DETAILS=V (vérifié) mais KYC_REF_NO absent
     SELECT COUNT(*) INTO v_count
@@ -1472,6 +1515,21 @@ BEGIN
     WHERE c.KYC_DETAILS = 'V'
       AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
     print_test('KYC_DETAILS=V mais sans KYC_REF_NO', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            WHERE c.KYC_DETAILS = 'V' AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | KYC_DET=V KYC=NULL Cat=' || d.CUSTOMER_CATEGORY
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 7.5 KYC Review dépassée (Retail)
     SELECT COUNT(*) INTO v_count
@@ -1479,6 +1537,23 @@ BEGIN
     WHERE r.KYC_NXT_REVIEW_DATE IS NOT NULL
       AND r.KYC_NXT_REVIEW_DATE < SYSDATE;
     print_test('KYC Retail : review date dépassée', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT r.KYC_REF_NO, TO_CHAR(r.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
+                   TRUNC(SYSDATE - r.KYC_NXT_REVIEW_DATE) AS jours_retard,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+            FROM STTM_KYC_RETAIL r
+            WHERE r.KYC_NXT_REVIEW_DATE IS NOT NULL AND r.KYC_NXT_REVIEW_DATE < SYSDATE
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | Review=' || d.review_dt || ' Retard=' || d.jours_retard || 'j'
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 7.6 KYC Review dépassée (Corporate)
     SELECT COUNT(*) INTO v_count
@@ -1486,6 +1561,23 @@ BEGIN
     WHERE k.KYC_NXT_REVIEW_DATE IS NOT NULL
       AND k.KYC_NXT_REVIEW_DATE < SYSDATE;
     print_test('KYC Corporate : review date dépassée', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT k.KYC_REF_NO, TO_CHAR(k.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
+                   TRUNC(SYSDATE - k.KYC_NXT_REVIEW_DATE) AS jours_retard,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+            FROM STTM_KYC_CORPORATE k
+            WHERE k.KYC_NXT_REVIEW_DATE IS NOT NULL AND k.KYC_NXT_REVIEW_DATE < SYSDATE
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1)),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | Review=' || d.review_dt || ' Retard=' || d.jours_retard || 'j'
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 7.7 PEP=Y mais pas de PEP_REMARKS
     SELECT COUNT(*) INTO v_count
@@ -1493,6 +1585,22 @@ BEGIN
     WHERE r.PEP = 'Y'
       AND (r.PEP_REMARKS IS NULL OR TRIM(r.PEP_REMARKS) IS NULL);
     print_test('PEP=Y mais PEP_REMARKS vide', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT r.KYC_REF_NO,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+            FROM STTM_KYC_RETAIL r
+            WHERE r.PEP = 'Y' AND (r.PEP_REMARKS IS NULL OR TRIM(r.PEP_REMARKS) IS NULL)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | PEP=Y REMARKS=NULL KYC=' || d.KYC_REF_NO
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 7.8 Clients avec compte mais sans entrée STTM_CUSTOMER
     SELECT COUNT(DISTINCT a.CUST_NO) INTO v_count
@@ -1501,6 +1609,19 @@ BEGIN
         SELECT 1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO = a.CUST_NO
     );
     print_test('Comptes avec CUST_NO absent de CUSTOMER', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, a.CUST_AC_NO, a.ACY_CURR_BALANCE AS solde, a.CCY, a.AC_DESC
+            FROM STTM_CUST_ACCOUNT a
+            WHERE NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO = a.CUST_NO)
+            ORDER BY a.ACY_CURR_BALANCE DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    CUST_NO=' || d.CUST_NO || ' | Cpte=' || d.CUST_AC_NO
+                || ' | ' || NVL(SUBSTR(d.AC_DESC,1,20),'-')
+                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00') || ' ' || NVL(d.CCY,'-'));
+        END LOOP;
+    END IF;
 
     -- 7.9 Doublons : même P_NATIONAL_ID pour des clients différents
     SELECT COUNT(*) INTO v_count FROM (
@@ -1509,6 +1630,20 @@ BEGIN
         GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
     );
     print_test('P_NATIONAL_ID en doublon (nb IDs)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 doublons (par nb occurrences) :');
+        FOR d IN (SELECT * FROM (
+            SELECT p.P_NATIONAL_ID, COUNT(*) AS nb,
+                   LISTAGG(p.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY p.CUSTOMER_NO) AS clients
+            FROM STTM_CUST_PERSONAL p
+            WHERE p.P_NATIONAL_ID IS NOT NULL AND TRIM(p.P_NATIONAL_ID) IS NOT NULL
+            GROUP BY p.P_NATIONAL_ID HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ID=' || d.P_NATIONAL_ID || ' | x' || d.nb
+                || ' | Clients=' || SUBSTR(d.clients,1,60));
+        END LOOP;
+    END IF;
 
     -- 7.10 Doublons : même UNIQUE_ID_VALUE pour des clients différents
     SELECT COUNT(*) INTO v_count FROM (
@@ -1517,6 +1652,20 @@ BEGIN
         GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
     );
     print_test('UNIQUE_ID_VALUE en doublon (nb IDs)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 doublons (par nb occurrences) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.UNIQUE_ID_VALUE, COUNT(*) AS nb,
+                   LISTAGG(c.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY c.CUSTOMER_NO) AS clients
+            FROM STTM_CUSTOMER c
+            WHERE c.UNIQUE_ID_VALUE IS NOT NULL AND TRIM(c.UNIQUE_ID_VALUE) IS NOT NULL
+            GROUP BY c.UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    UID=' || SUBSTR(d.UNIQUE_ID_VALUE,1,25) || ' | x' || d.nb
+                || ' | Clients=' || SUBSTR(d.clients,1,60));
+        END LOOP;
+    END IF;
 
     -- 7.11 Client DECEASED=Y avec des comptes non bloqués
     SELECT COUNT(*) INTO v_count
@@ -1529,6 +1678,22 @@ BEGIN
             AND a.AC_STAT_FROZEN != 'Y'
       );
     print_test('Client DECEASED avec comptes non bloqués', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO||'(B='||NVL(a.AC_STAT_BLOCK,'N')||' F='||NVL(a.AC_STAT_FROZEN,'N')||')',', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM STTM_CUSTOMER c
+            WHERE c.DECEASED = 'Y'
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.AC_STAT_BLOCK != 'Y' AND a.AC_STAT_FROZEN != 'Y')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | DECEASED=Y'
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+        END LOOP;
+    END IF;
 
     -- 7.12 Comptes avec transactions mais client sans KYC
     SELECT COUNT(DISTINCT h.AC_NO) INTO v_count
@@ -1537,6 +1702,22 @@ BEGIN
     JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
     WHERE (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
     print_test('Comptes actifs (txn) sans KYC client', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_AC_NO, a.CUST_NO, c.CUSTOMER_NAME1, a.ACY_CURR_BALANCE AS solde,
+                   (SELECT COUNT(*) FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO) AS nb_txn
+            FROM STTM_CUST_ACCOUNT a
+            JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL)
+              AND EXISTS (SELECT 1 FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO)
+            ORDER BY a.ACY_CURR_BALANCE DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | KYC=NULL Txns=' || d.nb_txn
+                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 7.13 Maker = Checker sur les dossiers KYC (ségrégation)
     SELECT COUNT(*) INTO v_count
@@ -1545,16 +1726,25 @@ BEGIN
       AND MAKER_ID = CHECKER_ID
       AND MAKER_ID != 'MIGRATION';
     print_test('KYC Maker=Checker (hors MIGRATION)', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par date) :');
+        FOR d IN (SELECT * FROM (
+            SELECT m.KYC_REF_NO, m.MAKER_ID, NVL(TO_CHAR(m.MAKER_DT_STAMP,'DD/MM/YYYY'),'-') AS dt,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1),'-') AS nom
+            FROM STTM_KYC_MASTER m
+            WHERE m.MAKER_ID IS NOT NULL AND m.CHECKER_ID IS NOT NULL
+              AND m.MAKER_ID = m.CHECKER_ID AND m.MAKER_ID != 'MIGRATION'
+            ORDER BY m.MAKER_DT_STAMP DESC NULLS LAST
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | KYC=' || d.KYC_REF_NO || ' Maker=Checker=' || d.MAKER_ID || ' Date=' || d.dt);
+        END LOOP;
+    END IF;
 
     -- =========================================================
     -- FIN
     -- =========================================================
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE(v_sep);
-    DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);
-    DBMS_OUTPUT.PUT_LINE('   TESTS AVEC ANOMALIES : ' || v_anomalies);
-    DBMS_OUTPUT.PUT_LINE('   FIN — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
-    DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);

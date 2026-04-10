@@ -1301,6 +1301,24 @@ BEGIN
       AND UPPER(TRIM(u.field_val_18)) = 'Y'
       AND (c.FROZEN IS NULL OR c.FROZEN != 'Y');
     print_test('UDF compliance_watchlist=Y mais non FROZEN', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, NVL(c.FROZEN,'N') AS frozen_val,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+            FROM cstm_function_userdef_fields u
+            JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = SUBSTR(u.rec_key, 1, INSTR(u.rec_key, '~', 1, 1) - 1)
+            WHERE u.function_id = 'STDCIF'
+              AND UPPER(TRIM(u.field_val_18)) = 'Y'
+              AND (c.FROZEN IS NULL OR c.FROZEN != 'Y')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
+                || ' | Watchlist=Y FROZEN=' || d.frozen_val
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+        END LOOP;
+    END IF;
 
     -- 6.2 STDKYCMN : pep_status vs PEP dans KYC_RETAIL
     SELECT COUNT(*) INTO v_count
@@ -1310,6 +1328,26 @@ BEGIN
       AND u.field_val_1 IS NOT NULL AND UPPER(TRIM(u.field_val_1)) = 'Y'
       AND (r.PEP IS NULL OR r.PEP != 'Y');
     print_test('UDF PEP_STATUS=Y mais KYC PEP != Y', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT r.KYC_REF_NO,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL(r.PEP,'NULL') AS pep_kyc,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+            FROM cstm_function_userdef_fields u
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = SUBSTR(u.rec_key, 1, LENGTH(u.rec_key) - 1)
+            WHERE u.function_id = 'STDKYCMN'
+              AND u.field_val_1 IS NOT NULL AND UPPER(TRIM(u.field_val_1)) = 'Y'
+              AND (r.PEP IS NULL OR r.PEP != 'Y')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | UDF_PEP=Y KYC_PEP=' || d.pep_kyc || ' KYC=' || d.KYC_REF_NO
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 6.3 STDKYCMN : PEP=Y dans KYC mais pep_status UDF != Y
     SELECT COUNT(*) INTO v_count
@@ -1320,6 +1358,26 @@ BEGIN
     WHERE r.PEP = 'Y'
       AND (u.field_val_1 IS NULL OR UPPER(TRIM(u.field_val_1)) != 'Y');
     print_test('KYC PEP=Y mais UDF pep_status != Y', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        FOR d IN (SELECT * FROM (
+            SELECT r.KYC_REF_NO, NVL(UPPER(TRIM(u.field_val_1)),'NULL') AS udf_pep,
+                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+            FROM STTM_KYC_RETAIL r
+            JOIN cstm_function_userdef_fields u
+              ON SUBSTR(u.rec_key, 1, LENGTH(u.rec_key) - 1) = r.KYC_REF_NO
+              AND u.function_id = 'STDKYCMN'
+            WHERE r.PEP = 'Y'
+              AND (u.field_val_1 IS NULL OR UPPER(TRIM(u.field_val_1)) != 'Y')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
+                || ' | KYC_PEP=Y UDF_PEP=' || d.udf_pep || ' KYC=' || d.KYC_REF_NO
+                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+        END LOOP;
+    END IF;
 
     -- 6.4 SMDUSRDF : email vide pour des utilisateurs actifs
     SELECT COUNT(*) INTO v_count
@@ -1341,6 +1399,25 @@ BEGIN
                 INSTR(u.rec_key, '~', 1, 2) - INSTR(u.rec_key, '~', 1, 1) - 1)
       );
     print_test('STDCUSAC : UDF sans compte CUST_ACCOUNT', v_count);
+    IF v_count > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    TOP 30 (premiers rec_key) :');
+        FOR d IN (SELECT * FROM (
+            SELECT u.rec_key,
+                   SUBSTR(u.rec_key, 1, INSTR(u.rec_key, '~', 1, 1) - 1) AS branch,
+                   SUBSTR(u.rec_key, INSTR(u.rec_key, '~', 1, 1) + 1,
+                          INSTR(u.rec_key, '~', 1, 2) - INSTR(u.rec_key, '~', 1, 1) - 1) AS ac_no
+            FROM cstm_function_userdef_fields u
+            WHERE u.function_id = 'STDCUSAC'
+              AND NOT EXISTS (
+                  SELECT 1 FROM STTM_CUST_ACCOUNT a
+                  WHERE a.CUST_AC_NO = SUBSTR(u.rec_key, INSTR(u.rec_key, '~', 1, 1) + 1,
+                        INSTR(u.rec_key, '~', 1, 2) - INSTR(u.rec_key, '~', 1, 1) - 1)
+              )
+            ORDER BY u.rec_key
+        ) WHERE ROWNUM <= 30) LOOP
+            DBMS_OUTPUT.PUT_LINE('    REC_KEY=' || SUBSTR(d.rec_key,1,50) || ' | AC_NO=' || d.ac_no);
+        END LOOP;
+    END IF;
 
     -- 6.6 STDCIF : nombre d'enregistrements UDF vs nombre de clients
     SELECT COUNT(*) INTO v_count

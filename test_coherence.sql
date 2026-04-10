@@ -529,6 +529,78 @@ BEGIN
     print_test('Catégorie FOREIGN mais nationalité = CMR', v_count);
 
     -- =========================================================
+    -- 6. COHERENCE UDF (CSTM_FUNCTION_USERDEF_FIELDS) vs TABLES
+    -- =========================================================
+    print_section('6. COHERENCE UDF vs TABLES PRINCIPALES');
+
+    -- 6.1 STDCIF : compliance_watchlist=Y mais client non FROZEN
+    SELECT COUNT(*) INTO v_count
+    FROM cstm_function_userdef_fields u
+    JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = SUBSTR(u.rec_key, 1, INSTR(u.rec_key, '~', 1, 1) - 1)
+    WHERE u.function_id = 'STDCIF'
+      AND UPPER(TRIM(u.field_val_18)) = 'Y'
+      AND (c.FROZEN IS NULL OR c.FROZEN != 'Y');
+    print_test('UDF compliance_watchlist=Y mais non FROZEN', v_count);
+
+    -- 6.2 STDKYCMN : pep_status vs PEP dans KYC_RETAIL
+    SELECT COUNT(*) INTO v_count
+    FROM cstm_function_userdef_fields u
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = SUBSTR(u.rec_key, 1, LENGTH(u.rec_key) - 1)
+    WHERE u.function_id = 'STDKYCMN'
+      AND u.field_val_1 IS NOT NULL AND UPPER(TRIM(u.field_val_1)) = 'Y'
+      AND (r.PEP IS NULL OR r.PEP != 'Y');
+    print_test('UDF PEP_STATUS=Y mais KYC PEP != Y', v_count);
+
+    -- 6.3 STDKYCMN : PEP=Y dans KYC mais pep_status UDF != Y
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_KYC_RETAIL r
+    JOIN cstm_function_userdef_fields u
+      ON SUBSTR(u.rec_key, 1, LENGTH(u.rec_key) - 1) = r.KYC_REF_NO
+      AND u.function_id = 'STDKYCMN'
+    WHERE r.PEP = 'Y'
+      AND (u.field_val_1 IS NULL OR UPPER(TRIM(u.field_val_1)) != 'Y');
+    print_test('KYC PEP=Y mais UDF pep_status != Y', v_count);
+
+    -- 6.4 SMDUSRDF : email vide pour des utilisateurs actifs
+    SELECT COUNT(*) INTO v_count
+    FROM cstm_function_userdef_fields u
+    WHERE u.function_id = 'SMDUSRDF'
+      AND (u.field_val_1 IS NULL OR TRIM(u.field_val_1) IS NULL);
+    SELECT COUNT(*) INTO v_total
+    FROM cstm_function_userdef_fields
+    WHERE function_id = 'SMDUSRDF';
+    print_test('SMDUSRDF : utilisateurs sans email UDF', v_count, v_total);
+
+    -- 6.5 STDCUSAC : account_no UDF vs STTM_CUST_ACCOUNT — comptes orphelins
+    SELECT COUNT(*) INTO v_count
+    FROM cstm_function_userdef_fields u
+    WHERE u.function_id = 'STDCUSAC'
+      AND NOT EXISTS (
+          SELECT 1 FROM STTM_CUST_ACCOUNT a
+          WHERE a.CUST_AC_NO = SUBSTR(u.rec_key, INSTR(u.rec_key, '~', 1, 1) + 1,
+                INSTR(u.rec_key, '~', 1, 2) - INSTR(u.rec_key, '~', 1, 1) - 1)
+      );
+    print_test('STDCUSAC : UDF sans compte CUST_ACCOUNT', v_count);
+
+    -- 6.6 STDCIF : nombre d'enregistrements UDF vs nombre de clients
+    SELECT COUNT(*) INTO v_count
+    FROM cstm_function_userdef_fields WHERE function_id = 'STDCIF';
+    SELECT COUNT(*) INTO v_total FROM STTM_CUSTOMER;
+    DBMS_OUTPUT.PUT_LINE('  [INFO] Nb UDF STDCIF: ' || v_count || ' vs Nb clients: ' || v_total);
+    IF v_count != v_total THEN
+        v_test_no := v_test_no + 1;
+        DBMS_OUTPUT.PUT_LINE('  [TEST ' || LPAD(v_test_no, 3, '0') || '] '
+            || RPAD('Écart volumétrie STDCIF vs STTM_CUSTOMER', 55, '.')
+            || ' ' || ABS(v_count - v_total) || '  *** ÉCART ***');
+        v_anomalies := v_anomalies + 1;
+    ELSE
+        v_test_no := v_test_no + 1;
+        DBMS_OUTPUT.PUT_LINE('  [TEST ' || LPAD(v_test_no, 3, '0') || '] '
+            || RPAD('Volumétrie STDCIF = STTM_CUSTOMER', 55, '.')
+            || ' 0  OK');
+    END IF;
+
+    -- =========================================================
     -- FIN PROVISOIRE
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

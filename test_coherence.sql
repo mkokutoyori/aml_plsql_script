@@ -463,6 +463,72 @@ BEGIN
     print_test('RECORD_STAT vs AC_GL_REC_STATUS discordant', v_count);
 
     -- =========================================================
+    -- 5. COHERENCE PAYS / ADRESSES INTER-TABLES
+    -- =========================================================
+    print_section('5. COHERENCE PAYS / ADRESSES INTER-TABLES');
+
+    -- 5.1 COUNTRY (STTM_CUSTOMER) vs D_COUNTRY (STTM_CUST_PERSONAL)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.COUNTRY IS NOT NULL AND TRIM(c.COUNTRY) IS NOT NULL
+      AND p.D_COUNTRY IS NOT NULL AND TRIM(p.D_COUNTRY) IS NOT NULL
+      AND TRIM(c.COUNTRY) != TRIM(p.D_COUNTRY);
+    print_test('COUNTRY(CUSTOMER) vs D_COUNTRY(PERSONAL)', v_count);
+
+    -- 5.2 COUNTRY (STTM_CUSTOMER) vs LOCAL_ADDR_COUNTRY (KYC_RETAIL)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.COUNTRY IS NOT NULL AND TRIM(c.COUNTRY) IS NOT NULL
+      AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
+      AND TRIM(c.COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
+    print_test('COUNTRY(CUSTOMER) vs LOCAL_ADDR(KYC_RETAIL)', v_count);
+
+    -- 5.3 D_COUNTRY (PERSONAL) vs LOCAL_ADDR_COUNTRY (KYC_RETAIL)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE p.D_COUNTRY IS NOT NULL AND TRIM(p.D_COUNTRY) IS NOT NULL
+      AND r.LOCAL_ADDR_COUNTRY IS NOT NULL AND TRIM(r.LOCAL_ADDR_COUNTRY) IS NOT NULL
+      AND TRIM(p.D_COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
+    print_test('D_COUNTRY(PERSONAL) vs LOCAL_ADDR(KYC)', v_count);
+
+    -- 5.4 P_COUNTRY (PERSONAL) vs HOME_ADDR_COUNTRY (KYC_RETAIL)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE p.P_COUNTRY IS NOT NULL AND TRIM(p.P_COUNTRY) IS NOT NULL
+      AND r.HOME_ADDR_COUNTRY IS NOT NULL AND TRIM(r.HOME_ADDR_COUNTRY) IS NOT NULL
+      AND TRIM(p.P_COUNTRY) != TRIM(r.HOME_ADDR_COUNTRY);
+    print_test('P_COUNTRY(PERSONAL) vs HOME_ADDR(KYC)', v_count);
+
+    -- 5.5 Non-résident mais pays = CMR
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE p.RESIDENT_STATUS = 'N'
+      AND c.COUNTRY = 'CMR';
+    print_test('Non-résident mais COUNTRY = CMR', v_count);
+
+    -- 5.6 Catégorie NRA (non-résident) mais résident dans PERSONAL
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_CATEGORY IN ('NRA1', 'NRA2')
+      AND p.RESIDENT_STATUS = 'R';
+    print_test('Catégorie NRA mais RESIDENT_STATUS = R', v_count);
+
+    -- 5.7 Catégorie FOREIGN mais NATIONALITY = CMR
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_CATEGORY = 'FOREIGN'
+      AND c.NATIONALITY = 'CMR';
+    print_test('Catégorie FOREIGN mais nationalité = CMR', v_count);
+
+    -- =========================================================
     -- FIN PROVISOIRE
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

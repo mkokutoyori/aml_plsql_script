@@ -159,6 +159,88 @@ BEGIN
     print_test('Nationalité CUSTOMER vs KYC_RETAIL', v_count);
 
     -- =========================================================
+    -- 2. COHERENCE TYPE CLIENT vs TABLES DE DETAIL
+    -- =========================================================
+    print_section('2. COHERENCE TYPE CLIENT vs TABLES DE DETAIL');
+
+    -- 2.1 CUSTOMER_TYPE (I=Individuel) vs KYC_CUST_TYPE (R=Retail)
+    -- I doit correspondre à R, C à C, B à F
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.KYC_REF_NO IS NOT NULL AND TRIM(c.KYC_REF_NO) IS NOT NULL
+      AND (
+          (c.CUSTOMER_TYPE = 'I' AND m.KYC_CUST_TYPE != 'R')
+          OR (c.CUSTOMER_TYPE = 'C' AND m.KYC_CUST_TYPE != 'C')
+          OR (c.CUSTOMER_TYPE = 'B' AND m.KYC_CUST_TYPE != 'F')
+      );
+    print_test('CUSTOMER_TYPE(I/C/B) vs KYC_CUST_TYPE(R/C/F)', v_count);
+
+    -- 2.2 Client individuel (type I) sans données personnelles
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_TYPE = 'I'
+      AND NOT EXISTS (
+          SELECT 1 FROM STTM_CUST_PERSONAL p
+          WHERE p.CUSTOMER_NO = c.CUSTOMER_NO
+      );
+    print_test('Type I sans fiche STTM_CUST_PERSONAL', v_count);
+
+    -- 2.3 Client corporel (type C) avec KYC mais sans fiche Corporate
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_TYPE = 'C'
+      AND m.KYC_CUST_TYPE = 'C'
+      AND NOT EXISTS (
+          SELECT 1 FROM STTM_KYC_CORPORATE k
+          WHERE k.KYC_REF_NO = c.KYC_REF_NO
+      );
+    print_test('Type C (KYC=C) sans fiche KYC_CORPORATE', v_count);
+
+    -- 2.4 Client individuel (type I) avec KYC mais sans fiche Retail
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_TYPE = 'I'
+      AND m.KYC_CUST_TYPE = 'R'
+      AND NOT EXISTS (
+          SELECT 1 FROM STTM_KYC_RETAIL r
+          WHERE r.KYC_REF_NO = c.KYC_REF_NO
+      );
+    print_test('Type I (KYC=R) sans fiche KYC_RETAIL', v_count);
+
+    -- 2.5 STAFF=Y mais catégorie != STAF
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER
+    WHERE STAFF = 'Y'
+      AND CUSTOMER_CATEGORY != 'STAF';
+    print_test('STAFF=Y mais catégorie != STAF', v_count);
+
+    -- 2.6 Catégorie STAF mais STAFF != Y
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER
+    WHERE CUSTOMER_CATEGORY = 'STAF'
+      AND (STAFF IS NULL OR STAFF != 'Y');
+    print_test('Catégorie STAF mais STAFF != Y', v_count);
+
+    -- 2.7 Catégorie PEP/FEPS mais PEP != Y dans KYC_RETAIL
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'PEP/FEPS'
+      AND (r.PEP IS NULL OR r.PEP != 'Y');
+    print_test('Catégorie PEP/FEPS mais PEP != Y (KYC)', v_count);
+
+    -- 2.8 PEP=Y dans KYC mais catégorie != PEP/FEPS
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
+    WHERE r.PEP = 'Y'
+      AND c.CUSTOMER_CATEGORY != 'PEP/FEPS';
+    print_test('PEP=Y (KYC) mais catégorie != PEP/FEPS', v_count);
+
+    -- =========================================================
     -- FIN PROVISOIRE
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

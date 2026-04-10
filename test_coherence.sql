@@ -381,6 +381,88 @@ BEGIN
     print_test('Catégorie corporate mais TYPE != C', v_count);
 
     -- =========================================================
+    -- 4. COHERENCE STATUTS COMPTES
+    --    STTM_CUST_ACCOUNT vs STTB_ACCOUNT
+    -- =========================================================
+    print_section('4. COHERENCE STATUTS COMPTES (CUST_ACCOUNT vs STTB_ACCOUNT)');
+
+    -- 4.1 Statut dormant discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_DORMANT IS NOT NULL AND b.AC_STAT_DORMANT IS NOT NULL
+      AND a.AC_STAT_DORMANT != b.AC_STAT_DORMANT;
+    print_test('Dormant discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.2 Statut frozen discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_FROZEN IS NOT NULL AND b.AC_STAT_FROZEN IS NOT NULL
+      AND a.AC_STAT_FROZEN != b.AC_STAT_FROZEN;
+    print_test('Frozen discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.3 Statut blocked discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_BLOCK IS NOT NULL AND b.GL_STAT_BLOCKED IS NOT NULL
+      AND a.AC_STAT_BLOCK != b.GL_STAT_BLOCKED;
+    print_test('Blocked discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.4 Statut no_dr discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_NO_DR IS NOT NULL AND b.AC_STAT_NO_DR IS NOT NULL
+      AND a.AC_STAT_NO_DR != b.AC_STAT_NO_DR;
+    print_test('No DR discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.5 Statut no_cr discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_NO_CR IS NOT NULL AND b.AC_STAT_NO_CR IS NOT NULL
+      AND a.AC_STAT_NO_CR != b.AC_STAT_NO_CR;
+    print_test('No CR discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.6 Statut stop_pay discordant
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.AC_STAT_STOP_PAY IS NOT NULL AND b.AC_STAT_STOP_PAY IS NOT NULL
+      AND a.AC_STAT_STOP_PAY != b.AC_STAT_STOP_PAY;
+    print_test('Stop Pay discordant CUST_ACCOUNT vs STTB', v_count);
+
+    -- 4.7 Devise discordante
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.CCY IS NOT NULL AND TRIM(a.CCY) IS NOT NULL
+      AND b.AC_GL_CCY IS NOT NULL AND TRIM(b.AC_GL_CCY) IS NOT NULL
+      AND TRIM(a.CCY) != TRIM(b.AC_GL_CCY);
+    print_test('Devise CCY vs AC_GL_CCY discordante', v_count);
+
+    -- 4.8 Client FROZEN=Y mais aucun compte gelé
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.FROZEN = 'Y'
+      AND EXISTS (
+          SELECT 1 FROM STTM_CUST_ACCOUNT a
+          WHERE a.CUST_NO = c.CUSTOMER_NO
+            AND a.AC_STAT_FROZEN != 'Y'
+      );
+    print_test('Client FROZEN=Y avec comptes non gelés', v_count);
+
+    -- 4.9 RECORD_STAT discordant entre les deux tables
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
+    WHERE a.RECORD_STAT IS NOT NULL AND b.AC_GL_REC_STATUS IS NOT NULL
+      AND a.RECORD_STAT != b.AC_GL_REC_STATUS;
+    print_test('RECORD_STAT vs AC_GL_REC_STATUS discordant', v_count);
+
+    -- =========================================================
     -- FIN PROVISOIRE
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

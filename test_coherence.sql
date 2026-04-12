@@ -1928,7 +1928,11 @@ BEGIN
       AND k.KYC_NXT_REVIEW_DATE < SYSDATE;
     print_test('KYC Corporate : review date dépassée', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,16,12,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' KYC_C.REVIEW_DT',16) || '|' || RPAD(' RETARD (j)',12) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,16,12,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT k.KYC_REF_NO, TO_CHAR(k.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
                    TRUNC(SYSDATE - k.KYC_NXT_REVIEW_DATE) AS jours_retard,
@@ -1939,10 +1943,13 @@ BEGIN
             WHERE k.KYC_NXT_REVIEW_DATE IS NOT NULL AND k.KYC_NXT_REVIEW_DATE < SYSDATE
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1)),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | Review=' || d.review_dt || ' Retard=' || d.jours_retard || 'j'
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cust_no,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.review_dt,''),16) || '|' || LPAD(d.jours_retard,11) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,16,12,18');
     END IF;
 
     -- 7.7 PEP=Y mais pas de PEP_REMARKS
@@ -1952,7 +1959,11 @@ BEGIN
       AND (r.PEP_REMARKS IS NULL OR TRIM(r.PEP_REMARKS) IS NULL);
     print_test('PEP=Y mais PEP_REMARKS vide', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' KYC_R.KYC_REF_NO',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT r.KYC_REF_NO,
                    NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
@@ -1962,10 +1973,13 @@ BEGIN
             WHERE r.PEP = 'Y' AND (r.PEP_REMARKS IS NULL OR TRIM(r.PEP_REMARKS) IS NULL)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | PEP=Y REMARKS=NULL KYC=' || d.KYC_REF_NO
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cust_no,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.KYC_REF_NO,''),22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,18');
     END IF;
 
     -- 7.8 Clients avec compte mais sans entrée STTM_CUSTOMER
@@ -1976,17 +1990,24 @@ BEGIN
     );
     print_test('Comptes avec CUST_NO absent de CUSTOMER', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,22,6,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CA.CUST_NO',13) || '|' || RPAD(' CA.CUST_AC_NO',22) || '|'
+            || RPAD(' CA.AC_DESC',22) || '|' || RPAD(' CCY',6) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,22,6,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_NO, a.CUST_AC_NO, a.ACY_CURR_BALANCE AS solde, a.CCY, a.AC_DESC
             FROM STTM_CUST_ACCOUNT a
             WHERE NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO = a.CUST_NO)
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    CUST_NO=' || d.CUST_NO || ' | Cpte=' || d.CUST_AC_NO
-                || ' | ' || NVL(SUBSTR(d.AC_DESC,1,20),'-')
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00') || ' ' || NVL(d.CCY,'-'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || NVL(SUBSTR(d.AC_DESC,1,20),'-'),22) || '|' || RPAD(' ' || NVL(d.CCY,'-'),6) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,22,6,18');
     END IF;
 
     -- 7.9 Doublons : même P_NATIONAL_ID pour des clients différents

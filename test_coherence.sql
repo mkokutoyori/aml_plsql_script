@@ -1412,11 +1412,14 @@ BEGIN
       AND TRIM(c.COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
     print_test('COUNTRY(CUSTOMER) vs LOCAL_ADDR(KYC_RETAIL)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.COUNTRY',22) || '|' || RPAD(' KYC_R.LOCAL_ADDR_CTR',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(c.COUNTRY) AS country_cust, TRIM(r.LOCAL_ADDR_COUNTRY) AS local_addr,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
             WHERE c.COUNTRY IS NOT NULL AND TRIM(c.COUNTRY) IS NOT NULL
@@ -1424,10 +1427,13 @@ BEGIN
               AND TRIM(c.COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | COUNTRY=' || d.country_cust || ' LOCAL_ADDR=' || d.local_addr
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.country_cust,''),22) || '|' || RPAD(' ' || NVL(d.local_addr,''),22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 5.3 D_COUNTRY (PERSONAL) vs LOCAL_ADDR_COUNTRY (KYC_RETAIL)
@@ -1440,11 +1446,14 @@ BEGIN
       AND TRIM(p.D_COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY);
     print_test('D_COUNTRY(PERSONAL) vs LOCAL_ADDR(KYC)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' PERSONAL.D_COUNTRY',22) || '|' || RPAD(' KYC_R.LOCAL_ADDR_CTR',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(p.D_COUNTRY) AS d_country, TRIM(r.LOCAL_ADDR_COUNTRY) AS local_addr,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
             JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
@@ -1453,10 +1462,13 @@ BEGIN
               AND TRIM(p.D_COUNTRY) != TRIM(r.LOCAL_ADDR_COUNTRY)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | D_COUNTRY=' || d.d_country || ' LOCAL_ADDR=' || d.local_addr
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.d_country,''),22) || '|' || RPAD(' ' || NVL(d.local_addr,''),22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 5.4 P_COUNTRY (PERSONAL) vs HOME_ADDR_COUNTRY (KYC_RETAIL)
@@ -1469,11 +1481,14 @@ BEGIN
       AND TRIM(p.P_COUNTRY) != TRIM(r.HOME_ADDR_COUNTRY);
     print_test('P_COUNTRY(PERSONAL) vs HOME_ADDR(KYC)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' PERSONAL.P_COUNTRY',22) || '|' || RPAD(' KYC_R.HOME_ADDR_CTR',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, TRIM(p.P_COUNTRY) AS p_country, TRIM(r.HOME_ADDR_COUNTRY) AS home_addr,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
             JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
@@ -1482,10 +1497,13 @@ BEGIN
               AND TRIM(p.P_COUNTRY) != TRIM(r.HOME_ADDR_COUNTRY)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | P_COUNTRY=' || d.p_country || ' HOME_ADDR=' || d.home_addr
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.p_country,''),22) || '|' || RPAD(' ' || NVL(d.home_addr,''),22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 5.5 Non-résident mais pays = CMR

@@ -2018,7 +2018,10 @@ BEGIN
     );
     print_test('P_NATIONAL_ID en doublon (nb IDs)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 doublons (par nb occurrences) :');
+        tbl_line('4,22,6,60');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' P.P_NATIONAL_ID',22) || '|' || RPAD(' NB',6) || '|' || RPAD(' CLIENTS (CIF)',60) || '|');
+        tbl_line('4,22,6,60');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT p.P_NATIONAL_ID, COUNT(*) AS nb,
                    LISTAGG(p.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY p.CUSTOMER_NO) AS clients
@@ -2027,9 +2030,12 @@ BEGIN
             GROUP BY p.P_NATIONAL_ID HAVING COUNT(*) > 1
             ORDER BY COUNT(*) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ID=' || d.P_NATIONAL_ID || ' | x' || d.nb
-                || ' | Clients=' || SUBSTR(d.clients,1,60));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || NVL(d.P_NATIONAL_ID,''),22) || '|' || LPAD(d.nb,5) || ' |'
+                || RPAD(' ' || SUBSTR(d.clients,1,58),60) || '|');
         END LOOP;
+        tbl_line('4,22,6,60');
     END IF;
 
     -- 7.10 Doublons : même UNIQUE_ID_VALUE pour des clients différents
@@ -2040,7 +2046,10 @@ BEGIN
     );
     print_test('UNIQUE_ID_VALUE en doublon (nb IDs)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 doublons (par nb occurrences) :');
+        tbl_line('4,28,6,60');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' C.UNIQUE_ID_VALUE',28) || '|' || RPAD(' NB',6) || '|' || RPAD(' CLIENTS (CIF)',60) || '|');
+        tbl_line('4,28,6,60');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.UNIQUE_ID_VALUE, COUNT(*) AS nb,
                    LISTAGG(c.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY c.CUSTOMER_NO) AS clients
@@ -2049,9 +2058,12 @@ BEGIN
             GROUP BY c.UNIQUE_ID_VALUE HAVING COUNT(*) > 1
             ORDER BY COUNT(*) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    UID=' || SUBSTR(d.UNIQUE_ID_VALUE,1,25) || ' | x' || d.nb
-                || ' | Clients=' || SUBSTR(d.clients,1,60));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || SUBSTR(d.UNIQUE_ID_VALUE,1,26),28) || '|' || LPAD(d.nb,5) || ' |'
+                || RPAD(' ' || SUBSTR(d.clients,1,58),60) || '|');
         END LOOP;
+        tbl_line('4,28,6,60');
     END IF;
 
     -- 7.11 Client DECEASED=Y avec des comptes non bloqués
@@ -2066,20 +2078,26 @@ BEGIN
       );
     print_test('Client DECEASED avec comptes non bloqués', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,12,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' C.DECEASED',12) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,12,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO||'(B='||NVL(a.AC_STAT_BLOCK,'N')||' F='||NVL(a.AC_STAT_FROZEN,'N')||')',', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             WHERE c.DECEASED = 'Y'
               AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.AC_STAT_BLOCK != 'Y' AND a.AC_STAT_FROZEN != 'Y')
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | DECEASED=Y'
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,60));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' Y',12) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,12,18');
     END IF;
 
     -- 7.12 Comptes avec transactions mais client sans KYC

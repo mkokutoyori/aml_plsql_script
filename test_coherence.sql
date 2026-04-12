@@ -1163,6 +1163,106 @@ BEGIN
         tbl_line('4,13,28,22,6,18');
     END IF;
 
+    -- 3.18 Âge >= 60 mais catégorie != SENIORS et != VPFP
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE c.CUSTOMER_TYPE = 'I'
+      AND p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 >= 60
+      AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY NOT IN ('SENIORS','VPFP'));
+    print_test('Âge >= 60 mais catégorie != SENIORS/VPFP', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,22,6,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',22) || '|' || RPAD(' AGE',6) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,6,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                   TRUNC(MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12) AS age,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            WHERE c.CUSTOMER_TYPE = 'I'
+              AND p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 >= 60
+              AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY NOT IN ('SENIORS','VPFP'))
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),22) || '|' || LPAD(d.age,5) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,22,6,18');
+    END IF;
+
+    -- 3.19 RESIDENT=N (KYC) mais catégorie != NRA1/NRA2/FOREIGN
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+    WHERE r.RESIDENT = 'N'
+      AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY NOT IN ('NRA1','NRA2','FOREIGN'));
+    print_test('RESIDENT=N (KYC) mais catégorie != NRA', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,14,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' KYC_R.RESIDENT',14) || '|' || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,14,20,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, r.RESIDENT,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            WHERE r.RESIDENT = 'N'
+              AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY NOT IN ('NRA1','NRA2','FOREIGN'))
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.RESIDENT,'-'),14) || '|' || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,14,20,18');
+    END IF;
+
+    -- 3.20 Catégorie SAL mais SALARY_INCOME NULL ou 0
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+    WHERE c.CUSTOMER_CATEGORY = 'SAL'
+      AND (r.SALARY_INCOME IS NULL OR TRIM(r.SALARY_INCOME) IS NULL);
+    print_test('Catégorie SAL mais SALARY_INCOME vide', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,20,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' KYC_R.SALARY_INC',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,20,20,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, r.SALARY_INCOME,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            WHERE c.CUSTOMER_CATEGORY = 'SAL'
+              AND (r.SALARY_INCOME IS NULL OR TRIM(r.SALARY_INCOME) IS NULL)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|' || RPAD(' ' || NVL(d.SALARY_INCOME,'NULL'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,20,20,18');
+    END IF;
+
     -- =========================================================
     -- 4. COHERENCE STATUTS COMPTES
     --    STTM_CUST_ACCOUNT vs STTB_ACCOUNT

@@ -770,20 +770,27 @@ BEGIN
       AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 60;
     print_test('SENIORS mais âge < 60 ans', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,6,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' PERSONAL.DATE_OF_BIRTH',22) || '|' || RPAD(' AGE',6) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,6,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
                    TRUNC(MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12) AS age_val,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   TO_CHAR(p.DATE_OF_BIRTH,'DD/MM/YYYY') AS dob,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
             WHERE c.CUSTOMER_CATEGORY = 'SENIORS' AND p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 60
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
-                || ' | Cat=SENIORS Âge=' || d.age_val
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,50));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.dob,''),22) || '|' || LPAD(d.age_val,5) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,6,18');
     END IF;
 
     -- 3.5 Catégorie STUDENTS mais âge hors 19-28
@@ -793,21 +800,28 @@ BEGIN
       AND (MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 19 OR MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 > 28);
     print_test('STUDENTS mais âge hors [19-28] ans', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,6,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' PERSONAL.DATE_OF_BIRTH',22) || '|' || RPAD(' AGE',6) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,6,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
                    TRUNC(MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12) AS age_val,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   TO_CHAR(p.DATE_OF_BIRTH,'DD/MM/YYYY') AS dob,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
             WHERE c.CUSTOMER_CATEGORY = 'STUDENTS' AND p.DATE_OF_BIRTH IS NOT NULL
               AND (MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 19 OR MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 > 28)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
-                || ' | Cat=STUDENTS Âge=' || d.age_val
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,50));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.dob,''),22) || '|' || LPAD(d.age_val,5) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,6,18');
     END IF;
 
     -- 3.6 CSE1 (fonctionnaires < 250K) mais revenu >= 250000
@@ -816,19 +830,25 @@ BEGIN
     WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 250000;
     print_test('CSE1 (< 250K) mais TOTAL_INCOME >= 250K', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,20,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' KYC_R.TOTAL_INCOME',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,20,20,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
             WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 250000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
-                || ' | Cat=CSE1 Income=' || TO_CHAR(d.TOTAL_INCOME,'FM999G999G999')
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,50));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' CSE1',20) || '|' || LPAD(TO_CHAR(d.TOTAL_INCOME,'FM999G999G999'),19) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,20,20,18');
     END IF;
 
     -- 3.7 CSE2 (fonctionnaires > 250K) mais revenu < 250000

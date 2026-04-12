@@ -1024,20 +1024,26 @@ BEGIN
       AND CUSTOMER_TYPE != 'I';
     print_test('Catégorie individuelle mais TYPE != I', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,20,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' CUSTOMER.CUST_TYPE',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,20,20,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, c.CUSTOMER_TYPE,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             WHERE c.CUSTOMER_CATEGORY IN ('INDV','MINORS','STUDENTS','SENIORS','CSE1','CSE2','PSE1','PSE2','PSE3','PFBI','VPFP','SAL','STAF','RSA','RSA1','ABWP','PEP/FEPS','NRA1','NRA2')
               AND c.CUSTOMER_TYPE != 'I'
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
-                || ' | Cat=' || d.CUSTOMER_CATEGORY || ' Type=' || d.CUSTOMER_TYPE
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,50));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|' || RPAD(' ' || NVL(d.CUSTOMER_TYPE,'-'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,20,20,18');
     END IF;
 
     -- 3.14 Catégorie corporate mais CUSTOMER_TYPE != C
@@ -1047,20 +1053,26 @@ BEGIN
       AND CUSTOMER_TYPE != 'C';
     print_test('Catégorie corporate mais TYPE != C', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,20,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' CUSTOMER.CUST_TYPE',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,20,20,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY, c.CUSTOMER_TYPE,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             WHERE c.CUSTOMER_CATEGORY IN ('CORP','SME','NGOs','GOVT','GOVT INST','INSURANCE','CONSTRUCTN','HOSPITALIT','OIL&GAS','FIN_INT')
               AND c.CUSTOMER_TYPE != 'C'
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,30)
-                || ' | Cat=' || d.CUSTOMER_CATEGORY || ' Type=' || d.CUSTOMER_TYPE
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,50));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|' || RPAD(' ' || NVL(d.CUSTOMER_TYPE,'-'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,20,20,18');
     END IF;
 
     -- =========================================================
@@ -1077,21 +1089,27 @@ BEGIN
       AND a.AC_STAT_DORMANT != b.AC_STAT_DORMANT;
     print_test('Dormant discordant CUST_ACCOUNT vs STTB', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' COMPTE',22) || '|'
+            || RPAD(' CUST_AC.DORMANT',22) || '|' || RPAD(' STTB_AC.DORMANT',22) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_AC_NO, a.CUST_NO, a.AC_STAT_DORMANT AS cust_val, b.AC_STAT_DORMANT AS sttb_val,
-                   a.ACY_CURR_BALANCE AS solde,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO=a.CUST_NO),'-') AS nom
+                   a.ACY_CURR_BALANCE AS solde
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
             WHERE a.AC_STAT_DORMANT IS NOT NULL AND b.AC_STAT_DORMANT IS NOT NULL
               AND a.AC_STAT_DORMANT != b.AC_STAT_DORMANT
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | CUST=' || d.cust_val || ' STTB=' || d.sttb_val
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || NVL(d.cust_val,''),22) || '|' || RPAD(' ' || NVL(d.sttb_val,''),22) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,22,22,18');
     END IF;
 
     -- 4.2 Statut frozen discordant

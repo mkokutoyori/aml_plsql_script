@@ -1727,7 +1727,10 @@ BEGIN
       );
     print_test('STDCUSAC : UDF sans compte CUST_ACCOUNT', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (premiers rec_key) :');
+        tbl_line('4,14,30,40');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' BRANCHE',14) || '|' || RPAD(' UDF.AC_NO',30) || '|' || RPAD(' UDF.REC_KEY',40) || '|');
+        tbl_line('4,14,30,40');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT u.rec_key,
                    SUBSTR(u.rec_key, 1, INSTR(u.rec_key, '~', 1, 1) - 1) AS branch,
@@ -1742,8 +1745,12 @@ BEGIN
               )
             ORDER BY u.rec_key
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    REC_KEY=' || SUBSTR(d.rec_key,1,50) || ' | AC_NO=' || d.ac_no);
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.branch,14) || '|' || RPAD(' ' || d.ac_no,30) || '|'
+                || RPAD(' ' || SUBSTR(d.rec_key,1,38),40) || '|');
         END LOOP;
+        tbl_line('4,14,30,40');
     END IF;
 
     -- 6.6 STDCIF : nombre d'enregistrements UDF vs nombre de clients
@@ -1778,20 +1785,26 @@ BEGIN
       );
     print_test('KYC_REF_NO orphelins (absent de MASTER)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.KYC_REF_NO',22) || '|' || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,20,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.KYC_REF_NO, c.CUSTOMER_CATEGORY,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c
             WHERE c.KYC_REF_NO IS NOT NULL AND TRIM(c.KYC_REF_NO) IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM STTM_KYC_MASTER m WHERE m.KYC_REF_NO = c.KYC_REF_NO)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | KYC=' || d.KYC_REF_NO || ' Cat=' || d.CUSTOMER_CATEGORY
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.KYC_REF_NO,''),22) || '|' || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,20,18');
     END IF;
 
     -- 7.2 KYC_MASTER non référencé par aucun client
@@ -1802,16 +1815,23 @@ BEGIN
     );
     print_test('KYC_MASTER sans client associé', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (premiers KYC_REF_NO) :');
+        tbl_line('4,22,14,16,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' KYC_M.KYC_REF_NO',22) || '|'
+            || RPAD(' KYC_M.CUST_TYP',14) || '|' || RPAD(' KYC_M.MAKER_ID',16) || '|' || RPAD(' KYC_M.MAKER_DT',14) || '|');
+        tbl_line('4,22,14,16,14');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT m.KYC_REF_NO, m.KYC_TYPE, NVL(m.MAKER_ID,'-') AS maker, NVL(TO_CHAR(m.MAKER_DT_STAMP,'DD/MM/YYYY'),'-') AS dt
+            SELECT m.KYC_REF_NO, m.KYC_CUST_TYPE, NVL(m.MAKER_ID,'-') AS maker, NVL(TO_CHAR(m.MAKER_DT_STAMP,'DD/MM/YYYY'),'-') AS dt
             FROM STTM_KYC_MASTER m
             WHERE NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO = m.KYC_REF_NO)
             ORDER BY m.KYC_REF_NO
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    KYC=' || d.KYC_REF_NO || ' | Type=' || NVL(d.KYC_TYPE,'-')
-                || ' | Maker=' || d.maker || ' | Date=' || d.dt);
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.KYC_REF_NO,22) || '|' || RPAD(' ' || NVL(d.KYC_CUST_TYPE,'-'),14) || '|'
+                || RPAD(' ' || d.maker,16) || '|' || RPAD(' ' || d.dt,14) || '|');
         END LOOP;
+        tbl_line('4,22,14,16,14');
     END IF;
 
     -- 7.3 AML_REQUIRED=Y mais sans KYC

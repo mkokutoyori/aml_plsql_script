@@ -1075,6 +1075,94 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
+    -- 3.15 Client sans catégorie (CUSTOMER_CATEGORY NULL)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER
+    WHERE CUSTOMER_CATEGORY IS NULL OR TRIM(CUSTOMER_CATEGORY) IS NULL;
+    print_test('Client sans catégorie (CATEGORY NULL)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,12,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' C.CUST_TYPE',12) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,12,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_TYPE,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            WHERE c.CUSTOMER_CATEGORY IS NULL OR TRIM(c.CUSTOMER_CATEGORY) IS NULL
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_TYPE,'-'),12) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,12,18');
+    END IF;
+
+    -- 3.16 Catégorie non référencée dans STTM_CUSTOMER_CAT
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_CATEGORY IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER_CAT t WHERE t.CUST_CAT = c.CUSTOMER_CATEGORY);
+    print_test('Catégorie absente de STTM_CUSTOMER_CAT', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,20,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',20) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,20,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            WHERE c.CUSTOMER_CATEGORY IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM STTM_CUSTOMER_CAT t WHERE t.CUST_CAT = c.CUSTOMER_CATEGORY)
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),20) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,20,18');
+    END IF;
+
+    -- 3.17 Âge < 18 mais catégorie != MINORS
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+    WHERE p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 18
+      AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY != 'MINORS');
+    print_test('Âge < 18 mais catégorie != MINORS', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,22,6,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' CUSTOMER.CUST_CAT',22) || '|' || RPAD(' AGE',6) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,6,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.CUSTOMER_CATEGORY,
+                   TRUNC(MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12) AS age,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_PERSONAL p ON p.CUSTOMER_NO = c.CUSTOMER_NO
+            WHERE p.DATE_OF_BIRTH IS NOT NULL AND MONTHS_BETWEEN(SYSDATE, p.DATE_OF_BIRTH)/12 < 18
+              AND (c.CUSTOMER_CATEGORY IS NULL OR c.CUSTOMER_CATEGORY != 'MINORS')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),22) || '|' || LPAD(d.age,5) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,22,6,18');
+    END IF;
+
     -- =========================================================
     -- 4. COHERENCE STATUTS COMPTES
     --    STTM_CUST_ACCOUNT vs STTB_ACCOUNT

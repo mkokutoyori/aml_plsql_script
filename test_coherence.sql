@@ -1120,21 +1120,27 @@ BEGIN
       AND a.AC_STAT_FROZEN != b.AC_STAT_FROZEN;
     print_test('Frozen discordant CUST_ACCOUNT vs STTB', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' COMPTE',22) || '|'
+            || RPAD(' CUST_AC.FROZEN',22) || '|' || RPAD(' STTB_AC.FROZEN',22) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_AC_NO, a.CUST_NO, a.AC_STAT_FROZEN AS cust_val, b.AC_STAT_FROZEN AS sttb_val,
-                   a.ACY_CURR_BALANCE AS solde,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO=a.CUST_NO),'-') AS nom
+                   a.ACY_CURR_BALANCE AS solde
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
             WHERE a.AC_STAT_FROZEN IS NOT NULL AND b.AC_STAT_FROZEN IS NOT NULL
               AND a.AC_STAT_FROZEN != b.AC_STAT_FROZEN
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | CUST=' || d.cust_val || ' STTB=' || d.sttb_val
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || NVL(d.cust_val,''),22) || '|' || RPAD(' ' || NVL(d.sttb_val,''),22) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,22,22,18');
     END IF;
 
     -- 4.3 Statut blocked discordant
@@ -1145,21 +1151,27 @@ BEGIN
       AND a.AC_STAT_BLOCK != b.GL_STAT_BLOCKED;
     print_test('Blocked discordant CUST_ACCOUNT vs STTB', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' COMPTE',22) || '|'
+            || RPAD(' CUST_AC.BLOCK',22) || '|' || RPAD(' STTB_AC.BLOCKED',22) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_AC_NO, a.CUST_NO, a.AC_STAT_BLOCK AS cust_val, b.GL_STAT_BLOCKED AS sttb_val,
-                   a.ACY_CURR_BALANCE AS solde,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO=a.CUST_NO),'-') AS nom
+                   a.ACY_CURR_BALANCE AS solde
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
             WHERE a.AC_STAT_BLOCK IS NOT NULL AND b.GL_STAT_BLOCKED IS NOT NULL
               AND a.AC_STAT_BLOCK != b.GL_STAT_BLOCKED
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | CUST=' || d.cust_val || ' STTB=' || d.sttb_val
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || NVL(d.cust_val,''),22) || '|' || RPAD(' ' || NVL(d.sttb_val,''),22) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,22,22,18');
     END IF;
 
     -- 4.4 Statut no_dr discordant
@@ -1170,21 +1182,27 @@ BEGIN
       AND a.AC_STAT_NO_DR != b.AC_STAT_NO_DR;
     print_test('No DR discordant CUST_ACCOUNT vs STTB', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' COMPTE',22) || '|'
+            || RPAD(' CUST_AC.NO_DR',22) || '|' || RPAD(' STTB_AC.NO_DR',22) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_AC_NO, a.CUST_NO, a.AC_STAT_NO_DR AS cust_val, b.AC_STAT_NO_DR AS sttb_val,
-                   a.ACY_CURR_BALANCE AS solde,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.CUSTOMER_NO=a.CUST_NO),'-') AS nom
+                   a.ACY_CURR_BALANCE AS solde
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT b ON b.AC_GL_NO = a.CUST_AC_NO AND b.BRANCH_CODE = a.BRANCH_CODE
             WHERE a.AC_STAT_NO_DR IS NOT NULL AND b.AC_STAT_NO_DR IS NOT NULL
               AND a.AC_STAT_NO_DR != b.AC_STAT_NO_DR
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | CUST=' || d.cust_val || ' STTB=' || d.sttb_val
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || NVL(d.cust_val,''),22) || '|' || RPAD(' ' || NVL(d.sttb_val,''),22) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,22,22,18');
     END IF;
 
     -- 4.5 Statut no_cr discordant

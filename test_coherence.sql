@@ -2108,7 +2108,11 @@ BEGIN
     WHERE (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL);
     print_test('Comptes actifs (txn) sans KYC client', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,22,28,8,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' CA.CUST_AC_NO',22) || '|'
+            || RPAD(' NOM CLIENT',28) || '|' || RPAD(' NB TXN',8) || '|' || RPAD(' SOLDE',18) || '|');
+        tbl_line('4,13,22,28,8,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT a.CUST_AC_NO, a.CUST_NO, c.CUSTOMER_NAME1, a.ACY_CURR_BALANCE AS solde,
                    (SELECT COUNT(*) FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO) AS nb_txn
@@ -2118,10 +2122,13 @@ BEGIN
               AND EXISTS (SELECT 1 FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO)
             ORDER BY a.ACY_CURR_BALANCE DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUST_AC_NO || ' | ' || d.CUST_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | KYC=NULL Txns=' || d.nb_txn
-                || ' | Solde=' || TO_CHAR(d.solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || d.CUST_AC_NO,22) || '|'
+                || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|' || LPAD(d.nb_txn,7) || ' |'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,22,28,8,18');
     END IF;
 
     -- 7.13 Maker = Checker sur les dossiers KYC (ségrégation)
@@ -2132,19 +2139,28 @@ BEGIN
       AND MAKER_ID != 'MIGRATION';
     print_test('KYC Maker=Checker (hors MIGRATION)', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par date) :');
+        tbl_line('4,13,28,16,14,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' M.MAKER_ID',16) || '|' || RPAD(' M.MAKER_DT',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,16,14,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT m.KYC_REF_NO, m.MAKER_ID, NVL(TO_CHAR(m.MAKER_DT_STAMP,'DD/MM/YYYY'),'-') AS dt,
                    NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1),'-') AS nom
+                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=m.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
             FROM STTM_KYC_MASTER m
             WHERE m.MAKER_ID IS NOT NULL AND m.CHECKER_ID IS NOT NULL
               AND m.MAKER_ID = m.CHECKER_ID AND m.MAKER_ID != 'MIGRATION'
             ORDER BY m.MAKER_DT_STAMP DESC NULLS LAST
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | KYC=' || d.KYC_REF_NO || ' Maker=Checker=' || d.MAKER_ID || ' Date=' || d.dt);
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cust_no,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,26),28) || '|'
+                || RPAD(' ' || NVL(d.MAKER_ID,''),16) || '|' || RPAD(' ' || NVL(d.dt,''),14) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,16,14,18');
     END IF;
 
     -- =========================================================

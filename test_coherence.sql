@@ -1609,11 +1609,14 @@ BEGIN
       AND (c.FROZEN IS NULL OR c.FROZEN != 'Y');
     print_test('UDF compliance_watchlist=Y mais non FROZEN', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' UDF.WATCHLIST',22) || '|' || RPAD(' CUSTOMER.FROZEN',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, NVL(c.FROZEN,'N') AS frozen_val,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
-                   NVL((SELECT LISTAGG(a.CUST_AC_NO,', ') WITHIN GROUP(ORDER BY a.CUST_AC_NO) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),'AUCUN') AS comptes
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM cstm_function_userdef_fields u
             JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = SUBSTR(u.rec_key, 1, INSTR(u.rec_key, '~', 1, 1) - 1)
             WHERE u.function_id = 'STDCIF'
@@ -1621,10 +1624,13 @@ BEGIN
               AND (c.FROZEN IS NULL OR c.FROZEN != 'Y')
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' | ' || SUBSTR(d.CUSTOMER_NAME1,1,25)
-                || ' | Watchlist=Y FROZEN=' || d.frozen_val
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00') || ' | Cptes=' || SUBSTR(d.comptes,1,40));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || RPAD(' Y',22) || '|' || RPAD(' ' || d.frozen_val,22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 6.2 STDKYCMN : pep_status vs PEP dans KYC_RETAIL
@@ -1636,7 +1642,11 @@ BEGIN
       AND (r.PEP IS NULL OR r.PEP != 'Y');
     print_test('UDF PEP_STATUS=Y mais KYC PEP != Y', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' UDF.PEP_STATUS',22) || '|' || RPAD(' KYC_RETAIL.PEP',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT r.KYC_REF_NO,
                    NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
@@ -1650,10 +1660,13 @@ BEGIN
               AND (r.PEP IS NULL OR r.PEP != 'Y')
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | UDF_PEP=Y KYC_PEP=' || d.pep_kyc || ' KYC=' || d.KYC_REF_NO
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cust_no,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,26),28) || '|'
+                || RPAD(' Y',22) || '|' || RPAD(' ' || d.pep_kyc,22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 6.3 STDKYCMN : PEP=Y dans KYC mais pep_status UDF != Y
@@ -1666,7 +1679,11 @@ BEGIN
       AND (u.field_val_1 IS NULL OR UPPER(TRIM(u.field_val_1)) != 'Y');
     print_test('KYC PEP=Y mais UDF pep_status != Y', v_count);
     IF v_count > 0 THEN
-        DBMS_OUTPUT.PUT_LINE('    TOP 30 (par solde) :');
+        tbl_line('4,13,28,22,22,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' KYC_RETAIL.PEP',22) || '|' || RPAD(' UDF.PEP_STATUS',22) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,28,22,22,18');
+        v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT r.KYC_REF_NO, NVL(UPPER(TRIM(u.field_val_1)),'NULL') AS udf_pep,
                    NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
@@ -1680,10 +1697,13 @@ BEGIN
               AND (u.field_val_1 IS NULL OR UPPER(TRIM(u.field_val_1)) != 'Y')
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
-            DBMS_OUTPUT.PUT_LINE('    ' || d.cust_no || ' | ' || SUBSTR(d.nom,1,25)
-                || ' | KYC_PEP=Y UDF_PEP=' || d.udf_pep || ' KYC=' || d.KYC_REF_NO
-                || ' | Solde=' || TO_CHAR(d.total_solde,'FM999G999G999G999D00'));
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cust_no,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,26),28) || '|'
+                || RPAD(' Y',22) || '|' || RPAD(' ' || d.udf_pep,22) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
         END LOOP;
+        tbl_line('4,13,28,22,22,18');
     END IF;
 
     -- 6.4 SMDUSRDF : email vide pour des utilisateurs actifs

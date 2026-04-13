@@ -2126,14 +2126,15 @@ BEGIN
         tbl_line('4,13,28,16,12,18');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT r.KYC_REF_NO, TO_CHAR(r.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
+            SELECT NVL(c.CUSTOMER_NO,'-') AS cust_no, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   TO_CHAR(r.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
                    TRUNC(SYSDATE - r.KYC_NXT_REVIEW_DATE) AS jours_retard,
-                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+                   NVL(bal.total_solde,0) AS total_solde
             FROM STTM_KYC_RETAIL r
+            LEFT JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = r.KYC_REF_NO
+            LEFT JOIN (SELECT CUST_NO, SUM(ACY_CURR_BALANCE) AS total_solde FROM STTM_CUST_ACCOUNT GROUP BY CUST_NO) bal ON bal.CUST_NO = c.CUSTOMER_NO
             WHERE r.KYC_NXT_REVIEW_DATE IS NOT NULL AND r.KYC_NXT_REVIEW_DATE < SYSDATE
-            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=r.KYC_REF_NO AND ROWNUM=1)),0) DESC
+            ORDER BY NVL(bal.total_solde,0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
@@ -2157,14 +2158,15 @@ BEGIN
         tbl_line('4,13,28,16,12,18');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT k.KYC_REF_NO, TO_CHAR(k.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
+            SELECT NVL(c.CUSTOMER_NO,'-') AS cust_no, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   TO_CHAR(k.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
                    TRUNC(SYSDATE - k.KYC_NXT_REVIEW_DATE) AS jours_retard,
-                   NVL((SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1),'-') AS cust_no,
-                   NVL((SELECT c.CUSTOMER_NAME1 FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1),'-') AS nom,
-                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1)),0) AS total_solde
+                   NVL(bal.total_solde,0) AS total_solde
             FROM STTM_KYC_CORPORATE k
+            LEFT JOIN STTM_CUSTOMER c ON c.KYC_REF_NO = k.KYC_REF_NO
+            LEFT JOIN (SELECT CUST_NO, SUM(ACY_CURR_BALANCE) AS total_solde FROM STTM_CUST_ACCOUNT GROUP BY CUST_NO) bal ON bal.CUST_NO = c.CUSTOMER_NO
             WHERE k.KYC_NXT_REVIEW_DATE IS NOT NULL AND k.KYC_NXT_REVIEW_DATE < SYSDATE
-            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=(SELECT c.CUSTOMER_NO FROM STTM_CUSTOMER c WHERE c.KYC_REF_NO=k.KYC_REF_NO AND ROWNUM=1)),0) DESC
+            ORDER BY NVL(bal.total_solde,0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
@@ -2246,13 +2248,19 @@ BEGIN
         tbl_line('4,22,6,60');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT p.P_NATIONAL_ID, COUNT(*) AS nb,
-                   LISTAGG(p.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY p.CUSTOMER_NO) AS clients
-            FROM STTM_CUST_PERSONAL p
-            WHERE p.P_NATIONAL_ID IS NOT NULL AND TRIM(p.P_NATIONAL_ID) IS NOT NULL
-            GROUP BY p.P_NATIONAL_ID HAVING COUNT(*) > 1
-            ORDER BY COUNT(*) DESC
-        ) WHERE ROWNUM <= 30) LOOP
+            SELECT g.nat_id AS P_NATIONAL_ID, g.nb,
+                   (SELECT LISTAGG(x.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY x.CUSTOMER_NO)
+                    FROM (SELECT CUSTOMER_NO FROM STTM_CUST_PERSONAL WHERE P_NATIONAL_ID = g.nat_id AND ROWNUM <= 15) x
+                   ) AS clients
+            FROM (
+                SELECT P_NATIONAL_ID AS nat_id, COUNT(*) AS nb
+                FROM STTM_CUST_PERSONAL
+                WHERE P_NATIONAL_ID IS NOT NULL AND TRIM(P_NATIONAL_ID) IS NOT NULL
+                GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
+                ORDER BY COUNT(*) DESC
+            ) g
+            WHERE ROWNUM <= 30
+        )) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || NVL(d.P_NATIONAL_ID,''),22) || '|' || LPAD(d.nb,5) || ' |'
@@ -2274,13 +2282,19 @@ BEGIN
         tbl_line('4,28,6,60');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT c.UNIQUE_ID_VALUE, COUNT(*) AS nb,
-                   LISTAGG(c.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY c.CUSTOMER_NO) AS clients
-            FROM STTM_CUSTOMER c
-            WHERE c.UNIQUE_ID_VALUE IS NOT NULL AND TRIM(c.UNIQUE_ID_VALUE) IS NOT NULL
-            GROUP BY c.UNIQUE_ID_VALUE HAVING COUNT(*) > 1
-            ORDER BY COUNT(*) DESC
-        ) WHERE ROWNUM <= 30) LOOP
+            SELECT g.uid_val AS UNIQUE_ID_VALUE, g.nb,
+                   (SELECT LISTAGG(x.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY x.CUSTOMER_NO)
+                    FROM (SELECT CUSTOMER_NO FROM STTM_CUSTOMER WHERE UNIQUE_ID_VALUE = g.uid_val AND ROWNUM <= 15) x
+                   ) AS clients
+            FROM (
+                SELECT UNIQUE_ID_VALUE AS uid_val, COUNT(*) AS nb
+                FROM STTM_CUSTOMER
+                WHERE UNIQUE_ID_VALUE IS NOT NULL AND TRIM(UNIQUE_ID_VALUE) IS NOT NULL
+                GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+                ORDER BY COUNT(*) DESC
+            ) g
+            WHERE ROWNUM <= 30
+        )) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || SUBSTR(d.UNIQUE_ID_VALUE,1,26),28) || '|' || LPAD(d.nb,5) || ' |'

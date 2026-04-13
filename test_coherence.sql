@@ -2691,15 +2691,16 @@ BEGIN
     );
     print_test('Individus : même profil mais RISK différent (nb groupes)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+        tbl_line('4,12,18,24,20,8,4,4,5,14,14');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',18) || '|'
-            || RPAD(' PROFESSION',12) || '|' || RPAD(' CAT',8) || '|' || RPAD(' RISK',8) || '|'
+            || RPAD(' PROFESSION',24) || '|' || RPAD(' CATEGORIE',20) || '|' || RPAD(' RISK',8) || '|'
             || RPAD(' PEP',4) || '|' || RPAD(' RES',4) || '|' || RPAD(' NAT',5) || '|'
             || RPAD(' TOTAL_INCOME',14) || '|' || RPAD(' SOLDE CPTES',14) || '|');
-        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+        tbl_line('4,12,18,24,20,8,4,4,5,14,14');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, c.CUSTOMER_CATEGORY,
+                   NVL(cc.CUST_CAT_DESC, c.CUSTOMER_CATEGORY) AS cat_desc,
                    m.RISK_LEVEL, NVL(r.PEP,'N') AS pep, NVL(r.RESIDENT,'?') AS resident_st,
                    r.TOTAL_INCOME,
                    NVL(uf.FIELD_VAL_1,'-') AS profession,
@@ -2710,6 +2711,8 @@ BEGIN
             LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
             LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf
                    ON uf.FUNCTION_ID = 'STDCIF' AND uf.REC_KEY = c.CUSTOMER_NO || '~'
+            LEFT JOIN STTM_CUSTOMER_CAT cc
+                   ON cc.CUST_CAT = c.CUSTOMER_CATEGORY
             WHERE c.CUSTOMER_TYPE = 'I'
               AND m.RISK_LEVEL IS NOT NULL
               AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
@@ -2737,13 +2740,13 @@ BEGIN
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,12) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,16),18) || '|'
-                || RPAD(' ' || SUBSTR(d.profession,1,10),12) || '|' || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),8) || '|'
+                || RPAD(' ' || SUBSTR(d.profession,1,22),24) || '|' || RPAD(' ' || SUBSTR(NVL(d.cat_desc,'-'),1,18),20) || '|'
                 || RPAD(' ' || NVL(d.RISK_LEVEL,'-'),8) || '|' || RPAD(' ' || d.pep,4) || '|'
                 || RPAD(' ' || d.resident_st,4) || '|' || RPAD(' ' || NVL(d.NATIONALITY,'-'),5) || '|'
                 || LPAD(TO_CHAR(NVL(d.TOTAL_INCOME,0),'FM999G999G990'),13) || ' |'
                 || LPAD(TO_CHAR(d.total_solde,'FM999G999G990'),13) || ' |');
         END LOOP;
-        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+        tbl_line('4,12,18,24,20,8,4,4,5,14,14');
     END IF;
 
     -- 7.18 Clients avec plusieurs profils (même nom + même TAX_ID) mais risk level différent

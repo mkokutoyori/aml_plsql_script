@@ -1263,6 +1263,41 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
+    -- 3.21 Solde total > 10x TOTAL_INCOME annuel déclaré
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+    WHERE r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0
+      AND NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) > r.TOTAL_INCOME * 10;
+    print_test('Solde total > 10x TOTAL_INCOME annuel', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,28,18,18,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
+            || RPAD(' KYC_R.TOTAL_INC',18) || '|' || RPAD(' SOLDE TOTAL',18) || '|' || RPAD(' RATIO (x)',18) || '|');
+        tbl_line('4,13,28,18,18,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde,
+                   ROUND(NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) / r.TOTAL_INCOME, 1) AS ratio
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            WHERE r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0
+              AND NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) > r.TOTAL_INCOME * 10
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,26),28) || '|'
+                || LPAD(TO_CHAR(d.TOTAL_INCOME,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.ratio,'FM999G990D0') || 'x',17) || ' |');
+        END LOOP;
+        tbl_line('4,13,28,18,18,18');
+    END IF;
+
     -- =========================================================
     -- 4. COHERENCE STATUTS COMPTES
     --    STTM_CUST_ACCOUNT vs STTB_ACCOUNT

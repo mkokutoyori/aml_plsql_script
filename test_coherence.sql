@@ -2388,6 +2388,102 @@ BEGIN
         tbl_line('4,13,28,16,14,18');
     END IF;
 
+    -- 7.14 PEP/FEP : même TOTAL_INCOME et même NATIONALITY mais RISK_LEVEL différent
+    --      (uniquement clients avec comptes ouverts et actifs)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT c.CUSTOMER_NO
+        FROM STTM_CUSTOMER c
+        JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+        WHERE (r.PEP = 'Y' OR c.CUSTOMER_CATEGORY = 'PEP/FEPS')
+          AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+          AND EXISTS (
+              SELECT 1 FROM STTM_CUSTOMER c2
+              JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+              LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
+              WHERE (r2.PEP = 'Y' OR c2.CUSTOMER_CATEGORY = 'PEP/FEPS')
+                AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                AND NVL(r2.TOTAL_INCOME, -1) = NVL(r.TOTAL_INCOME, -1)
+                AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+          )
+    );
+    print_test('PEP : même INCOME+NATIONALITE mais RISK différent', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,12,8,16,6,6,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' PEP SOURCE',12) || '|' || RPAD(' RISK',8) || '|' || RPAD(' TOTAL_INCOME',16) || '|'
+            || RPAD(' CTRY',6) || '|' || RPAD(' NAT',6) || '|' || RPAD(' SOLDE CPTES',16) || '|');
+        tbl_line('4,12,22,12,8,16,6,6,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, c.COUNTRY,
+                   r.TOTAL_INCOME, m.RISK_LEVEL,
+                   CASE
+                       WHEN r.PEP = 'Y' AND c.CUSTOMER_CATEGORY = 'PEP/FEPS' THEN 'PEP+CAT'
+                       WHEN r.PEP = 'Y' THEN 'KYC_R.PEP'
+                       ELSE 'CAT.PEP'
+                   END AS pep_src,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a
+                        WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            WHERE (r.PEP = 'Y' OR c.CUSTOMER_CATEGORY = 'PEP/FEPS')
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+              AND EXISTS (
+                  SELECT 1 FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
+                  WHERE (r2.PEP = 'Y' OR c2.CUSTOMER_CATEGORY = 'PEP/FEPS')
+                    AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                    AND NVL(r2.TOTAL_INCOME, -1) = NVL(r.TOTAL_INCOME, -1)
+                    AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                    AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+              )
+            ORDER BY c.NATIONALITY, r.TOTAL_INCOME, m.RISK_LEVEL, c.CUSTOMER_NO
+        ) WHERE ROWNUM <= 60) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,12) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,20),22) || '|'
+                || RPAD(' ' || d.pep_src,12) || '|' || RPAD(' ' || NVL(d.RISK_LEVEL,'-'),8) || '|'
+                || LPAD(TO_CHAR(NVL(d.TOTAL_INCOME,0),'FM999G999G999G990'),15) || ' |'
+                || RPAD(' ' || NVL(d.COUNTRY,'-'),6) || '|' || RPAD(' ' || NVL(d.NATIONALITY,'-'),6) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,12,8,16,6,6,16');
+        -- Détail des comptes ouverts pour chaque PEP flaggé
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('    Détail comptes ouverts :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO,
+                   RTRIM(SUBSTR(XMLAGG(XMLELEMENT(e, a.CUST_AC_NO || '(' || a.CCY || ':' || TO_CHAR(a.ACY_CURR_BALANCE,'FM999G999G990') || '), ')
+                       ORDER BY a.CUST_AC_NO).EXTRACT('//text()').GetClobVal(), 1, 200), ', ') AS detail_cptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            WHERE (r.PEP = 'Y' OR c.CUSTOMER_CATEGORY = 'PEP/FEPS')
+              AND EXISTS (
+                  SELECT 1 FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
+                  WHERE (r2.PEP = 'Y' OR c2.CUSTOMER_CATEGORY = 'PEP/FEPS')
+                    AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                    AND NVL(r2.TOTAL_INCOME, -1) = NVL(r.TOTAL_INCOME, -1)
+                    AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                    AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+              )
+            GROUP BY c.CUSTOMER_NO
+            ORDER BY c.CUSTOMER_NO
+        ) WHERE ROWNUM <= 60) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' → ' || d.detail_cptes);
+        END LOOP;
+    END IF;
+
     -- =========================================================
     -- FIN
     -- =========================================================

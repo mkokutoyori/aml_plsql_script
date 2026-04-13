@@ -2737,6 +2737,88 @@ BEGIN
     -- =========================================================
     print_section('8. COHERENCE BANQUES CORRESPONDANTES');
 
+    -- 8.0 Liste des banques ayant transacté avec nous (FT) en 2024 et 2025
+    v_test_no := v_test_no + 1;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  TEST ' || v_test_no || ': Banques correspondantes ayant transacté (module FT) — 2024 & 2025');
+    DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',100,'-'));
+
+    -- Année 2024
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  >>> ANNEE 2024');
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
+        || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' SWIFT',14) || '|'
+        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
+               NVL(m.RISK_LEVEL,'-') AS risk, NVL(c.SWIFT_CODE,'-') AS swift,
+               COUNT(h.TRN_REF_NO) AS nb_txn,
+               SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+               SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
+        FROM STTM_CUSTOMER c
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FT'
+             AND h.TRN_DT >= TO_DATE('01/01/2024','DD/MM/YYYY') AND h.TRN_DT < TO_DATE('01/01/2025','DD/MM/YYYY')
+        LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        WHERE c.CUSTOMER_TYPE = 'B'
+        GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL, c.SWIFT_CODE
+        ORDER BY SUM(h.LCY_AMOUNT) DESC
+    ) WHERE ROWNUM <= 50) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
+            || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
+            || RPAD(' ' || d.swift,14) || '|'
+            || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+            || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
+            || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+    END LOOP;
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    IF v_row_num = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('  (aucune transaction FT en 2024)');
+    END IF;
+
+    -- Année 2025
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  >>> ANNEE 2025');
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
+        || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' SWIFT',14) || '|'
+        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
+               NVL(m.RISK_LEVEL,'-') AS risk, NVL(c.SWIFT_CODE,'-') AS swift,
+               COUNT(h.TRN_REF_NO) AS nb_txn,
+               SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+               SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
+        FROM STTM_CUSTOMER c
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FT'
+             AND h.TRN_DT >= TO_DATE('01/01/2025','DD/MM/YYYY') AND h.TRN_DT < TO_DATE('01/01/2026','DD/MM/YYYY')
+        LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        WHERE c.CUSTOMER_TYPE = 'B'
+        GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL, c.SWIFT_CODE
+        ORDER BY SUM(h.LCY_AMOUNT) DESC
+    ) WHERE ROWNUM <= 50) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
+            || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
+            || RPAD(' ' || d.swift,14) || '|'
+            || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+            || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
+            || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+    END LOOP;
+    tbl_line('4,13,30,14,12,14,10,18,18');
+    IF v_row_num = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('  (aucune transaction FT en 2025)');
+    END IF;
+
     -- 8.1 Banques sans KYC (KYC_REF_NO absent ou vide)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c
@@ -3277,22 +3359,25 @@ BEGIN
         tbl_line('4,13,26,14,18,18,10');
     END IF;
 
-    -- 8.14 Transactions de change (MODULE=FX) avec banques correspondantes (12 mois)
+    -- 8.14 Transactions internationales (FT/FX/FS) avec banques correspondantes (12 mois)
     SELECT COUNT(*) INTO v_count FROM (
         SELECT c.CUSTOMER_NO
         FROM STTM_CUSTOMER c
         JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
-        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FX' AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE IN ('FT','FX','FS') AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
         WHERE c.CUSTOMER_TYPE = 'B'
         GROUP BY c.CUSTOMER_NO
     );
-    print_test('Banques avec transactions FX (change, 12 mois)', v_count);
+    print_test('Banques avec transactions FT/FX/FS (12 mois)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,14,12,10,16,16');
+        -- Tableau récapitulatif par banque (tous modules confondus)
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  --- Récapitulatif par banque (FT + FX + FS) ---');
+        tbl_line('4,13,26,14,12,10,18,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN FX',10) || '|'
-            || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
-        tbl_line('4,13,26,14,12,10,16,16');
+            || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
+            || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
+        tbl_line('4,13,26,14,12,10,18,18');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -3302,7 +3387,7 @@ BEGIN
                    SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
             FROM STTM_CUSTOMER c
             JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
-            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FX' AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE IN ('FT','FX','FS') AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
             LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
             WHERE c.CUSTOMER_TYPE = 'B'
             GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL
@@ -3313,10 +3398,41 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
-                || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+                || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
         END LOOP;
-        tbl_line('4,13,26,14,12,10,16,16');
+        tbl_line('4,13,26,14,12,10,18,18');
+
+        -- Détail par module
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('  --- Détail par module (FT=Funds Transfer, FX=Foreign Exchange, FS=FX Settlement) ---');
+        tbl_line('4,13,26,6,10,18,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' MOD.',6) || '|' || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
+        tbl_line('4,13,26,6,10,18,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, h.MODULE AS mod_code,
+                   COUNT(h.TRN_REF_NO) AS nb_txn,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit,
+                   SUM(h.LCY_AMOUNT) AS vol_total
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE IN ('FT','FX','FS') AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            WHERE c.CUSTOMER_TYPE = 'B'
+            GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, h.MODULE
+            ORDER BY SUM(h.LCY_AMOUNT) DESC
+        ) WHERE ROWNUM <= 60) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.mod_code,6) || '|'
+                || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+                || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,6,10,18,18');
     END IF;
 
     -- 8.15 Comptes banques ouverts sans aucune activité depuis 12 mois

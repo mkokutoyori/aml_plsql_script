@@ -824,11 +824,11 @@ BEGIN
         tbl_line('4,13,28,22,6,18');
     END IF;
 
-    -- 3.6 CSE1 (fonctionnaires < 250K) mais revenu >= 250000
+    -- 3.6 CSE1 (fonctionnaires < 250K/mois) mais revenu annuel >= 3.75M (250K x 15)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 250000;
-    print_test('CSE1 (< 250K) mais TOTAL_INCOME >= 250K', v_count);
+    WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 3750000;
+    print_test('CSE1 (<250K/mois) mais TOTAL_INCOME >= 3.75M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -839,7 +839,7 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-            WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 250000
+            WHERE c.CUSTOMER_CATEGORY = 'CSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 3750000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
@@ -851,11 +851,11 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
-    -- 3.7 CSE2 (fonctionnaires > 250K) mais revenu < 250000
+    -- 3.7 CSE2 (fonctionnaires >= 250K/mois) mais revenu annuel < 3.75M (250K x 15)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE c.CUSTOMER_CATEGORY = 'CSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME < 250000;
-    print_test('CSE2 (> 250K) mais TOTAL_INCOME < 250K', v_count);
+    WHERE c.CUSTOMER_CATEGORY = 'CSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME < 3750000;
+    print_test('CSE2 (>=250K/mois) mais TOTAL_INCOME < 3.75M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -866,7 +866,7 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-            WHERE c.CUSTOMER_CATEGORY = 'CSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME < 250000
+            WHERE c.CUSTOMER_CATEGORY = 'CSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME < 3750000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
@@ -878,11 +878,11 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
-    -- 3.8 PSE1 (secteur privé < 350K) mais revenu >= 350000
+    -- 3.8 PSE1 (secteur privé < 350K/mois) mais revenu annuel >= 5.25M (350K x 15)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE c.CUSTOMER_CATEGORY = 'PSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 350000;
-    print_test('PSE1 (< 350K) mais TOTAL_INCOME >= 350K', v_count);
+    WHERE c.CUSTOMER_CATEGORY = 'PSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 5250000;
+    print_test('PSE1 (<350K/mois) mais TOTAL_INCOME >= 5.25M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -893,7 +893,7 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-            WHERE c.CUSTOMER_CATEGORY = 'PSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 350000
+            WHERE c.CUSTOMER_CATEGORY = 'PSE1' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME >= 5250000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
@@ -905,12 +905,12 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
-    -- 3.9 PSE2 (secteur privé 350K-1M) mais revenu hors fourchette
+    -- 3.9 PSE2 (secteur privé 350K-1M/mois) mais revenu annuel hors 5.25M-15M
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
     WHERE c.CUSTOMER_CATEGORY = 'PSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0
-      AND (r.TOTAL_INCOME < 350000 OR r.TOTAL_INCOME > 1000000);
-    print_test('PSE2 (350K-1M) mais TOTAL_INCOME hors range', v_count);
+      AND (r.TOTAL_INCOME < 5250000 OR r.TOTAL_INCOME > 15000000);
+    print_test('PSE2 (350K-1M/mois) mais INCOME hors 5.25-15M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -922,7 +922,7 @@ BEGIN
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
             WHERE c.CUSTOMER_CATEGORY = 'PSE2' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0
-              AND (r.TOTAL_INCOME < 350000 OR r.TOTAL_INCOME > 1000000)
+              AND (r.TOTAL_INCOME < 5250000 OR r.TOTAL_INCOME > 15000000)
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
@@ -934,11 +934,11 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
-    -- 3.10 PSE3 (secteur privé > 1M) mais revenu <= 1000000
+    -- 3.10 PSE3 (secteur privé > 1M/mois) mais revenu annuel <= 15M (1M x 15)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE c.CUSTOMER_CATEGORY = 'PSE3' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 1000000;
-    print_test('PSE3 (> 1M) mais TOTAL_INCOME <= 1M', v_count);
+    WHERE c.CUSTOMER_CATEGORY = 'PSE3' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 15000000;
+    print_test('PSE3 (>1M/mois) mais TOTAL_INCOME <= 15M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -949,7 +949,7 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-            WHERE c.CUSTOMER_CATEGORY = 'PSE3' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 1000000
+            WHERE c.CUSTOMER_CATEGORY = 'PSE3' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 15000000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
@@ -961,11 +961,11 @@ BEGIN
         tbl_line('4,13,28,20,20,18');
     END IF;
 
-    -- 3.11 PFBI (indépendants > 1M mensuel) mais revenu annuel <= 12M
+    -- 3.11 PFBI (indépendants > 1M/mois) mais revenu annuel <= 15M (1M x 15)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-    WHERE c.CUSTOMER_CATEGORY = 'PFBI' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 12000000;
-    print_test('PFBI (rev mensuel>1M) mais annuel <= 12M', v_count);
+    WHERE c.CUSTOMER_CATEGORY = 'PFBI' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 15000000;
+    print_test('PFBI (>1M/mois) mais TOTAL_INCOME <= 15M/an', v_count);
     IF v_count > 0 THEN
         tbl_line('4,13,28,20,20,18');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',28) || '|'
@@ -976,7 +976,7 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, r.TOTAL_INCOME,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) AS total_solde
             FROM STTM_CUSTOMER c JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = c.KYC_REF_NO
-            WHERE c.CUSTOMER_CATEGORY = 'PFBI' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 12000000
+            WHERE c.CUSTOMER_CATEGORY = 'PFBI' AND r.TOTAL_INCOME IS NOT NULL AND r.TOTAL_INCOME > 0 AND r.TOTAL_INCOME <= 15000000
             ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO=c.CUSTOMER_NO),0) DESC
         ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;

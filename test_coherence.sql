@@ -7,6 +7,8 @@
 -- tables de la base de données.
 -- ============================================================
 
+SET ECHO OFF
+SET DEFINE OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED;
 
 DECLARE

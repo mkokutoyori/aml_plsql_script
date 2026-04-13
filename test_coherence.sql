@@ -2729,7 +2729,9 @@ BEGIN
                            NVL(r2.TOTAL_INCOME,0), NVL(uf2.FIELD_VAL_1,'-')
                   HAVING COUNT(DISTINCT m2.RISK_LEVEL) > 1
               )
-            ORDER BY c.CUSTOMER_CATEGORY, c.NATIONALITY, NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'), m.RISK_LEVEL,
+            ORDER BY NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
+                     NVL(r.TOTAL_INCOME,0), NVL(uf.FIELD_VAL_1,'-'),
+                     m.RISK_LEVEL,
                      NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) DESC
         ) WHERE ROWNUM <= 60) LOOP
             v_row_num := v_row_num + 1;

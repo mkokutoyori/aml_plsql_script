@@ -2843,11 +2843,11 @@ BEGIN
     -- Année 2024
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  >>> ANNEE 2024');
-    tbl_line('4,13,30,14,12,14,10,18,18');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
         || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' SWIFT',14) || '|'
-        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
-    tbl_line('4,13,30,14,12,14,10,18,18');
+        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     v_row_num := 0;
     FOR d IN (SELECT * FROM (
         SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -2870,10 +2870,10 @@ BEGIN
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || RPAD(' ' || d.swift,14) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
-            || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
     END LOOP;
-    tbl_line('4,13,30,14,12,14,10,18,18');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     IF v_row_num = 0 THEN
         DBMS_OUTPUT.PUT_LINE('  (aucune transaction FT en 2024)');
     END IF;
@@ -2881,11 +2881,11 @@ BEGIN
     -- Année 2025
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  >>> ANNEE 2025');
-    tbl_line('4,13,30,14,12,14,10,18,18');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
         || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' SWIFT',14) || '|'
-        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
-    tbl_line('4,13,30,14,12,14,10,18,18');
+        || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     v_row_num := 0;
     FOR d IN (SELECT * FROM (
         SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -2908,10 +2908,10 @@ BEGIN
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || RPAD(' ' || d.swift,14) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
-            || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
     END LOOP;
-    tbl_line('4,13,30,14,12,14,10,18,18');
+    tbl_line('4,13,30,14,12,14,10,22,22');
     IF v_row_num = 0 THEN
         DBMS_OUTPUT.PUT_LINE('  (aucune transaction FT en 2025)');
     END IF;
@@ -2924,10 +2924,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques correspondantes sans KYC (comptes ouverts)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,16,14,18');
+        tbl_line('4,13,30,16,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' SWIFT',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,16,14,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' SWIFT',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,16,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -2943,9 +2943,9 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.swift,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,16,14,18');
+        tbl_line('4,13,30,16,14,22');
     END IF;
 
     -- 8.2 Banques sans SWIFT_CODE
@@ -2956,10 +2956,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques correspondantes sans code SWIFT', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,16,14,14,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,16,14,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -2977,9 +2977,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
     END IF;
 
     -- 8.3 Banques avec KYC review dépassée
@@ -2993,11 +2993,11 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques avec KYC review dépassée', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,16,12,14,12,18');
+        tbl_line('4,13,26,16,12,14,12,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
             || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' REVIEW DATE',14) || '|'
-            || RPAD(' RETARD (J)',12) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,26,16,12,14,12,18');
+            || RPAD(' RETARD (J)',12) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,26,16,12,14,12,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -3020,9 +3020,9 @@ BEGIN
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || RPAD(' ' || d.review_dt,14) || '|'
                 || LPAD(TO_CHAR(d.jours_retard,'FM999G990'),11) || ' |'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,16,12,14,12,18');
+        tbl_line('4,13,26,16,12,14,12,22');
     END IF;
 
     -- 8.4 Banques sans CUST_CLASSIFICATION (code COBAC)
@@ -3033,10 +3033,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques sans classification COBAC (CUST_CLASSIFICATION)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,16,14,14,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,16,14,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -3054,9 +3054,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
     END IF;
 
     -- 8.5 Banques sans ANNUAL_TURNOVER (chiffre d'affaires)
@@ -3069,10 +3069,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques sans chiffre d''affaires (ANNUAL_TURNOVER)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,16,12,18,18');
+        tbl_line('4,13,26,16,12,24,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' ANNUAL_TURNOVER',18) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,26,16,12,18,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' ANNUAL_TURNOVER (M XAF)',24) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,26,16,12,24,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -3090,10 +3090,10 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,12) || '|'
-                || LPAD(TO_CHAR(d.turnover,'FM999G999G999G990'),17) || ' |'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.turnover,0)/1000000,'FM999G999G990.00') || ' M',23) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,16,12,18,18');
+        tbl_line('4,13,26,16,12,24,22');
     END IF;
 
     -- 8.6 TYPE=B mais catégorie incohérente (ni BANK, ni FIN_INT, ni OFI, ni BDC)
@@ -3104,10 +3104,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('TYPE=B avec catégorie incohérente (pas BANK/FIN_INT/OFI/BDC)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,16,14,14,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,16,14,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -3125,9 +3125,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
     END IF;
 
     -- 8.7 Catégorie BANK mais CUSTOMER_TYPE != B
@@ -3138,10 +3138,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Catégorie BANK mais CUSTOMER_TYPE différent de B', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,10,14,14,18');
+        tbl_line('4,13,30,10,14,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',30) || '|'
-            || RPAD(' TYPE',10) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,10,14,14,18');
+            || RPAD(' TYPE',10) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,10,14,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_TYPE,'-') AS ctype,
@@ -3159,9 +3159,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.ctype,10) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,10,14,14,18');
+        tbl_line('4,13,30,10,14,14,22');
     END IF;
 
     -- 8.8 Même pays + même classification COBAC mais risk level différent
@@ -3189,10 +3189,10 @@ BEGIN
     );
     print_test('Banques même pays+classification, risk différent', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,14,12,14,18');
+        tbl_line('4,13,26,14,12,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' CLASSIF.',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,26,14,12,14,18');
+            || RPAD(' CLASSIF.',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,26,14,12,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom,
@@ -3226,9 +3226,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.classif,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,14,12,14,18');
+        tbl_line('4,13,26,14,12,14,22');
     END IF;
 
     -- 8.9 Banques avec AML_REQUIRED = N (comptes ouverts)
@@ -3239,10 +3239,10 @@ BEGIN
       AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
     print_test('Banques avec AML_REQUIRED = N (comptes ouverts)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
-            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
-        tbl_line('4,13,30,16,14,14,18');
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL (M XAF)',22) || '|');
+        tbl_line('4,13,30,16,14,14,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
@@ -3260,9 +3260,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,30,16,14,14,18');
+        tbl_line('4,13,30,16,14,14,22');
     END IF;
 
     -- 8.10 Top 30 banques correspondantes par volume de transactions (12 mois)
@@ -3270,11 +3270,11 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  TEST ' || v_test_no || ': Top 30 banques par volume transactionnel (12 mois)');
     DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',80,'-'));
-    tbl_line('4,13,26,14,12,10,16,16');
+    tbl_line('4,13,26,14,12,10,22,22');
     DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
         || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
-        || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
-    tbl_line('4,13,26,14,12,10,16,16');
+        || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+    tbl_line('4,13,26,14,12,10,22,22');
     v_row_num := 0;
     FOR d IN (SELECT * FROM (
         SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -3295,10 +3295,10 @@ BEGIN
             || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
-            || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
     END LOOP;
-    tbl_line('4,13,26,14,12,10,16,16');
+    tbl_line('4,13,26,14,12,10,22,22');
 
     -- 8.11 Banques hors CEMAC avec volume transactionnel élevé (12 mois)
     SELECT COUNT(*) INTO v_count FROM (
@@ -3313,11 +3313,11 @@ BEGIN
     );
     print_test('Banques hors CEMAC avec transactions (12 mois)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,14,12,10,16,16');
+        tbl_line('4,13,26,14,12,10,22,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
             || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
-            || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
-        tbl_line('4,13,26,14,12,10,16,16');
+            || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+        tbl_line('4,13,26,14,12,10,22,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -3339,10 +3339,10 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
-                || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,14,12,10,16,16');
+        tbl_line('4,13,26,14,12,10,22,22');
     END IF;
 
     -- 8.12 Comptes banques dormants (solde ~0) avec transactions récentes (6 mois)
@@ -3359,10 +3359,10 @@ BEGIN
       );
     print_test('Comptes banques dormants (solde<1000) avec grosses txn récentes (>1M, 6 mois)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,20,14,16,18');
+        tbl_line('4,13,26,20,20,22,14');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' COMPTE',20) || '|' || RPAD(' SOLDE ACTUEL',14) || '|' || RPAD(' MAX TXN (6M)',16) || '|' || RPAD(' NB TXN > 1M',18) || '|');
-        tbl_line('4,13,26,20,14,16,18');
+            || RPAD(' COMPTE',20) || '|' || RPAD(' SOLDE (M XAF)',20) || '|' || RPAD(' MAX TXN 6M (M XAF)',22) || '|' || RPAD(' NB TXN > 1M',14) || '|');
+        tbl_line('4,13,26,20,20,22,14');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO AS compte,
@@ -3385,11 +3385,11 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.compte,20) || '|'
-                || LPAD(TO_CHAR(d.solde,'FM999G999G990'),13) || ' |'
-                || LPAD(TO_CHAR(d.max_txn,'FM999G999G990'),15) || ' |'
-                || LPAD(TO_CHAR(d.nb_big_txn,'FM999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990.00') || ' M',19) || ' |'
+                || LPAD(TO_CHAR(NVL(d.max_txn,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(d.nb_big_txn,'FM999G990'),13) || ' |');
         END LOOP;
-        tbl_line('4,13,26,20,14,16,18');
+        tbl_line('4,13,26,20,20,22,14');
     END IF;
 
     -- 8.13 Concentration des flux : banques recevant > 50% des crédits totaux inter-bancaires
@@ -3416,10 +3416,10 @@ BEGIN
     );
     print_test('Banques concentrant >50% des crédits inter-bancaires (12 mois)', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,14,18,18,10');
+        tbl_line('4,13,26,14,24,24,10');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' NATIONALITE',14) || '|' || RPAD(' CREDIT TOTAL',18) || '|' || RPAD(' TOTAL SYSTEME',18) || '|' || RPAD(' % PART',10) || '|');
-        tbl_line('4,13,26,14,18,18,10');
+            || RPAD(' NATIONALITE',14) || '|' || RPAD(' CREDIT TOTAL (M XAF)',24) || '|' || RPAD(' TOTAL SYSTEME (M XAF)',24) || '|' || RPAD(' % PART',10) || '|');
+        tbl_line('4,13,26,14,24,24,10');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT bk.CUSTOMER_NO, bk.CUSTOMER_NAME1 AS nom, NVL(bk.NATIONALITY,'-') AS nat,
@@ -3449,11 +3449,11 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(d.credit_total,'FM999G999G999G990'),17) || ' |'
-                || LPAD(TO_CHAR(d.total_credit_all,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(NVL(d.credit_total,0)/1000000,'FM999G999G999G990.00') || ' M',23) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit_all,0)/1000000,'FM999G999G999G990.00') || ' M',23) || ' |'
                 || LPAD(TO_CHAR(d.pct,'FM990.0') || '%',9) || ' |');
         END LOOP;
-        tbl_line('4,13,26,14,18,18,10');
+        tbl_line('4,13,26,14,24,24,10');
     END IF;
 
     -- 8.14 Transactions internationales (FT/FX/FS) avec banques correspondantes (12 mois)
@@ -3470,11 +3470,11 @@ BEGIN
         -- Tableau récapitulatif par banque (tous modules confondus)
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  --- Récapitulatif par banque (FT + FX + FS) ---');
-        tbl_line('4,13,26,14,12,10,18,18');
+        tbl_line('4,13,26,14,12,10,22,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
             || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
-            || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
-        tbl_line('4,13,26,14,12,10,18,18');
+            || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+        tbl_line('4,13,26,14,12,10,22,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
@@ -3495,18 +3495,18 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
-                || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,14,12,10,18,18');
+        tbl_line('4,13,26,14,12,10,22,22');
 
         -- Détail par module
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE('  --- Détail par module (FT=Funds Transfer, FX=Foreign Exchange, FS=FX Settlement) ---');
-        tbl_line('4,13,26,6,10,18,18');
+        tbl_line('4,13,26,6,10,22,22');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' MOD.',6) || '|' || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT',18) || '|' || RPAD(' TOTAL CREDIT',18) || '|');
-        tbl_line('4,13,26,6,10,18,18');
+            || RPAD(' MOD.',6) || '|' || RPAD(' NB TXN',10) || '|' || RPAD(' TOTAL DEBIT (M XAF)',22) || '|' || RPAD(' TOTAL CREDIT (M XAF)',22) || '|');
+        tbl_line('4,13,26,6,10,22,22');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, h.MODULE AS mod_code,
@@ -3526,10 +3526,10 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.mod_code,6) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(d.total_debit,'FM999G999G999G990'),17) || ' |'
-                || LPAD(TO_CHAR(d.total_credit,'FM999G999G999G990'),17) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
         END LOOP;
-        tbl_line('4,13,26,6,10,18,18');
+        tbl_line('4,13,26,6,10,22,22');
     END IF;
 
     -- 8.15 Comptes banques ouverts sans aucune activité depuis 12 mois
@@ -3544,10 +3544,10 @@ BEGIN
       );
     print_test('Comptes banques ouverts sans activité depuis 12 mois', v_count);
     IF v_count > 0 THEN
-        tbl_line('4,13,26,20,14,14,14');
+        tbl_line('4,13,26,20,14,14,20');
         DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
-            || RPAD(' COMPTE',20) || '|' || RPAD(' CATEGORIE',14) || '|' || RPAD(' OUVERTURE',14) || '|' || RPAD(' SOLDE ACTUEL',14) || '|');
-        tbl_line('4,13,26,20,14,14,14');
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CATEGORIE',14) || '|' || RPAD(' OUVERTURE',14) || '|' || RPAD(' SOLDE (M XAF)',20) || '|');
+        tbl_line('4,13,26,20,14,14,20');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO AS compte,
@@ -3569,9 +3569,9 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.compte,20) || '|' || RPAD(' ' || d.cat,14) || '|'
                 || RPAD(' ' || d.open_dt,14) || '|'
-                || LPAD(TO_CHAR(d.solde,'FM999G999G990'),13) || ' |');
+                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990.00') || ' M',19) || ' |');
         END LOOP;
-        tbl_line('4,13,26,20,14,14,14');
+        tbl_line('4,13,26,20,14,14,20');
     END IF;
 
     -- =========================================================

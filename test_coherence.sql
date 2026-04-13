@@ -2732,6 +2732,81 @@ BEGIN
         tbl_line('4,12,18,12,8,8,4,4,5,14,14');
     END IF;
 
+    -- 7.18 Clients avec plusieurs profils (même nom + même UNIQUE_ID) mais risk level différent
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT c.CUSTOMER_NO
+        FROM STTM_CUSTOMER c
+        JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        WHERE c.CUSTOMER_NAME1 IS NOT NULL
+          AND c.UNIQUE_ID_VALUE IS NOT NULL
+          AND TRIM(c.UNIQUE_ID_VALUE) IS NOT NULL
+          AND m.RISK_LEVEL IS NOT NULL
+          AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+          AND (UPPER(TRIM(c.CUSTOMER_NAME1)), UPPER(TRIM(c.UNIQUE_ID_VALUE))) IN (
+              SELECT UPPER(TRIM(c2.CUSTOMER_NAME1)), UPPER(TRIM(c2.UNIQUE_ID_VALUE))
+              FROM STTM_CUSTOMER c2
+              JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+              WHERE c2.CUSTOMER_NAME1 IS NOT NULL
+                AND c2.UNIQUE_ID_VALUE IS NOT NULL
+                AND TRIM(c2.UNIQUE_ID_VALUE) IS NOT NULL
+                AND m2.RISK_LEVEL IS NOT NULL
+                AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+              GROUP BY UPPER(TRIM(c2.CUSTOMER_NAME1)), UPPER(TRIM(c2.UNIQUE_ID_VALUE))
+              HAVING COUNT(DISTINCT c2.CUSTOMER_NO) > 1
+                 AND COUNT(DISTINCT m2.RISK_LEVEL) > 1
+          )
+    );
+    print_test('Clients multi-profils (même nom+ID) avec risk level différent', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,26,8,13,16,12,8,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' AGENCE',8) || '|' || RPAD(' CIF',13) || '|' || RPAD(' TAX_ID (UID)',16) || '|'
+            || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB CPT',8) || '|' || RPAD(' SOLDE TOTAL',16) || '|');
+        tbl_line('4,26,8,13,16,12,8,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   NVL(c.LOCAL_BRANCH,'-') AS agence,
+                   c.CUSTOMER_NO,
+                   NVL(c.UNIQUE_ID_VALUE,'-') AS tax_id,
+                   NVL(m.RISK_LEVEL,'-') AS risk_level,
+                   (SELECT COUNT(*) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O') AS nb_cpt,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.CUSTOMER_NAME1 IS NOT NULL
+              AND c.UNIQUE_ID_VALUE IS NOT NULL
+              AND TRIM(c.UNIQUE_ID_VALUE) IS NOT NULL
+              AND m.RISK_LEVEL IS NOT NULL
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+              AND (UPPER(TRIM(c.CUSTOMER_NAME1)), UPPER(TRIM(c.UNIQUE_ID_VALUE))) IN (
+                  SELECT UPPER(TRIM(c2.CUSTOMER_NAME1)), UPPER(TRIM(c2.UNIQUE_ID_VALUE))
+                  FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  WHERE c2.CUSTOMER_NAME1 IS NOT NULL
+                    AND c2.UNIQUE_ID_VALUE IS NOT NULL
+                    AND TRIM(c2.UNIQUE_ID_VALUE) IS NOT NULL
+                    AND m2.RISK_LEVEL IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+                  GROUP BY UPPER(TRIM(c2.CUSTOMER_NAME1)), UPPER(TRIM(c2.UNIQUE_ID_VALUE))
+                  HAVING COUNT(DISTINCT c2.CUSTOMER_NO) > 1
+                     AND COUNT(DISTINCT m2.RISK_LEVEL) > 1
+              )
+            ORDER BY UPPER(TRIM(c.CUSTOMER_NAME1)), c.UNIQUE_ID_VALUE, m.RISK_LEVEL
+        ) WHERE ROWNUM <= 60) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.agence,8) || '|'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|'
+                || RPAD(' ' || SUBSTR(d.tax_id,1,14),16) || '|'
+                || RPAD(' ' || d.risk_level,12) || '|'
+                || LPAD(TO_CHAR(d.nb_cpt,'FM990'),7) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,26,8,13,16,12,8,16');
+    END IF;
+
     -- =========================================================
     -- SECTION 8 : COHERENCE BANQUES CORRESPONDANTES
     -- =========================================================

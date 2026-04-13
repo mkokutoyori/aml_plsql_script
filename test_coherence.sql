@@ -2248,19 +2248,13 @@ BEGIN
         tbl_line('4,22,6,60');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT g.nat_id AS P_NATIONAL_ID, g.nb,
-                   (SELECT LISTAGG(x.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY x.CUSTOMER_NO)
-                    FROM (SELECT CUSTOMER_NO FROM STTM_CUST_PERSONAL WHERE P_NATIONAL_ID = g.nat_id AND ROWNUM <= 15) x
-                   ) AS clients
-            FROM (
-                SELECT P_NATIONAL_ID AS nat_id, COUNT(*) AS nb
-                FROM STTM_CUST_PERSONAL
-                WHERE P_NATIONAL_ID IS NOT NULL AND TRIM(P_NATIONAL_ID) IS NOT NULL
-                GROUP BY P_NATIONAL_ID HAVING COUNT(*) > 1
-                ORDER BY COUNT(*) DESC
-            ) g
-            WHERE ROWNUM <= 30
-        )) LOOP
+            SELECT p.P_NATIONAL_ID, COUNT(*) AS nb,
+                   RTRIM(SUBSTR(XMLAGG(XMLELEMENT(e, p.CUSTOMER_NO || ', ') ORDER BY p.CUSTOMER_NO).EXTRACT('//text()').GetClobVal(), 1, 200), ', ') AS clients
+            FROM STTM_CUST_PERSONAL p
+            WHERE p.P_NATIONAL_ID IS NOT NULL AND TRIM(p.P_NATIONAL_ID) IS NOT NULL
+            GROUP BY p.P_NATIONAL_ID HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || NVL(d.P_NATIONAL_ID,''),22) || '|' || LPAD(d.nb,5) || ' |'
@@ -2282,19 +2276,13 @@ BEGIN
         tbl_line('4,28,6,60');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT g.uid_val AS UNIQUE_ID_VALUE, g.nb,
-                   (SELECT LISTAGG(x.CUSTOMER_NO, ', ') WITHIN GROUP(ORDER BY x.CUSTOMER_NO)
-                    FROM (SELECT CUSTOMER_NO FROM STTM_CUSTOMER WHERE UNIQUE_ID_VALUE = g.uid_val AND ROWNUM <= 15) x
-                   ) AS clients
-            FROM (
-                SELECT UNIQUE_ID_VALUE AS uid_val, COUNT(*) AS nb
-                FROM STTM_CUSTOMER
-                WHERE UNIQUE_ID_VALUE IS NOT NULL AND TRIM(UNIQUE_ID_VALUE) IS NOT NULL
-                GROUP BY UNIQUE_ID_VALUE HAVING COUNT(*) > 1
-                ORDER BY COUNT(*) DESC
-            ) g
-            WHERE ROWNUM <= 30
-        )) LOOP
+            SELECT c.UNIQUE_ID_VALUE, COUNT(*) AS nb,
+                   RTRIM(SUBSTR(XMLAGG(XMLELEMENT(e, c.CUSTOMER_NO || ', ') ORDER BY c.CUSTOMER_NO).EXTRACT('//text()').GetClobVal(), 1, 200), ', ') AS clients
+            FROM STTM_CUSTOMER c
+            WHERE c.UNIQUE_ID_VALUE IS NOT NULL AND TRIM(c.UNIQUE_ID_VALUE) IS NOT NULL
+            GROUP BY c.UNIQUE_ID_VALUE HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM <= 30) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || SUBSTR(d.UNIQUE_ID_VALUE,1,26),28) || '|' || LPAD(d.nb,5) || ' |'

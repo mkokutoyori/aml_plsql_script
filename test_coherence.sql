@@ -2484,6 +2484,98 @@ BEGIN
         END LOOP;
     END IF;
 
+    -- 7.15 NGOs : même ANNUAL_TURNOVER et même NATIONALITY mais RISK_LEVEL différent
+    --      (uniquement clients avec comptes ouverts et actifs)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT c.CUSTOMER_NO
+        FROM STTM_CUSTOMER c
+        JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        LEFT JOIN STTM_KYC_CORPORATE k ON k.KYC_REF_NO = m.KYC_REF_NO
+        WHERE c.CUSTOMER_CATEGORY = 'NGOs'
+          AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+          AND EXISTS (
+              SELECT 1 FROM STTM_CUSTOMER c2
+              JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+              LEFT JOIN STTM_KYC_CORPORATE k2 ON k2.KYC_REF_NO = m2.KYC_REF_NO
+              WHERE c2.CUSTOMER_CATEGORY = 'NGOs'
+                AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                AND NVL(k2.ANNUAL_TURNOVER, -1) = NVL(k.ANNUAL_TURNOVER, -1)
+                AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+          )
+    );
+    print_test('NGOs : même CA+NATIONALITE mais RISK différent', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,10,8,18,6,6,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' BUS_NATURE',10) || '|' || RPAD(' RISK',8) || '|' || RPAD(' ANNUAL_TURNOVER',18) || '|'
+            || RPAD(' CTRY',6) || '|' || RPAD(' NAT',6) || '|' || RPAD(' SOLDE CPTES',16) || '|');
+        tbl_line('4,12,22,10,8,18,6,6,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, c.COUNTRY,
+                   k.ANNUAL_TURNOVER, m.RISK_LEVEL,
+                   NVL(SUBSTR(k.BUSINESS_NATURE,1,8),'-') AS bus_nature,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a
+                        WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_CORPORATE k ON k.KYC_REF_NO = m.KYC_REF_NO
+            WHERE c.CUSTOMER_CATEGORY = 'NGOs'
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+              AND EXISTS (
+                  SELECT 1 FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  LEFT JOIN STTM_KYC_CORPORATE k2 ON k2.KYC_REF_NO = m2.KYC_REF_NO
+                  WHERE c2.CUSTOMER_CATEGORY = 'NGOs'
+                    AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                    AND NVL(k2.ANNUAL_TURNOVER, -1) = NVL(k.ANNUAL_TURNOVER, -1)
+                    AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                    AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+              )
+            ORDER BY c.NATIONALITY, k.ANNUAL_TURNOVER, m.RISK_LEVEL, c.CUSTOMER_NO
+        ) WHERE ROWNUM <= 60) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,12) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,20),22) || '|'
+                || RPAD(' ' || d.bus_nature,10) || '|' || RPAD(' ' || NVL(d.RISK_LEVEL,'-'),8) || '|'
+                || LPAD(TO_CHAR(NVL(d.ANNUAL_TURNOVER,0),'FM999G999G999G990'),17) || ' |'
+                || RPAD(' ' || NVL(d.COUNTRY,'-'),6) || '|' || RPAD(' ' || NVL(d.NATIONALITY,'-'),6) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,10,8,18,6,6,16');
+        -- Détail des comptes ouverts pour chaque NGO flaggée
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE('    Détail comptes ouverts :');
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO,
+                   RTRIM(SUBSTR(XMLAGG(XMLELEMENT(e, a.CUST_AC_NO || '(' || a.CCY || ':' || TO_CHAR(a.ACY_CURR_BALANCE,'FM999G999G990') || '), ')
+                       ORDER BY a.CUST_AC_NO).EXTRACT('//text()').GetClobVal(), 1, 200), ', ') AS detail_cptes
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_CORPORATE k ON k.KYC_REF_NO = m.KYC_REF_NO
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            WHERE c.CUSTOMER_CATEGORY = 'NGOs'
+              AND EXISTS (
+                  SELECT 1 FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  LEFT JOIN STTM_KYC_CORPORATE k2 ON k2.KYC_REF_NO = m2.KYC_REF_NO
+                  WHERE c2.CUSTOMER_CATEGORY = 'NGOs'
+                    AND c2.CUSTOMER_NO != c.CUSTOMER_NO
+                    AND NVL(k2.ANNUAL_TURNOVER, -1) = NVL(k.ANNUAL_TURNOVER, -1)
+                    AND NVL(c2.NATIONALITY, '?') = NVL(c.NATIONALITY, '?')
+                    AND NVL(m2.RISK_LEVEL, '?') != NVL(m.RISK_LEVEL, '?')
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+              )
+            GROUP BY c.CUSTOMER_NO
+            ORDER BY c.CUSTOMER_NO
+        ) WHERE ROWNUM <= 60) LOOP
+            DBMS_OUTPUT.PUT_LINE('    ' || d.CUSTOMER_NO || ' → ' || d.detail_cptes);
+        END LOOP;
+    END IF;
+
     -- =========================================================
     -- FIN
     -- =========================================================

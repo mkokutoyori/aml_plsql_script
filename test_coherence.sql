@@ -2670,19 +2670,25 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- 7.17 Individus : même CATEGORIE+NATIONALITE+PEP+RESIDENT mais RISK_LEVEL différent
+    -- 7.17 Individus : même CATEGORIE+NATIONALITE+PEP+RESIDENT+TOTAL_INCOME+PROFESSION mais RISK_LEVEL différent
     --      Détecte les groupes de clients individuels partageant le même profil
+    --      (incluant le revenu total et la profession - UDF STDCIF.FIELD_VAL_1)
     --      mais dont l'appréciation du risque (KYC_MASTER.RISK_LEVEL) diffère.
-    --      Enrichi avec la profession (UDF STDCIF.FIELD_VAL_1).
     SELECT COUNT(*) INTO v_count FROM (
-        SELECT NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')
+        SELECT NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
+               NVL(r.TOTAL_INCOME,0),
+               NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
+                    WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')
         FROM STTM_CUSTOMER c
         JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
         LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
         WHERE c.CUSTOMER_TYPE = 'I'
           AND m.RISK_LEVEL IS NOT NULL
           AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
-        GROUP BY NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')
+        GROUP BY NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
+                 NVL(r.TOTAL_INCOME,0),
+                 NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
+                      WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')
         HAVING COUNT(DISTINCT m.RISK_LEVEL) > 1
     );
     print_test('Individus : même profil mais RISK différent (nb groupes)', v_count);
@@ -2708,15 +2714,24 @@ BEGIN
             WHERE c.CUSTOMER_TYPE = 'I'
               AND m.RISK_LEVEL IS NOT NULL
               AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
-              AND (NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')) IN (
-                  SELECT NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?')
+              AND (NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
+                   NVL(r.TOTAL_INCOME,0),
+                   NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
+                        WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')) IN (
+                  SELECT NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?'),
+                         NVL(r2.TOTAL_INCOME,0),
+                         NVL((SELECT u2.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u2
+                              WHERE u2.FUNCTION_ID = 'STDCIF' AND u2.REC_KEY = c2.CUSTOMER_NO || '~'), '-')
                   FROM STTM_CUSTOMER c2
                   JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
                   LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
                   WHERE c2.CUSTOMER_TYPE = 'I'
                     AND m2.RISK_LEVEL IS NOT NULL
                     AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
-                  GROUP BY NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?')
+                  GROUP BY NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?'),
+                           NVL(r2.TOTAL_INCOME,0),
+                           NVL((SELECT u2.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u2
+                                WHERE u2.FUNCTION_ID = 'STDCIF' AND u2.REC_KEY = c2.CUSTOMER_NO || '~'), '-')
                   HAVING COUNT(DISTINCT m2.RISK_LEVEL) > 1
               )
             ORDER BY c.CUSTOMER_CATEGORY, c.NATIONALITY, NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'), m.RISK_LEVEL,

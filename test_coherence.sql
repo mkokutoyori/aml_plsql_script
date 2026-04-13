@@ -2668,6 +2668,70 @@ BEGIN
         END LOOP;
     END IF;
 
+    -- 7.17 Individus : même CATEGORIE+NATIONALITE+PEP+RESIDENT mais RISK_LEVEL différent
+    --      Détecte les groupes de clients individuels partageant le même profil
+    --      mais dont l'appréciation du risque (KYC_MASTER.RISK_LEVEL) diffère.
+    --      Enrichi avec la profession (UDF STDCIF.FIELD_VAL_1).
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')
+        FROM STTM_CUSTOMER c
+        JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+        WHERE c.CUSTOMER_TYPE = 'I'
+          AND m.RISK_LEVEL IS NOT NULL
+          AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+        GROUP BY NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')
+        HAVING COUNT(DISTINCT m.RISK_LEVEL) > 1
+    );
+    print_test('Individus : même profil mais RISK différent (nb groupes)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',18) || '|'
+            || RPAD(' PROFESSION',12) || '|' || RPAD(' CAT',8) || '|' || RPAD(' RISK',8) || '|'
+            || RPAD(' PEP',4) || '|' || RPAD(' RES',4) || '|' || RPAD(' NAT',5) || '|'
+            || RPAD(' TOTAL_INCOME',14) || '|' || RPAD(' SOLDE CPTES',14) || '|');
+        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, c.CUSTOMER_CATEGORY,
+                   m.RISK_LEVEL, NVL(r.PEP,'N') AS pep, NVL(r.RESIDENT,'?') AS resident_st,
+                   r.TOTAL_INCOME,
+                   NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
+                        WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-') AS profession,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a
+                        WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            WHERE c.CUSTOMER_TYPE = 'I'
+              AND m.RISK_LEVEL IS NOT NULL
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+              AND (NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?')) IN (
+                  SELECT NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?')
+                  FROM STTM_CUSTOMER c2
+                  JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
+                  LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
+                  WHERE c2.CUSTOMER_TYPE = 'I'
+                    AND m2.RISK_LEVEL IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
+                  GROUP BY NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?')
+                  HAVING COUNT(DISTINCT m2.RISK_LEVEL) > 1
+              )
+            ORDER BY c.CUSTOMER_CATEGORY, c.NATIONALITY, NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'), m.RISK_LEVEL,
+                     NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) DESC
+        ) WHERE ROWNUM <= 60) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,12) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,16),18) || '|'
+                || RPAD(' ' || SUBSTR(d.profession,1,10),12) || '|' || RPAD(' ' || NVL(d.CUSTOMER_CATEGORY,'-'),8) || '|'
+                || RPAD(' ' || NVL(d.RISK_LEVEL,'-'),8) || '|' || RPAD(' ' || d.pep,4) || '|'
+                || RPAD(' ' || d.resident_st,4) || '|' || RPAD(' ' || NVL(d.NATIONALITY,'-'),5) || '|'
+                || LPAD(TO_CHAR(NVL(d.TOTAL_INCOME,0),'FM999G999G990'),13) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G990'),13) || ' |');
+        END LOOP;
+        tbl_line('4,12,18,12,8,8,4,4,5,14,14');
+    END IF;
+
     -- =========================================================
     -- FIN
     -- =========================================================

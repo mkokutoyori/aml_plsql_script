@@ -3086,6 +3086,133 @@ BEGIN
         tbl_line('4,13,30,16,14,14,18');
     END IF;
 
+    -- 8.10 Top 30 banques correspondantes par volume de transactions (12 mois)
+    v_test_no := v_test_no + 1;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  TEST ' || v_test_no || ': Top 30 banques par volume transactionnel (12 mois)');
+    DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',80,'-'));
+    tbl_line('4,13,26,14,12,10,16,16');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+        || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
+        || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
+    tbl_line('4,13,26,14,12,10,16,16');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
+               NVL(m.RISK_LEVEL,'-') AS risk,
+               COUNT(h.TRN_REF_NO) AS nb_txn,
+               SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+               SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
+        FROM STTM_CUSTOMER c
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+        LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+        WHERE c.CUSTOMER_TYPE = 'B'
+        GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL
+        ORDER BY COUNT(h.TRN_REF_NO) DESC
+    ) WHERE ROWNUM <= 30) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
+            || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+            || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
+            || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+    END LOOP;
+    tbl_line('4,13,26,14,12,10,16,16');
+
+    -- 8.11 Banques hors CEMAC avec volume transactionnel élevé (12 mois)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT c.CUSTOMER_NO
+        FROM STTM_CUSTOMER c
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+        WHERE c.CUSTOMER_TYPE = 'B'
+          AND NVL(c.NATIONALITY,'?') NOT IN ('CMR','TCD','GAB','COG','CAF','GNQ')
+        GROUP BY c.CUSTOMER_NO
+        HAVING SUM(h.LCY_AMOUNT) > 0
+    );
+    print_test('Banques hors CEMAC avec transactions (12 mois)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,14,12,10,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN',10) || '|'
+            || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
+        tbl_line('4,13,26,14,12,10,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
+                   NVL(m.RISK_LEVEL,'-') AS risk,
+                   COUNT(h.TRN_REF_NO) AS nb_txn,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND NVL(c.NATIONALITY,'?') NOT IN ('CMR','TCD','GAB','COG','CAF','GNQ')
+            GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL
+            ORDER BY SUM(h.LCY_AMOUNT) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
+                || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+                || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
+                || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,14,12,10,16,16');
+    END IF;
+
+    -- 8.12 Comptes banques dormants (solde ~0) avec transactions récentes (6 mois)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+    WHERE c.CUSTOMER_TYPE = 'B'
+      AND ABS(a.ACY_CURR_BALANCE) < 1000
+      AND EXISTS (
+          SELECT 1 FROM ACTB_HISTORY h
+          WHERE h.AC_NO = a.CUST_AC_NO
+            AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -6)
+            AND h.LCY_AMOUNT > 1000000
+      );
+    print_test('Comptes banques dormants (solde<1000) avec grosses txn récentes (>1M, 6 mois)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,20,14,16,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' SOLDE ACTUEL',14) || '|' || RPAD(' MAX TXN (6M)',16) || '|' || RPAD(' NB TXN > 1M',18) || '|');
+        tbl_line('4,13,26,20,14,16,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO AS compte,
+                   a.ACY_CURR_BALANCE AS solde,
+                   (SELECT MAX(h.LCY_AMOUNT) FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -6)) AS max_txn,
+                   (SELECT COUNT(*) FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -6) AND h.LCY_AMOUNT > 1000000) AS nb_big_txn
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND ABS(a.ACY_CURR_BALANCE) < 1000
+              AND EXISTS (
+                  SELECT 1 FROM ACTB_HISTORY h
+                  WHERE h.AC_NO = a.CUST_AC_NO
+                    AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -6)
+                    AND h.LCY_AMOUNT > 1000000
+              )
+            ORDER BY (SELECT MAX(h.LCY_AMOUNT) FROM ACTB_HISTORY h WHERE h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -6)) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.compte,20) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G990'),13) || ' |'
+                || LPAD(TO_CHAR(d.max_txn,'FM999G999G990'),15) || ' |'
+                || LPAD(TO_CHAR(d.nb_big_txn,'FM999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,20,14,16,18');
+    END IF;
+
     -- =========================================================
     -- FIN
     -- =========================================================

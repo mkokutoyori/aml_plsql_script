@@ -2676,19 +2676,17 @@ BEGIN
     --      mais dont l'appréciation du risque (KYC_MASTER.RISK_LEVEL) diffère.
     SELECT COUNT(*) INTO v_count FROM (
         SELECT NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
-               NVL(r.TOTAL_INCOME,0),
-               NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
-                    WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')
+               NVL(r.TOTAL_INCOME,0), NVL(uf.FIELD_VAL_1,'-')
         FROM STTM_CUSTOMER c
         JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
         LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+        LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf
+               ON uf.FUNCTION_ID = 'STDCIF' AND uf.REC_KEY = c.CUSTOMER_NO || '~'
         WHERE c.CUSTOMER_TYPE = 'I'
           AND m.RISK_LEVEL IS NOT NULL
           AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
         GROUP BY NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
-                 NVL(r.TOTAL_INCOME,0),
-                 NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
-                      WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')
+                 NVL(r.TOTAL_INCOME,0), NVL(uf.FIELD_VAL_1,'-')
         HAVING COUNT(DISTINCT m.RISK_LEVEL) > 1
     );
     print_test('Individus : même profil mais RISK différent (nb groupes)', v_count);
@@ -2704,34 +2702,31 @@ BEGIN
             SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, c.CUSTOMER_CATEGORY,
                    m.RISK_LEVEL, NVL(r.PEP,'N') AS pep, NVL(r.RESIDENT,'?') AS resident_st,
                    r.TOTAL_INCOME,
-                   NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
-                        WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-') AS profession,
+                   NVL(uf.FIELD_VAL_1,'-') AS profession,
                    NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a
                         WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
             FROM STTM_CUSTOMER c
             JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
             LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf
+                   ON uf.FUNCTION_ID = 'STDCIF' AND uf.REC_KEY = c.CUSTOMER_NO || '~'
             WHERE c.CUSTOMER_TYPE = 'I'
               AND m.RISK_LEVEL IS NOT NULL
               AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
               AND (NVL(c.CUSTOMER_CATEGORY,'?'), NVL(c.NATIONALITY,'?'), NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'),
-                   NVL(r.TOTAL_INCOME,0),
-                   NVL((SELECT u.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u
-                        WHERE u.FUNCTION_ID = 'STDCIF' AND u.REC_KEY = c.CUSTOMER_NO || '~'), '-')) IN (
+                   NVL(r.TOTAL_INCOME,0), NVL(uf.FIELD_VAL_1,'-')) IN (
                   SELECT NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?'),
-                         NVL(r2.TOTAL_INCOME,0),
-                         NVL((SELECT u2.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u2
-                              WHERE u2.FUNCTION_ID = 'STDCIF' AND u2.REC_KEY = c2.CUSTOMER_NO || '~'), '-')
+                         NVL(r2.TOTAL_INCOME,0), NVL(uf2.FIELD_VAL_1,'-')
                   FROM STTM_CUSTOMER c2
                   JOIN STTM_KYC_MASTER m2 ON m2.KYC_REF_NO = c2.KYC_REF_NO
                   LEFT JOIN STTM_KYC_RETAIL r2 ON r2.KYC_REF_NO = m2.KYC_REF_NO
+                  LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf2
+                         ON uf2.FUNCTION_ID = 'STDCIF' AND uf2.REC_KEY = c2.CUSTOMER_NO || '~'
                   WHERE c2.CUSTOMER_TYPE = 'I'
                     AND m2.RISK_LEVEL IS NOT NULL
                     AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a2 WHERE a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O')
                   GROUP BY NVL(c2.CUSTOMER_CATEGORY,'?'), NVL(c2.NATIONALITY,'?'), NVL(r2.PEP,'N'), NVL(r2.RESIDENT,'?'),
-                           NVL(r2.TOTAL_INCOME,0),
-                           NVL((SELECT u2.FIELD_VAL_1 FROM CSTM_FUNCTION_USERDEF_FIELDS u2
-                                WHERE u2.FUNCTION_ID = 'STDCIF' AND u2.REC_KEY = c2.CUSTOMER_NO || '~'), '-')
+                           NVL(r2.TOTAL_INCOME,0), NVL(uf2.FIELD_VAL_1,'-')
                   HAVING COUNT(DISTINCT m2.RISK_LEVEL) > 1
               )
             ORDER BY c.CUSTOMER_CATEGORY, c.NATIONALITY, NVL(r.PEP,'N'), NVL(r.RESIDENT,'?'), m.RISK_LEVEL,

@@ -2733,6 +2733,120 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 8 : COHERENCE BANQUES CORRESPONDANTES
+    -- =========================================================
+    print_section('8. COHERENCE BANQUES CORRESPONDANTES');
+
+    -- 8.1 Banques sans KYC (KYC_REF_NO absent ou vide)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_TYPE = 'B'
+      AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL)
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    print_test('Banques correspondantes sans KYC (comptes ouverts)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,30,16,14,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' SWIFT',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,30,16,14,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(c.SWIFT_CODE,'-') AS swift,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND (c.KYC_REF_NO IS NULL OR TRIM(c.KYC_REF_NO) IS NULL)
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
+                || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.swift,14) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,30,16,14,18');
+    END IF;
+
+    -- 8.2 Banques sans SWIFT_CODE
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_TYPE = 'B'
+      AND (c.SWIFT_CODE IS NULL OR TRIM(c.SWIFT_CODE) IS NULL)
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    print_test('Banques correspondantes sans code SWIFT', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,30,16,14,14,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',30) || '|'
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',14) || '|' || RPAD(' NATIONALITE',14) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,30,16,14,14,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(m.RISK_LEVEL,'-') AS risk, NVL(c.NATIONALITY,'-') AS nat,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND (c.SWIFT_CODE IS NULL OR TRIM(c.SWIFT_CODE) IS NULL)
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
+                || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
+                || RPAD(' ' || d.nat,14) || '|'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,30,16,14,14,18');
+    END IF;
+
+    -- 8.3 Banques avec KYC review dépassée
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+    LEFT JOIN STTM_KYC_CORPORATE k ON k.KYC_REF_NO = m.KYC_REF_NO
+    WHERE c.CUSTOMER_TYPE = 'B'
+      AND k.KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND k.KYC_NXT_REVIEW_DATE < SYSDATE
+      AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O');
+    print_test('Banques avec KYC review dépassée', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,16,12,14,12,18');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' CATEGORIE',16) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' REVIEW DATE',14) || '|'
+            || RPAD(' RETARD (J)',12) || '|' || RPAD(' SOLDE TOTAL',18) || '|');
+        tbl_line('4,13,26,16,12,14,12,18');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(m.RISK_LEVEL,'-') AS risk,
+                   TO_CHAR(k.KYC_NXT_REVIEW_DATE,'DD/MM/YYYY') AS review_dt,
+                   TRUNC(SYSDATE - k.KYC_NXT_REVIEW_DATE) AS jours_retard,
+                   NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) AS total_solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_CORPORATE k ON k.KYC_REF_NO = m.KYC_REF_NO
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND k.KYC_NXT_REVIEW_DATE IS NOT NULL
+              AND k.KYC_NXT_REVIEW_DATE < SYSDATE
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+            ORDER BY NVL((SELECT SUM(a.ACY_CURR_BALANCE) FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'),0) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,12) || '|'
+                || RPAD(' ' || d.review_dt,14) || '|'
+                || LPAD(TO_CHAR(d.jours_retard,'FM999G990'),11) || ' |'
+                || LPAD(TO_CHAR(d.total_solde,'FM999G999G999G990'),17) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,16,12,14,12,18');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

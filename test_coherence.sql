@@ -3213,6 +3213,154 @@ BEGIN
         tbl_line('4,13,26,20,14,16,18');
     END IF;
 
+    -- 8.13 Concentration des flux : banques recevant > 50% des crédits totaux inter-bancaires
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT bk.CUSTOMER_NO
+        FROM (
+            SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS credit_total
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            WHERE c.CUSTOMER_TYPE = 'B'
+            GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY
+        ) bk
+        CROSS JOIN (
+            SELECT SUM(CASE WHEN h2.DRCR_IND = 'C' THEN h2.LCY_AMOUNT ELSE 0 END) AS total_credit_all
+            FROM STTM_CUSTOMER c2
+            JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O'
+            JOIN ACTB_HISTORY h2 ON h2.AC_NO = a2.CUST_AC_NO AND h2.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            WHERE c2.CUSTOMER_TYPE = 'B'
+        ) tot
+        WHERE tot.total_credit_all > 0
+          AND bk.credit_total / tot.total_credit_all > 0.5
+    );
+    print_test('Banques concentrant >50% des crédits inter-bancaires (12 mois)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,14,18,18,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' NATIONALITE',14) || '|' || RPAD(' CREDIT TOTAL',18) || '|' || RPAD(' TOTAL SYSTEME',18) || '|' || RPAD(' % PART',10) || '|');
+        tbl_line('4,13,26,14,18,18,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT bk.CUSTOMER_NO, bk.CUSTOMER_NAME1 AS nom, NVL(bk.NATIONALITY,'-') AS nat,
+                   bk.credit_total, tot.total_credit_all,
+                   ROUND(bk.credit_total / NULLIF(tot.total_credit_all,0) * 100, 1) AS pct
+            FROM (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY,
+                       SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS credit_total
+                FROM STTM_CUSTOMER c
+                JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+                JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+                WHERE c.CUSTOMER_TYPE = 'B'
+                GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY
+            ) bk
+            CROSS JOIN (
+                SELECT SUM(CASE WHEN h2.DRCR_IND = 'C' THEN h2.LCY_AMOUNT ELSE 0 END) AS total_credit_all
+                FROM STTM_CUSTOMER c2
+                JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_NO = c2.CUSTOMER_NO AND a2.RECORD_STAT = 'O'
+                JOIN ACTB_HISTORY h2 ON h2.AC_NO = a2.CUST_AC_NO AND h2.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+                WHERE c2.CUSTOMER_TYPE = 'B'
+            ) tot
+            WHERE tot.total_credit_all > 0
+              AND bk.credit_total / tot.total_credit_all > 0.5
+            ORDER BY bk.credit_total DESC
+        ) WHERE ROWNUM <= 10) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.nat,14) || '|'
+                || LPAD(TO_CHAR(d.credit_total,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.total_credit_all,'FM999G999G999G990'),17) || ' |'
+                || LPAD(TO_CHAR(d.pct,'FM990.0') || '%',9) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,14,18,18,10');
+    END IF;
+
+    -- 8.14 Transactions de change (MODULE=FX) avec banques correspondantes (12 mois)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT c.CUSTOMER_NO
+        FROM STTM_CUSTOMER c
+        JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FX' AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+        WHERE c.CUSTOMER_TYPE = 'B'
+        GROUP BY c.CUSTOMER_NO
+    );
+    print_test('Banques avec transactions FX (change, 12 mois)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,14,12,10,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' NATIONALITE',14) || '|' || RPAD(' RISK_LEVEL',12) || '|' || RPAD(' NB TXN FX',10) || '|'
+            || RPAD(' TOTAL DEBIT',16) || '|' || RPAD(' TOTAL CREDIT',16) || '|');
+        tbl_line('4,13,26,14,12,10,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, NVL(c.NATIONALITY,'-') AS nat,
+                   NVL(m.RISK_LEVEL,'-') AS risk,
+                   COUNT(h.TRN_REF_NO) AS nb_txn,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS total_debit,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS total_credit
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'FX' AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+            LEFT JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            WHERE c.CUSTOMER_TYPE = 'B'
+            GROUP BY c.CUSTOMER_NO, c.CUSTOMER_NAME1, c.NATIONALITY, m.RISK_LEVEL
+            ORDER BY SUM(h.LCY_AMOUNT) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
+                || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
+                || LPAD(TO_CHAR(d.total_debit,'FM999G999G990'),15) || ' |'
+                || LPAD(TO_CHAR(d.total_credit,'FM999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,14,12,10,16,16');
+    END IF;
+
+    -- 8.15 Comptes banques ouverts sans aucune activité depuis 12 mois
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+    WHERE c.CUSTOMER_TYPE = 'B'
+      AND NOT EXISTS (
+          SELECT 1 FROM ACTB_HISTORY h
+          WHERE h.AC_NO = a.CUST_AC_NO
+            AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+      );
+    print_test('Comptes banques ouverts sans activité depuis 12 mois', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,13,26,20,14,14,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM BANQUE',26) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CATEGORIE',14) || '|' || RPAD(' OUVERTURE',14) || '|' || RPAD(' SOLDE ACTUEL',14) || '|');
+        tbl_line('4,13,26,20,14,14,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT c.CUSTOMER_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO AS compte,
+                   NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(TO_CHAR(a.AC_OPEN_DATE,'DD/MM/YYYY'),'-') AS open_dt,
+                   a.ACY_CURR_BALANCE AS solde
+            FROM STTM_CUSTOMER c
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O'
+            WHERE c.CUSTOMER_TYPE = 'B'
+              AND NOT EXISTS (
+                  SELECT 1 FROM ACTB_HISTORY h
+                  WHERE h.AC_NO = a.CUST_AC_NO
+                    AND h.TRN_DT >= ADD_MONTHS(SYSDATE, -12)
+              )
+            ORDER BY ABS(a.ACY_CURR_BALANCE) DESC
+        ) WHERE ROWNUM <= 30) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.compte,20) || '|' || RPAD(' ' || d.cat,14) || '|'
+                || RPAD(' ' || d.open_dt,14) || '|'
+                || LPAD(TO_CHAR(d.solde,'FM999G999G990'),13) || ' |');
+        END LOOP;
+        tbl_line('4,13,26,20,14,14,14');
+    END IF;
+
     -- =========================================================
     -- FIN
     -- =========================================================

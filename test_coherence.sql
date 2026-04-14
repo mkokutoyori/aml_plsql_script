@@ -2829,6 +2829,128 @@ BEGIN
         tbl_line('4,26,8,13,18,12,8,16');
     END IF;
 
+    -- 7.19 Individus avec risk_level minoritaire pour leur profil (majorité >= 50%)
+    --      Pour chaque profil (CAT+NAT+PEP+RES+TOTAL_INCOME+PROFESSION) on identifie le
+    --      risk_level majoritaire. Si celui-ci représente >= 50% des clients du profil ET
+    --      qu'il existe au moins deux risk_levels différents, on liste les clients qui
+    --      portent un risk_level minoritaire (présumés mal classés).
+    SELECT COUNT(*) INTO v_count FROM (
+        WITH base AS (
+            SELECT c.CUSTOMER_NO,
+                   NVL(c.CUSTOMER_CATEGORY,'?') AS cat,
+                   NVL(c.NATIONALITY,'?') AS nat,
+                   NVL(r.PEP,'N') AS pep,
+                   NVL(r.RESIDENT,'?') AS resident_st,
+                   NVL(r.TOTAL_INCOME,0) AS total_income,
+                   NVL(uf.FIELD_VAL_1,'-') AS profession,
+                   m.RISK_LEVEL
+            FROM STTM_CUSTOMER c
+            JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+            LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+            LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf
+                   ON uf.FUNCTION_ID = 'STDCIF' AND uf.REC_KEY = c.CUSTOMER_NO || '~'
+            WHERE c.CUSTOMER_TYPE = 'I'
+              AND m.RISK_LEVEL IS NOT NULL
+              AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+        ),
+        risk_counts AS (
+            SELECT cat, nat, pep, resident_st, total_income, profession, RISK_LEVEL,
+                   COUNT(*) AS nb_in_risk
+            FROM base
+            GROUP BY cat, nat, pep, resident_st, total_income, profession, RISK_LEVEL
+        ),
+        profile_majority AS (
+            SELECT cat, nat, pep, resident_st, total_income, profession,
+                   MAX(RISK_LEVEL) KEEP (DENSE_RANK FIRST ORDER BY nb_in_risk DESC) AS majority_risk,
+                   MAX(nb_in_risk) AS majority_count,
+                   SUM(nb_in_risk) AS total_count
+            FROM risk_counts
+            GROUP BY cat, nat, pep, resident_st, total_income, profession
+            HAVING COUNT(*) > 1
+               AND MAX(nb_in_risk) >= SUM(nb_in_risk) * 0.5
+        )
+        SELECT b.CUSTOMER_NO
+        FROM base b
+        JOIN profile_majority pm
+          ON pm.cat = b.cat AND pm.nat = b.nat AND pm.pep = b.pep
+         AND pm.resident_st = b.resident_st AND pm.total_income = b.total_income
+         AND pm.profession = b.profession
+        WHERE b.RISK_LEVEL != pm.majority_risk
+    );
+    print_test('Clients avec risk_level minoritaire pour leur profil (majorité >= 50%)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,18,24,20,12,12,8,4,4,5,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',18) || '|'
+            || RPAD(' PROFESSION',24) || '|' || RPAD(' CATEGORIE',20) || '|'
+            || RPAD(' RISK CLIENT',12) || '|' || RPAD(' RISK MAJ.',12) || '|' || RPAD(' % MAJ',8) || '|'
+            || RPAD(' PEP',4) || '|' || RPAD(' RES',4) || '|' || RPAD(' NAT',5) || '|'
+            || RPAD(' TOTAL_INCOME',16) || '|');
+        tbl_line('4,12,18,24,20,12,12,8,4,4,5,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            WITH base AS (
+                SELECT c.CUSTOMER_NO, c.CUSTOMER_NAME1,
+                       NVL(c.CUSTOMER_CATEGORY,'?') AS cat,
+                       NVL(c.NATIONALITY,'?') AS nat,
+                       NVL(r.PEP,'N') AS pep,
+                       NVL(r.RESIDENT,'?') AS resident_st,
+                       NVL(r.TOTAL_INCOME,0) AS total_income,
+                       r.TOTAL_INCOME AS total_income_raw,
+                       NVL(uf.FIELD_VAL_1,'-') AS profession,
+                       NVL(cc.CUST_CAT_DESC, c.CUSTOMER_CATEGORY) AS cat_desc,
+                       m.RISK_LEVEL
+                FROM STTM_CUSTOMER c
+                JOIN STTM_KYC_MASTER m ON m.KYC_REF_NO = c.KYC_REF_NO
+                LEFT JOIN STTM_KYC_RETAIL r ON r.KYC_REF_NO = m.KYC_REF_NO
+                LEFT JOIN CSTM_FUNCTION_USERDEF_FIELDS uf
+                       ON uf.FUNCTION_ID = 'STDCIF' AND uf.REC_KEY = c.CUSTOMER_NO || '~'
+                LEFT JOIN STTM_CUSTOMER_CAT cc
+                       ON cc.CUST_CAT = c.CUSTOMER_CATEGORY
+                WHERE c.CUSTOMER_TYPE = 'I'
+                  AND m.RISK_LEVEL IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a WHERE a.CUST_NO = c.CUSTOMER_NO AND a.RECORD_STAT = 'O')
+            ),
+            risk_counts AS (
+                SELECT cat, nat, pep, resident_st, total_income, profession, RISK_LEVEL,
+                       COUNT(*) AS nb_in_risk
+                FROM base
+                GROUP BY cat, nat, pep, resident_st, total_income, profession, RISK_LEVEL
+            ),
+            profile_majority AS (
+                SELECT cat, nat, pep, resident_st, total_income, profession,
+                       MAX(RISK_LEVEL) KEEP (DENSE_RANK FIRST ORDER BY nb_in_risk DESC) AS majority_risk,
+                       MAX(nb_in_risk) AS majority_count,
+                       SUM(nb_in_risk) AS total_count
+                FROM risk_counts
+                GROUP BY cat, nat, pep, resident_st, total_income, profession
+                HAVING COUNT(*) > 1
+                   AND MAX(nb_in_risk) >= SUM(nb_in_risk) * 0.5
+            )
+            SELECT b.CUSTOMER_NO, b.CUSTOMER_NAME1, b.cat_desc, b.RISK_LEVEL,
+                   pm.majority_risk,
+                   ROUND(pm.majority_count * 100 / pm.total_count, 1) AS majority_pct,
+                   b.pep, b.resident_st, b.nat, b.total_income_raw, b.profession,
+                   b.cat
+            FROM base b
+            JOIN profile_majority pm
+              ON pm.cat = b.cat AND pm.nat = b.nat AND pm.pep = b.pep
+             AND pm.resident_st = b.resident_st AND pm.total_income = b.total_income
+             AND pm.profession = b.profession
+            WHERE b.RISK_LEVEL != pm.majority_risk
+            ORDER BY b.cat, b.nat, b.pep, b.resident_st, b.total_income, b.profession, b.RISK_LEVEL
+        ) WHERE ROWNUM <= 80) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUSTOMER_NO,12) || '|' || RPAD(' ' || SUBSTR(d.CUSTOMER_NAME1,1,16),18) || '|'
+                || RPAD(' ' || SUBSTR(d.profession,1,22),24) || '|' || RPAD(' ' || SUBSTR(NVL(d.cat_desc,'-'),1,18),20) || '|'
+                || RPAD(' ' || NVL(d.RISK_LEVEL,'-'),12) || '|' || RPAD(' ' || NVL(d.majority_risk,'-'),12) || '|'
+                || LPAD(TO_CHAR(d.majority_pct,'FM990.0') || '%',7) || ' |'
+                || RPAD(' ' || d.pep,4) || '|' || RPAD(' ' || d.resident_st,4) || '|' || RPAD(' ' || NVL(d.nat,'-'),5) || '|'
+                || LPAD(TO_CHAR(NVL(d.total_income_raw,0),'FM999G999G990'),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,18,24,20,12,12,8,4,4,5,16');
+    END IF;
+
     -- =========================================================
     -- SECTION 8 : COHERENCE BANQUES CORRESPONDANTES
     -- =========================================================

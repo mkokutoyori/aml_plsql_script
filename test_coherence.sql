@@ -2992,8 +2992,8 @@ BEGIN
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || RPAD(' ' || d.swift,14) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
     END LOOP;
     tbl_line('4,13,30,14,12,14,10,22,22');
     IF v_row_num = 0 THEN
@@ -3030,8 +3030,8 @@ BEGIN
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || RPAD(' ' || d.swift,14) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
     END LOOP;
     tbl_line('4,13,30,14,12,14,10,22,22');
     IF v_row_num = 0 THEN
@@ -3065,7 +3065,7 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.swift,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,16,14,22');
     END IF;
@@ -3099,7 +3099,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,16,14,14,22');
     END IF;
@@ -3142,7 +3142,7 @@ BEGIN
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || RPAD(' ' || d.review_dt,14) || '|'
                 || LPAD(TO_CHAR(d.jours_retard,'FM999G990'),11) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,16,12,14,12,22');
     END IF;
@@ -3176,7 +3176,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,16,14,14,22');
     END IF;
@@ -3212,8 +3212,8 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,12) || '|'
-                || LPAD(TO_CHAR(NVL(d.turnover,0)/1000000,'FM999G999G990.00') || ' M',23) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.turnover,0)/1000000,'FM999G999G990D00') || ' M',23) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,16,12,24,22');
     END IF;
@@ -3247,7 +3247,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,16,14,14,22');
     END IF;
@@ -3281,7 +3281,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.ctype,10) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,10,14,14,22');
     END IF;
@@ -3348,7 +3348,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.classif,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,14,12,14,22');
     END IF;
@@ -3382,7 +3382,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
                 || RPAD(' ' || d.cat,16) || '|' || RPAD(' ' || d.risk,14) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_solde,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,30,16,14,14,22');
     END IF;
@@ -3417,8 +3417,8 @@ BEGIN
             || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
             || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
             || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+            || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+            || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
     END LOOP;
     tbl_line('4,13,26,14,12,10,22,22');
 
@@ -3461,8 +3461,8 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,14,12,10,22,22');
     END IF;
@@ -3507,8 +3507,8 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.compte,20) || '|'
-                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990.00') || ' M',19) || ' |'
-                || LPAD(TO_CHAR(NVL(d.max_txn,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990D00') || ' M',19) || ' |'
+                || LPAD(TO_CHAR(NVL(d.max_txn,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
                 || LPAD(TO_CHAR(d.nb_big_txn,'FM999G990'),13) || ' |');
         END LOOP;
         tbl_line('4,13,26,20,20,22,14');
@@ -3571,8 +3571,8 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.credit_total,0)/1000000,'FM999G999G999G990.00') || ' M',23) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_credit_all,0)/1000000,'FM999G999G999G990.00') || ' M',23) || ' |'
+                || LPAD(TO_CHAR(NVL(d.credit_total,0)/1000000,'FM999G999G999G990D00') || ' M',23) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit_all,0)/1000000,'FM999G999G999G990D00') || ' M',23) || ' |'
                 || LPAD(TO_CHAR(d.pct,'FM990.0') || '%',9) || ' |');
         END LOOP;
         tbl_line('4,13,26,14,24,24,10');
@@ -3617,8 +3617,8 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.nat,14) || '|' || RPAD(' ' || d.risk,12) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,14,12,10,22,22');
 
@@ -3648,8 +3648,8 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.mod_code,6) || '|'
                 || LPAD(TO_CHAR(d.nb_txn,'FM999G990'),9) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |'
-                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990.00') || ' M',21) || ' |');
+                || LPAD(TO_CHAR(NVL(d.total_debit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |'
+                || LPAD(TO_CHAR(NVL(d.total_credit,0)/1000000,'FM999G999G990D00') || ' M',21) || ' |');
         END LOOP;
         tbl_line('4,13,26,6,10,22,22');
     END IF;
@@ -3691,7 +3691,7 @@ BEGIN
                 || RPAD(' ' || d.CUSTOMER_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
                 || RPAD(' ' || d.compte,20) || '|' || RPAD(' ' || d.cat,14) || '|'
                 || RPAD(' ' || d.open_dt,14) || '|'
-                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990.00') || ' M',19) || ' |');
+                || LPAD(TO_CHAR(NVL(d.solde,0)/1000000,'FM999G999G990D00') || ' M',19) || ' |');
         END LOOP;
         tbl_line('4,13,26,20,14,14,20');
     END IF;

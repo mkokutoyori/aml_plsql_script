@@ -2249,6 +2249,220 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-15. COHERENCE INTER-TABLES & SEPARATION DES TACHES (SoD)
+    --        — Anomalies, orphelins, doublons, conflits d'acces
+    -- =========================================================
+    p_section('A-15. COHERENCE, ANOMALIES, SEPARATION DES TACHES (SoD)');
+
+    -- ---- Integrite user ----
+    p_sub('A-15.1 Integrite des comptes SMTB_USER');
+    SELECT COUNT(*) INTO v_total FROM SMTB_USER;
+
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE USER_ID IS NULL OR USER_ID = ' ';
+    p_pct('  USER_ID NULL/blanc', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE USER_NAME IS NULL OR USER_NAME = ' ';
+    p_pct('  USER_NAME NULL/blanc', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT USER_ID, COUNT(*) nb FROM SMTB_USER
+        GROUP BY USER_ID HAVING COUNT(*) > 1
+    );
+    p_kv('  Doublons USER_ID', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT UPPER(USER_NAME) nm, COUNT(*) nb FROM SMTB_USER
+        WHERE USER_NAME IS NOT NULL
+        GROUP BY UPPER(USER_NAME) HAVING COUNT(*) > 1
+    );
+    p_kv('  Doublons USER_NAME (nom homonyme, sans casse)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE CUSTOMER_NO IS NOT NULL AND CUSTOMER_NO <> ' '
+          AND CUSTOMER_NO NOT IN (SELECT CUSTOMER_NO FROM STTM_CUSTOMER);
+    p_kv('  CUSTOMER_NO renseigne mais absent de STTM_CUSTOMER', TO_CHAR(v_count));
+
+    -- ---- Incoherence statut ----
+    p_sub('A-15.2 Statut incoherent');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE USER_STATUS = 'E' AND (RECORD_STAT = 'C' OR AUTH_STAT = 'U');
+    p_kv('  ENABLED mais Record=Closed ou Auth=Unauth', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE USER_STATUS = 'E' AND END_DATE IS NOT NULL AND END_DATE < SYSDATE;
+    p_kv('  ENABLED et END_DATE depassee', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE USER_STATUS = 'D' AND AUTH_STAT = 'U';
+    p_kv('  DISABLED et Unauthorised (suspect)', TO_CHAR(v_count));
+
+    -- ---- Users actifs mais dormants ----
+    p_sub('A-15.3 Users enabled ET dormants > 90 jours (croisement)');
+    SELECT COUNT(*) INTO v_count
+    FROM SMTB_USER u
+    LEFT JOIN SMTB_USERLOG_DETAILS l ON l.USER_ID = u.USER_ID
+    WHERE u.USER_STATUS = 'E'
+      AND (l.LAST_SIGNED_ON IS NULL OR l.LAST_SIGNED_ON < SYSDATE - 90);
+    p_kv('  Users ENABLED dormants > 90 j', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count
+    FROM SMTB_USER u
+    LEFT JOIN SMTB_USERLOG_DETAILS l ON l.USER_ID = u.USER_ID
+    WHERE u.USER_STATUS = 'E' AND u.AUTH_STAT = 'A'
+      AND (l.LAST_SIGNED_ON IS NULL OR l.LAST_SIGNED_ON < SYSDATE - 180);
+    p_kv('  Users ENABLED/Auth et dormants > 180 j', TO_CHAR(v_count));
+
+    p_sub('A-15.4 Users jamais connectes mais disposant de roles');
+    SELECT COUNT(*) INTO v_count
+    FROM SMTB_USER u
+    LEFT JOIN SMTB_USERLOG_DETAILS l ON l.USER_ID = u.USER_ID
+    WHERE l.LAST_SIGNED_ON IS NULL
+      AND EXISTS (SELECT 1 FROM SMTB_USER_ROLE r WHERE r.USER_ID = u.USER_ID);
+    p_kv('  Jamais connectes MAIS avec roles actifs', TO_CHAR(v_count));
+
+    -- ---- Segregation of duties (SoD) ----
+    p_sub('A-15.5 SoD : MAKER = CHECKER (auto-validation)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    p_kv('  SMTB_USER : MAKER=CHECKER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER
+        WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    p_kv('  SMTB_ROLE_MASTER : MAKER=CHECKER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM
+        WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    p_kv('  SMTB_ROLE_FUNC_LIMIT_CUSTOM : MAKER=CHECKER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_PARAMETERS
+        WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    p_kv('  SMTB_PARAMETERS : MAKER=CHECKER', TO_CHAR(v_count));
+
+    p_sub('A-15.6 SoD : action SMTB_SMS_ACTION_LOG — auto-autorisation recente (180 j)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_ACTION_LOG a
+    WHERE a.REQ_TIME >= SYSDATE - 180
+      AND UPPER(a.ACTION) IN ('AUTH','AUTHORIZE')
+      AND EXISTS (
+          SELECT 1 FROM SMTB_SMS_ACTION_LOG b
+          WHERE b.PKVALS = a.PKVALS
+            AND UPPER(b.ACTION) IN ('NEW','MODIFY')
+            AND b.SEQUENCE_NO = a.SEQUENCE_NO
+      );
+    p_kv('  Paires NEW/MODIFY puis AUTH meme SEQUENCE_NO sur 180 j', TO_CHAR(v_count));
+
+    -- ---- Privileges excessifs ----
+    p_sub('A-15.7 Privileges excessifs potentiels');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE BRANCHES_ALLOWED = 'Y' AND ACCLASS_ALLOWED = 'Y'
+          AND PRODUCTS_ALLOWED = 'Y' AND GL_ALLOWED = 'Y';
+    p_kv('  Users avec ALL allowed (branches + acclass + products + GL)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT USER_ID FROM (
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_ROLE GROUP BY USER_ID
+            UNION ALL
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_CENTRAL_ROLES GROUP BY USER_ID
+        ) GROUP BY USER_ID HAVING SUM(nb) >= 10
+    );
+    p_kv('  Users avec >= 10 roles cumules', TO_CHAR(v_count));
+
+    p_sub('A-15.8 Roles a perimetre universel (toutes agences + classes)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER
+        WHERE BRANCHES_ALLOWED = 'Y' AND ACCCLASS_ALLOWED = 'Y';
+    p_kv('  Roles Branches=Y ET Acclass=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE BRANCH_VLT_ROLE = 'Y';
+    p_kv('  Roles coffre-fort (BRANCH_VLT_ROLE=Y)', TO_CHAR(v_count));
+
+    -- ---- LDAP ----
+    p_sub('A-15.9 Coherence LDAP / mot de passe local');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE LDAP_USER = 'Y' AND USER_PASSWORD IS NOT NULL AND USER_PASSWORD <> ' ';
+    p_kv('  LDAP=Y mais USER_PASSWORD stocke localement', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+        WHERE (LDAP_USER IS NULL OR LDAP_USER <> 'Y')
+          AND (USER_PASSWORD IS NULL OR USER_PASSWORD = ' ');
+    p_kv('  Local (non LDAP) mais sans USER_PASSWORD', TO_CHAR(v_count));
+
+    -- ---- Password policy ----
+    p_sub('A-15.10 Politique MDP : utilisateurs non conformes');
+    FOR p IN (SELECT * FROM SMTB_PARAMETERS WHERE ROWNUM = 1) LOOP
+        IF p.FREQ_PWD_CHG IS NOT NULL AND p.FREQ_PWD_CHG > 0 THEN
+            SELECT COUNT(*) INTO v_count FROM SMTB_USER
+                WHERE PWD_CHANGED_ON IS NOT NULL
+                  AND PWD_CHANGED_ON < SYSDATE - p.FREQ_PWD_CHG
+                  AND USER_STATUS = 'E';
+            p_kv('  Users ENABLED depassant FREQ_PWD_CHG (' || p.FREQ_PWD_CHG || 'j)',
+                 TO_CHAR(v_count));
+        END IF;
+        IF p.DORMANCY_DAYS IS NOT NULL AND p.DORMANCY_DAYS > 0 THEN
+            SELECT COUNT(*) INTO v_count
+            FROM SMTB_USER u
+            LEFT JOIN SMTB_USERLOG_DETAILS l ON l.USER_ID = u.USER_ID
+            WHERE u.USER_STATUS = 'E'
+              AND (l.LAST_SIGNED_ON IS NULL OR l.LAST_SIGNED_ON < SYSDATE - p.DORMANCY_DAYS);
+            p_kv('  Users ENABLED depassant DORMANCY_DAYS (' || p.DORMANCY_DAYS || 'j)',
+                 TO_CHAR(v_count));
+        END IF;
+    END LOOP;
+
+    -- ---- Orphelins ----
+    p_sub('A-15.11 Orphelins / fantomes');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE ROLE_ID NOT IN (SELECT ROLE_ID FROM SMTB_ROLE_MASTER);
+    p_kv('  SMTB_ROLE_DETAIL.ROLE_ID absent de SMTB_ROLE_MASTER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_ROLE
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER);
+    p_kv('  SMTB_USER_ROLE.USER_ID absent de SMTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_ROLE
+        WHERE ROLE_ID NOT IN (SELECT ROLE_ID FROM SMTB_ROLE_MASTER);
+    p_kv('  SMTB_USER_ROLE.ROLE_ID absent de SMTB_ROLE_MASTER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_CENTRAL_ROLES
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER);
+    p_kv('  SMTB_USER_CENTRAL_ROLES.USER_ID absent de SMTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_TILLS
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER);
+    p_kv('  SMTB_USER_TILLS.USER_ID absent de SMTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_PASSWORD_HISTORY
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER);
+    p_kv('  SMTB_PASSWORD_HISTORY.USER_ID absent de SMTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER);
+    p_kv('  SMTB_USERLOG_DETAILS.USER_ID absent de SMTB_USER', TO_CHAR(v_count));
+
+    -- ---- Cumul users actifs vs volumetrie ----
+    p_sub('A-15.12 Profil global des acces actifs');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE USER_STATUS = 'E' AND AUTH_STAT = 'A';
+    p_kv('  Users ENABLED + Authorised', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_ROLE WHERE AUTH_STAT = 'A';
+    p_kv('  Users avec au moins 1 role AUTH_STAT=A', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+        WHERE u.USER_STATUS = 'E' AND u.AUTH_STAT = 'A'
+          AND EXISTS (SELECT 1 FROM SMTB_USER_ROLE r WHERE r.USER_ID = u.USER_ID AND r.AUTH_STAT = 'A');
+    p_kv('  Users actifs ET role attribue actif', TO_CHAR(v_count));
+
+    -- ---- Tills multi-user ----
+    p_sub('A-15.13 Risque partage caisse / agence');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT TILL_ID, BRANCH_CODE FROM SMTB_USER_TILLS
+        GROUP BY TILL_ID, BRANCH_CODE HAVING COUNT(DISTINCT USER_ID) > 1
+    );
+    p_kv('  Caisses (TILL_ID) partagees par > 1 user', TO_CHAR(v_count));
+
+    -- ---- Session anormale ----
+    p_sub('A-15.14 Sessions anormales SMTB_SMS_LOG (30 j)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+        WHERE SYSTEM_START_TIME >= SYSDATE - 30 AND EXIT_FLAG <> 0;
+    p_kv('  Events EXIT_FLAG != 0 sur 30 j', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_SMS_LOG
+        WHERE SYSTEM_START_TIME >= SYSDATE - 30 AND EXIT_FLAG <> 0;
+    p_kv('  Users distincts impactes', TO_CHAR(v_count));
+
+    p_sub('A-15.15 Recap executif');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER;
+    p_kv('  Nombre total de comptes', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE USER_STATUS = 'E';
+    p_kv('  Dont ENABLED', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER;
+    p_kv('  Nombre total de roles', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_ROLE;
+    p_kv('  Affectations user-role (locales)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_CENTRAL_ROLES;
+    p_kv('  Affectations user-role (centralisees)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_DETAIL;
+    p_kv('  Lignes privileges role/fonction', TO_CHAR(v_count));
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

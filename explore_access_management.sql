@@ -2463,12 +2463,52 @@ BEGIN
     p_kv('  Lignes privileges role/fonction', TO_CHAR(v_count));
 
     -- =========================================================
-    -- FIN
+    -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
+    p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');
+
+    DBMS_OUTPUT.PUT_LINE('  Perimetre explore (24 tables + UDF) :');
+    DBMS_OUTPUT.PUT_LINE('    - Comptes & identite       : SMTB_USER, FBTB_USER, SMDUSRDF (UDF)');
+    DBMS_OUTPUT.PUT_LINE('    - Cycle de vie & inactivite: SMTB_USER_DISABLE, SMTB_USERLOG_DETAILS');
+    DBMS_OUTPUT.PUT_LINE('    - Roles & privileges       : SMTB_ROLE_MASTER, SMTB_ROLE_DETAIL,');
+    DBMS_OUTPUT.PUT_LINE('                                  SMTB_ROLE_BRANCHES, SMDROLDF (UDF)');
+    DBMS_OUTPUT.PUT_LINE('    - Affectations             : SMTB_USER_ROLE, SMTB_USER_CENTRAL_ROLES,');
+    DBMS_OUTPUT.PUT_LINE('                                  SMTB_USER_TILLS');
+    DBMS_OUTPUT.PUT_LINE('    - Limites transactionnelles: SMTB_ROLE_FUNC_LIMIT_CUSTOM/DETAIL');
+    DBMS_OUTPUT.PUT_LINE('    - Politique MDP & params   : SMTB_PARAMETERS, SMTB_PASSWORD_HISTORY');
+    DBMS_OUTPUT.PUT_LINE('    - Piste d''audit            : SMTB_SMS_LOG, SMTB_SMS_ACTION_LOG');
+    DBMS_OUTPUT.PUT_LINE('    - Catalogue fonctionnel    : SMTB_MENU, SMTB_FUNCTION_DESCRIPTION,');
+    DBMS_OUTPUT.PUT_LINE('                                  SMTB_MODULES, SMTB_LANGUAGE, SMTB_FUNC_GROUP');
+    DBMS_OUTPUT.PUT_LINE('    - Droits peripheriques     : SMTB_MSGS_RIGHTS, SMTB_QUEUES,');
+    DBMS_OUTPUT.PUT_LINE('                                  SMTB_QUEUE_RIGHTS, SMTB_ACTION_CONTROLS,');
+    DBMS_OUTPUT.PUT_LINE('                                  SMTB_STAGE_FIELD_VALUE');
+    DBMS_OUTPUT.PUT_LINE('    - Topologie agences        : FBTM_BRANCH, FBTM_BRANCH_INFO, STDBRANC (UDF)');
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  Prochaines etapes suggerees :');
+    DBMS_OUTPUT.PUT_LINE('    1. Rediger un rapport d''exploration (exploration_access_report.txt)');
+    DBMS_OUTPUT.PUT_LINE('    2. Etablir le dictionnaire de donnees securite / referentiels');
+    DBMS_OUTPUT.PUT_LINE('    3. Concevoir un script d''audit IAM (controles automatises COBAC / CIS)');
+    DBMS_OUTPUT.PUT_LINE('    4. Definir KRI : taux dormance, SoD, roles universels, MDP non tournes');
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  Referentiels applicables :');
+    DBMS_OUTPUT.PUT_LINE('    - COBAC R-2016/01 (controle interne etablissements de credit CEMAC)');
+    DBMS_OUTPUT.PUT_LINE('    - ISO/IEC 27001 A.9 (Access Control) & A.12.4 (Logging)');
+    DBMS_OUTPUT.PUT_LINE('    - PCI-DSS v4 8.x (gestion des identites et authentification)');
+    DBMS_OUTPUT.PUT_LINE('    - CIS Controls v8 # 5 (Account Management) & # 6 (Access Control)');
+
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('>>> EXPLORATION TERMINEE — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
+    DBMS_OUTPUT.PUT_LINE('>>> 16 sections - perimetre IAM/SECURITE FLEXCUBE');
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('');
+        DBMS_OUTPUT.PUT_LINE(v_sep);
+        DBMS_OUTPUT.PUT_LINE('>>> ERREUR PL/SQL : ' || SQLCODE || ' - ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('>>> ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+        DBMS_OUTPUT.PUT_LINE(v_sep);
+        RAISE;
 END;
 /

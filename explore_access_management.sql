@@ -1362,6 +1362,157 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-10. SMTB_SMS_ACTION_LOG — Journal des actions metier
+    --        (piste d'audit applicatif : creation, modification, autorisation)
+    -- =========================================================
+    p_section('A-10. SMTB_SMS_ACTION_LOG — Journal des actions metier (piste d''audit)');
+
+    SELECT COUNT(*) INTO v_total FROM SMTB_SMS_ACTION_LOG;
+    p_kv('Total actions enregistrees', TO_CHAR(v_total));
+
+    p_sub('Bornes temporelles');
+    FOR r IN (SELECT MIN(REQ_TIME) mn, MAX(REQ_TIME) mx FROM SMTB_SMS_ACTION_LOG) LOOP
+        p_kv('  Plus ancien REQ_TIME', TO_CHAR(r.mn,'DD/MM/YYYY HH24:MI'));
+        p_kv('  Plus recent REQ_TIME', TO_CHAR(r.mx,'DD/MM/YYYY HH24:MI'));
+    END LOOP;
+
+    p_sub('Distribution des ACTION (top 25)');
+    FOR r IN (
+        SELECT ACTION, nb FROM (
+            SELECT ACTION, COUNT(*) nb FROM SMTB_SMS_ACTION_LOG
+            GROUP BY ACTION ORDER BY nb DESC
+        ) WHERE ROWNUM <= 25
+    ) LOOP
+        p_pct('  ACTION = ' || NVL(r.ACTION,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Distribution EXITFLAG (0=ok / 1=abnormal, convention Flexcube)');
+    FOR r IN (SELECT EXITFLAG, COUNT(*) nb FROM SMTB_SMS_ACTION_LOG
+              GROUP BY EXITFLAG ORDER BY nb DESC) LOOP
+        p_pct('  EXITFLAG = ' || NVL(TO_CHAR(r.EXITFLAG),'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Actions d''ECHEC (EXITFLAG != 0) — focus ACTION');
+    FOR r IN (
+        SELECT ACTION, nb FROM (
+            SELECT ACTION, COUNT(*) nb FROM SMTB_SMS_ACTION_LOG
+            WHERE EXITFLAG IS NOT NULL AND EXITFLAG <> 0
+            GROUP BY ACTION ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ACTION = ' || NVL(r.ACTION,'(NULL)'), TO_CHAR(r.nb) || ' echec(s)');
+    END LOOP;
+
+    p_sub('Actions sensibles — focus securite / parametres');
+    FOR a IN (
+        SELECT action FROM (
+            SELECT 'NEW' AS action, 1 ord FROM DUAL UNION ALL
+            SELECT 'MODIFY',         2 FROM DUAL UNION ALL
+            SELECT 'DELETE',         3 FROM DUAL UNION ALL
+            SELECT 'CLOSE',          4 FROM DUAL UNION ALL
+            SELECT 'REOPEN',         5 FROM DUAL UNION ALL
+            SELECT 'AUTH',           6 FROM DUAL UNION ALL
+            SELECT 'AUTHORIZE',      7 FROM DUAL UNION ALL
+            SELECT 'REVERSE',        8 FROM DUAL UNION ALL
+            SELECT 'UNLOCK',         9 FROM DUAL UNION ALL
+            SELECT 'HOLD',          10 FROM DUAL UNION ALL
+            SELECT 'LIQUIDATE',     11 FROM DUAL UNION ALL
+            SELECT 'AMEND',         12 FROM DUAL UNION ALL
+            SELECT 'ROLLOVER',      13 FROM DUAL UNION ALL
+            SELECT 'DELETEALL',     14 FROM DUAL UNION ALL
+            SELECT 'COPY',          15 FROM DUAL UNION ALL
+            SELECT 'PRINT',         16 FROM DUAL UNION ALL
+            SELECT 'REJECT',        17 FROM DUAL ORDER BY ord
+        )
+    ) LOOP
+        EXECUTE IMMEDIATE
+            'SELECT COUNT(*) FROM SMTB_SMS_ACTION_LOG WHERE UPPER(ACTION) = :1'
+            INTO v_count USING a.action;
+        p_kv('  ACTION = ' || a.action, TO_CHAR(v_count));
+    END LOOP;
+
+    p_sub('Repartition par CURR_BRANCH (top 15)');
+    FOR r IN (
+        SELECT CURR_BRANCH, nb FROM (
+            SELECT CURR_BRANCH, COUNT(*) nb FROM SMTB_SMS_ACTION_LOG
+            GROUP BY CURR_BRANCH ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_pct('  CURR_BRANCH = ' || NVL(r.CURR_BRANCH,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Divergence CURR_BRANCH <> HOME_BRANCH (multi-agence)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_ACTION_LOG
+        WHERE CURR_BRANCH IS NOT NULL AND HOME_BRANCH IS NOT NULL
+          AND CURR_BRANCH <> HOME_BRANCH;
+    p_pct('  Nb actions CURR_BRANCH <> HOME_BRANCH', v_count, v_total);
+
+    p_sub('Volumetrie par mois (12 derniers mois)');
+    FOR r IN (
+        SELECT TO_CHAR(REQ_TIME,'YYYY-MM') mois, COUNT(*) nb
+        FROM SMTB_SMS_ACTION_LOG
+        WHERE REQ_TIME >= ADD_MONTHS(SYSDATE, -12)
+        GROUP BY TO_CHAR(REQ_TIME,'YYYY-MM') ORDER BY mois
+    ) LOOP
+        p_kv('  ' || r.mois, TO_CHAR(r.nb) || ' action(s)');
+    END LOOP;
+
+    p_sub('Duree moyenne requete (REQ_TIME -> RESP_TIME) en secondes');
+    FOR r IN (
+        SELECT ROUND(AVG(EXTRACT(DAY FROM (RESP_TIME - REQ_TIME)) * 86400 +
+                         EXTRACT(HOUR FROM (RESP_TIME - REQ_TIME)) * 3600 +
+                         EXTRACT(MINUTE FROM (RESP_TIME - REQ_TIME)) * 60 +
+                         EXTRACT(SECOND FROM (RESP_TIME - REQ_TIME))), 2) secs
+        FROM SMTB_SMS_ACTION_LOG
+        WHERE RESP_TIME IS NOT NULL AND REQ_TIME IS NOT NULL
+          AND REQ_TIME >= SYSDATE - 90
+    ) LOOP
+        p_kv('  Duree moyenne action sur 90 j (sec)', TO_CHAR(r.secs));
+    END LOOP;
+
+    p_sub('Actions en erreur (DESCRIPTION non nulle + EXITFLAG!=0) — top 15');
+    FOR r IN (
+        SELECT DESCRIPTION, nb FROM (
+            SELECT SUBSTR(DESCRIPTION, 1, 80) AS DESCRIPTION, COUNT(*) nb
+            FROM SMTB_SMS_ACTION_LOG
+            WHERE EXITFLAG IS NOT NULL AND EXITFLAG <> 0
+              AND DESCRIPTION IS NOT NULL
+            GROUP BY SUBSTR(DESCRIPTION, 1, 80) ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ' || NVL(r.DESCRIPTION,'(NULL)'), TO_CHAR(r.nb));
+    END LOOP;
+
+    p_sub('Echantillon 10 actions recentes');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT SEQUENCE_NO, ACTION_SEQUENCE_NO, ACTION,
+                   TO_CHAR(REQ_TIME,'DD/MM/YYYY HH24:MI:SS') dt,
+                   CURR_BRANCH, HOME_BRANCH, TXN_BRANCH, EXITFLAG,
+                   SUBSTR(DESCRIPTION, 1, 60) descr,
+                   SUBSTR(PKVALS, 1, 40) pk
+            FROM SMTB_SMS_ACTION_LOG
+            ORDER BY REQ_TIME DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('  --- ' || r.dt || ' | SEQ=' || r.SEQUENCE_NO
+            || '/' || r.ACTION_SEQUENCE_NO || ' | ACTION=' || r.ACTION || ' ---');
+        p_kv('    Branches (CURR/HOME/TXN)', NVL(r.CURR_BRANCH,'-')||' / '||NVL(r.HOME_BRANCH,'-')
+              ||' / '||NVL(r.TXN_BRANCH,'-'));
+        p_kv('    EXITFLAG / PKVALS', NVL(TO_CHAR(r.EXITFLAG),'-')||' / '||NVL(r.pk,'-'));
+        p_kv('    Description', NVL(r.descr,'-'));
+    END LOOP;
+
+    p_sub('Correlation avec SMTB_SMS_LOG : actions sans session loguee');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_ACTION_LOG a
+        WHERE a.REQ_TIME >= SYSDATE - 30
+          AND NOT EXISTS (
+              SELECT 1 FROM SMTB_SMS_LOG l
+              WHERE l.SEQUENCE_NO = a.SEQUENCE_NO
+          );
+    p_kv('  Actions 30 j sans entete session correspondante', TO_CHAR(v_count));
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

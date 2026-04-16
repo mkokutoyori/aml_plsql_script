@@ -735,6 +735,162 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-06. SMTB_USER_ROLE & SMTB_USER_CENTRAL_ROLES
+    --        — Affectation utilisateur <-> role (locale & centralisee)
+    -- =========================================================
+    p_section('A-06. SMTB_USER_ROLE & SMTB_USER_CENTRAL_ROLES — Affectation user<->role');
+
+    -- ---------- SMTB_USER_ROLE ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_USER_ROLE;
+    p_kv('Total affectations user-role (SMTB_USER_ROLE)', TO_CHAR(v_total));
+
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_ROLE;
+    p_kv('Utilisateurs distincts avec au moins 1 role', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_USER_ROLE;
+    p_kv('Roles distincts effectivement attribues', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM SMTB_USER_ROLE;
+    p_kv('Agences distinctes (BRANCH_CODE)', TO_CHAR(v_count));
+
+    p_sub('Statut d''autorisation (AUTH_STAT)');
+    FOR r IN (SELECT AUTH_STAT, COUNT(*) nb FROM SMTB_USER_ROLE
+              GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        p_pct('  AUTH_STAT = ' || NVL(r.AUTH_STAT,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Distribution par BRANCH_CODE (top 15)');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb FROM (
+            SELECT BRANCH_CODE, COUNT(*) nb FROM SMTB_USER_ROLE
+            GROUP BY BRANCH_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_pct('  BRANCH = ' || NVL(r.BRANCH_CODE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Nombre de roles par utilisateur — statistiques');
+    FOR r IN (
+        SELECT ROUND(AVG(nb),2) moy, MIN(nb) mini, MAX(nb) maxi
+        FROM (SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_ROLE GROUP BY USER_ID)
+    ) LOOP
+        p_kv('  Roles/user : moyenne', TO_CHAR(r.moy));
+        p_kv('  Roles/user : min', TO_CHAR(r.mini));
+        p_kv('  Roles/user : max', TO_CHAR(r.maxi));
+    END LOOP;
+
+    p_sub('Top 15 utilisateurs les plus dotes en roles');
+    FOR r IN (
+        SELECT USER_ID, nb FROM (
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_ROLE
+            GROUP BY USER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  USER = ' || NVL(r.USER_ID,'(NULL)'), TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('Top 15 roles les plus attribues');
+    FOR r IN (
+        SELECT ROLE_ID, nb FROM (
+            SELECT ROLE_ID, COUNT(*) nb FROM SMTB_USER_ROLE
+            GROUP BY ROLE_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ROLE = ' || NVL(r.ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' utilisateur(s)');
+    END LOOP;
+
+    p_sub('Utilisateurs actifs SANS role (AUTH_STAT = A et USER_STATUS actif)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+        WHERE NOT EXISTS (SELECT 1 FROM SMTB_USER_ROLE r WHERE r.USER_ID = u.USER_ID)
+          AND NOT EXISTS (SELECT 1 FROM SMTB_USER_CENTRAL_ROLES c WHERE c.USER_ID = u.USER_ID);
+    p_kv('  SMTB_USER sans AUCUNE affectation role', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+        WHERE u.USER_STATUS = 'E' AND u.AUTH_STAT = 'A'
+          AND NOT EXISTS (SELECT 1 FROM SMTB_USER_ROLE r WHERE r.USER_ID = u.USER_ID)
+          AND NOT EXISTS (SELECT 1 FROM SMTB_USER_CENTRAL_ROLES c WHERE c.USER_ID = u.USER_ID);
+    p_kv('  Dont actifs et autorises (ENABLED/Authorised)', TO_CHAR(v_count));
+
+    p_sub('Roles definis MAIS non attribues (orphelins)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER m
+        WHERE NOT EXISTS (SELECT 1 FROM SMTB_USER_ROLE r WHERE r.ROLE_ID = m.ROLE_ID)
+          AND NOT EXISTS (SELECT 1 FROM SMTB_USER_CENTRAL_ROLES c WHERE c.ROLE_ID = m.ROLE_ID);
+    p_kv('  Nombre de roles orphelins', TO_CHAR(v_count));
+
+    p_sub('Roles attribues mais absents de SMTB_ROLE_MASTER (fantomes)');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT DISTINCT ROLE_ID FROM SMTB_USER_ROLE
+        WHERE ROLE_ID NOT IN (SELECT ROLE_ID FROM SMTB_ROLE_MASTER)
+    );
+    p_kv('  Roles fantomes (SMTB_USER_ROLE)', TO_CHAR(v_count));
+
+    p_sub('Utilisateurs attribues mais absents de SMTB_USER');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT DISTINCT USER_ID FROM SMTB_USER_ROLE
+        WHERE USER_ID NOT IN (SELECT USER_ID FROM SMTB_USER)
+    );
+    p_kv('  Utilisateurs fantomes (SMTB_USER_ROLE)', TO_CHAR(v_count));
+
+    p_sub('Echantillon 10 affectations');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, ROLE_ID, BRANCH_CODE, AUTH_STAT
+            FROM SMTB_USER_ROLE ORDER BY USER_ID, ROLE_ID
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  USER=' || r.USER_ID, 'ROLE=' || r.ROLE_ID || ' | BRN=' || NVL(r.BRANCH_CODE,'-') || ' | AUTH=' || NVL(r.AUTH_STAT,'-'));
+    END LOOP;
+
+    -- ---------- SMTB_USER_CENTRAL_ROLES ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_USER_CENTRAL_ROLES;
+    p_kv('Total affectations centralisees (SMTB_USER_CENTRAL_ROLES)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_CENTRAL_ROLES;
+        p_kv('  Utilisateurs distincts avec role centralise', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_USER_CENTRAL_ROLES;
+        p_kv('  Roles centralises distincts', TO_CHAR(v_count));
+
+        p_sub('Statut d''autorisation (AUTH_STAT)');
+        FOR r IN (SELECT AUTH_STAT, COUNT(*) nb FROM SMTB_USER_CENTRAL_ROLES
+                  GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+            p_pct('  AUTH_STAT = ' || NVL(r.AUTH_STAT,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Top 15 utilisateurs les plus dotes en roles centralises');
+        FOR r IN (
+            SELECT USER_ID, nb FROM (
+                SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_CENTRAL_ROLES
+                GROUP BY USER_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  USER = ' || NVL(r.USER_ID,'(NULL)'), TO_CHAR(r.nb) || ' role(s)');
+        END LOOP;
+
+        p_sub('Top 15 roles centralises les plus attribues');
+        FOR r IN (
+            SELECT ROLE_ID, nb FROM (
+                SELECT ROLE_ID, COUNT(*) nb FROM SMTB_USER_CENTRAL_ROLES
+                GROUP BY ROLE_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  ROLE = ' || NVL(r.ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' utilisateur(s)');
+        END LOOP;
+
+        p_sub('Cumul total des roles par utilisateur (locaux + centralises) — Top 15');
+        FOR r IN (
+            SELECT USER_ID, nb FROM (
+                SELECT USER_ID, SUM(nb) nb FROM (
+                    SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_ROLE GROUP BY USER_ID
+                    UNION ALL
+                    SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_CENTRAL_ROLES GROUP BY USER_ID
+                ) GROUP BY USER_ID
+                ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  USER = ' || r.USER_ID, TO_CHAR(r.nb) || ' role(s) cumules');
+        END LOOP;
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

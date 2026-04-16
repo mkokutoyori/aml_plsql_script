@@ -891,6 +891,136 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-07. SMTB_ROLE_FUNC_LIMIT_CUSTOM & SMTB_ROLE_FUNC_LIMIT_DETAIL
+    --        — Limites transactionnelles par role/fonction
+    -- =========================================================
+    p_section('A-07. SMTB_ROLE_FUNC_LIMIT_* — Limites transactionnelles role/fonction');
+
+    -- ---------- SMTB_ROLE_FUNC_LIMIT_CUSTOM ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM;
+    p_kv('Total entetes CUSTOM (SMTB_ROLE_FUNC_LIMIT_CUSTOM)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Statut des entetes CUSTOM');
+        FOR r IN (SELECT RECORD_STAT, AUTH_STAT, COUNT(*) nb FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM
+                  GROUP BY RECORD_STAT, AUTH_STAT ORDER BY nb DESC) LOOP
+            p_pct('  Rec=' || NVL(r.RECORD_STAT,'(NULL)') || ' / Auth=' || NVL(r.AUTH_STAT,'(NULL)'),
+                  r.nb, v_total);
+        END LOOP;
+
+        p_sub('Liste des roles concernes (CUSTOM)');
+        FOR r IN (
+            SELECT ROLE_ID,
+                   SUBSTR(ROLE_DESCRIPTION,1,50) descr,
+                   MAKER_ID, CHECKER_ID,
+                   TO_CHAR(MAKER_DT_STAMP,'DD/MM/YYYY') mk_dt,
+                   TO_CHAR(CHECKER_DT_STAMP,'DD/MM/YYYY') ck_dt,
+                   RECORD_STAT, AUTH_STAT, ONCE_AUTH, MOD_NO
+            FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM
+            ORDER BY ROLE_ID
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  --- ROLE=' || r.ROLE_ID || ' | ' || NVL(r.descr,'-') || ' ---');
+            p_kv('    Maker / Date', NVL(r.MAKER_ID,'-') || ' / ' || NVL(r.mk_dt,'-'));
+            p_kv('    Checker / Date', NVL(r.CHECKER_ID,'-') || ' / ' || NVL(r.ck_dt,'-'));
+            p_kv('    Record/Auth/Once/Mod',
+                 r.RECORD_STAT||' / '||r.AUTH_STAT||' / '||NVL(r.ONCE_AUTH,'-')||' / '||r.MOD_NO);
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_ROLE_FUNC_LIMIT_DETAIL ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_FUNC_LIMIT_DETAIL;
+    p_kv('Total lignes DETAIL (SMTB_ROLE_FUNC_LIMIT_DETAIL)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL;
+        p_kv('  Roles distincts avec limite fonction', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT FUNCTION_ID) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL;
+        p_kv('  Fonctions distinctes avec limite', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT LIMIT_CCY) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL;
+        p_kv('  Devises distinctes (LIMIT_CCY)', TO_CHAR(v_count));
+
+        p_sub('Repartition par LIMIT_CCY');
+        FOR r IN (SELECT LIMIT_CCY, COUNT(*) nb,
+                         MIN(INPUT_LIMIT_AMOUNT) mini,
+                         ROUND(AVG(INPUT_LIMIT_AMOUNT)) moy,
+                         MAX(INPUT_LIMIT_AMOUNT) maxi
+                  FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+                  GROUP BY LIMIT_CCY ORDER BY nb DESC) LOOP
+            p_kv('  CCY=' || NVL(r.LIMIT_CCY,'(NULL)') || ' | nb=' || r.nb
+                 || ' | min=' || r.mini || ' | moy=' || r.moy || ' | max=' || r.maxi,
+                 ' ');
+        END LOOP;
+
+        p_sub('Repartition par FUNCTION_ID');
+        FOR r IN (
+            SELECT FUNCTION_ID, nb FROM (
+                SELECT FUNCTION_ID, COUNT(*) nb FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+                GROUP BY FUNCTION_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            p_pct('  FUNC = ' || NVL(r.FUNCTION_ID,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Top 20 roles avec le plus de limites configurees');
+        FOR r IN (
+            SELECT ROLE_ID, nb FROM (
+                SELECT ROLE_ID, COUNT(*) nb FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+                GROUP BY ROLE_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 20
+        ) LOOP
+            p_kv('  ROLE = ' || NVL(r.ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' fonction(s)');
+        END LOOP;
+
+        p_sub('Montants plafonds extremes (INPUT_LIMIT_AMOUNT)');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT ROLE_ID, FUNCTION_ID, LIMIT_CCY, INPUT_LIMIT_AMOUNT,
+                       SUBSTR(FUNCTION_DESCRIPTION, 1, 50) fd
+                FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+                ORDER BY INPUT_LIMIT_AMOUNT DESC NULLS LAST
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  ROLE=' || r.ROLE_ID || ' | FUNC=' || r.FUNCTION_ID || ' | CCY=' || r.LIMIT_CCY,
+                 'LIMIT=' || r.INPUT_LIMIT_AMOUNT || ' | ' || NVL(r.fd,'-'));
+        END LOOP;
+
+        p_sub('Limites nulles ou zero (anomalies potentielles)');
+        SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+            WHERE INPUT_LIMIT_AMOUNT IS NULL OR INPUT_LIMIT_AMOUNT = 0;
+        p_pct('  INPUT_LIMIT_AMOUNT NULL ou 0', v_count, v_total);
+        SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+            WHERE LIMIT_CCY IS NULL OR LIMIT_CCY = ' ';
+        p_pct('  LIMIT_CCY NULL', v_count, v_total);
+
+        p_sub('Coherence DETAIL <-> CUSTOM');
+        SELECT COUNT(DISTINCT d.ROLE_ID) INTO v_count
+            FROM SMTB_ROLE_FUNC_LIMIT_DETAIL d
+            WHERE NOT EXISTS (SELECT 1 FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM c WHERE c.ROLE_ID = d.ROLE_ID);
+        p_kv('  Roles presents dans DETAIL absents de CUSTOM', TO_CHAR(v_count));
+        SELECT COUNT(*) INTO v_count
+            FROM SMTB_ROLE_FUNC_LIMIT_CUSTOM c
+            WHERE NOT EXISTS (SELECT 1 FROM SMTB_ROLE_FUNC_LIMIT_DETAIL d WHERE d.ROLE_ID = c.ROLE_ID);
+        p_kv('  Roles CUSTOM sans lignes DETAIL', TO_CHAR(v_count));
+
+        p_sub('Echantillon 15 lignes DETAIL');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT ROLE_ID, FUNCTION_ID, LIMIT_CCY, INPUT_LIMIT_AMOUNT,
+                       SUBSTR(FUNCTION_DESCRIPTION, 1, 40) fd,
+                       SUBSTR(ROLE_DESCRIPTION, 1, 30) rd
+                FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+                ORDER BY ROLE_ID, FUNCTION_ID
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            DBMS_OUTPUT.PUT_LINE('  --- ROLE=' || r.ROLE_ID || ' (' || NVL(r.rd,'-') || ')'
+                || ' | FUNC=' || r.FUNCTION_ID || ' ---');
+            p_kv('    LIMIT / CCY', NVL(TO_CHAR(r.INPUT_LIMIT_AMOUNT),'-') || ' / ' || NVL(r.LIMIT_CCY,'-'));
+            p_kv('    Fonction', NVL(r.fd,'-'));
+        END LOOP;
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

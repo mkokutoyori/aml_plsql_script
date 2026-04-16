@@ -331,14 +331,6 @@ BEGIN
     END LOOP;
 
     -- =========================================================
-    -- FIN PROVISOIRE (sections suivantes à venir)
-    -- =========================================================
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE(v_sep);
-    DBMS_OUTPUT.PUT_LINE('>>> EXPLORATION TERMINEE — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
-    DBMS_OUTPUT.PUT_LINE(v_sep);
-
-    -- =========================================================
     -- 3. ACTB_HISTORY — REVENUS & CHARGES COMPTABILISES
     --    Angle Revenue Assurance : tous les amount tags typés
     --    "revenue" (intérêts, commissions, frais, pénalités)
@@ -650,5 +642,304 @@ BEGIN
     ) LOOP
         print_kv('  ORIG_PNL_GL ' || r.ORIG_PNL_GL, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 4. CLTB_ACCOUNT_COMPONENTS — COMPOSANTS DE PRET & WAIVERS
+    --    Angle Revenue Assurance :
+    --     - un composant INTEREST/PENAL/CHARGE marqué WAIVE='Y'
+    --       signifie qu'aucun intérêt/commission n'est collecté
+    --       ⇒ piste majeure de fuite de revenu si abus.
+    --     - les SPL_INTEREST (taux spécial dérogatoire), les
+    --       NEGOTIATED_RATE et les écarts ORG_EXCH_RATE vs
+    --       EXCHANGE_RATE donnent des dérogations commerciales
+    --       à auditer.
+    --     - le day count (DAYS_MTH / DAYS_YEAR) a un impact
+    --       direct sur le revenu d'intérêts calculé.
+    -- =========================================================
+    print_section('4. CLTB_ACCOUNT_COMPONENTS — composants de prêt & waivers');
+
+    -- 4.1 Volumétrie globale composants
+    DBMS_OUTPUT.PUT_LINE('  [4.1 Volumétrie globale]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Total composants prêt', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Comptes prêt distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Branches distinctes', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COMPONENT_NAME) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  COMPONENT_NAME distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COMPONENT_CCY) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Devises distinctes', TO_CHAR(v_count));
+
+    -- 4.2 Répartition par COMPONENT_TYPE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.2 Répartition par COMPONENT_TYPE]');
+    FOR r IN (
+        SELECT NVL(COMPONENT_TYPE,'(NULL)') COMPONENT_TYPE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY COMPONENT_TYPE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  COMPONENT_TYPE = ' || r.COMPONENT_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.3 Top 20 COMPONENT_NAME
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.3 Top 20 COMPONENT_NAME (inclut MAIN_PNT, INTEREST, PENALTY, ...)]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb FROM (
+            SELECT NVL(COMPONENT_NAME,'(NULL)') COMPONENT_NAME, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY COMPONENT_NAME ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  COMPONENT_NAME = ' || r.COMPONENT_NAME, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.4 MAIN_COMPONENT (marque le composant principal de l'échéancier)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.4 Répartition MAIN_COMPONENT]');
+    FOR r IN (
+        SELECT NVL(MAIN_COMPONENT,'(NULL)') MAIN_COMPONENT, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY MAIN_COMPONENT ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MAIN_COMPONENT = ' || r.MAIN_COMPONENT, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.5 WAIVE — analyse du waiver sur composant
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5 WAIVE — flag de renonciation au composant]');
+    FOR r IN (
+        SELECT NVL(WAIVE,'(NULL)') WAIVE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY WAIVE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  WAIVE = ' || r.WAIVE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.5.b WAIVE='Y' par COMPONENT_TYPE (là où la fuite se matérialise)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5.b WAIVE=''Y'' par COMPONENT_TYPE]');
+    FOR r IN (
+        SELECT NVL(COMPONENT_TYPE,'(NULL)') COMPONENT_TYPE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        WHERE WAIVE = 'Y'
+        GROUP BY COMPONENT_TYPE
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TYPE waivé = ' || r.COMPONENT_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.5.c WAIVE='Y' par COMPONENT_NAME — top 15
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5.c Top 15 COMPONENT_NAME waivés (WAIVE=''Y'')]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb FROM (
+            SELECT NVL(COMPONENT_NAME,'(NULL)') COMPONENT_NAME, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            WHERE WAIVE = 'Y'
+            GROUP BY COMPONENT_NAME
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.COMPONENT_NAME, TO_CHAR(r.nb) || ' composant(s) waivé(s)');
+    END LOOP;
+
+    -- 4.5.d WAIVE='Y' par BRANCH_CODE — top 15 (concentration agence)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5.d Top 15 BRANCHES utilisant des waivers]');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb_w, nb_tot,
+               ROUND(100 * nb_w / NULLIF(nb_tot,0), 2) pct
+        FROM (
+            SELECT BRANCH_CODE,
+                   SUM(CASE WHEN WAIVE = 'Y' THEN 1 ELSE 0 END) nb_w,
+                   COUNT(*) nb_tot
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY BRANCH_CODE
+            ORDER BY nb_w DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  BRANCHE ' || r.BRANCH_CODE,
+                 'waivés=' || TO_CHAR(r.nb_w) || ' / total=' || TO_CHAR(r.nb_tot) ||
+                 ' (' || TO_CHAR(r.pct) || ' %)');
+    END LOOP;
+
+    -- 4.5.e Comptes concentrant le plus de composants waivés
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5.e Top 15 comptes prêt avec composants waivés]');
+    FOR r IN (
+        SELECT ACCOUNT_NUMBER, BRANCH_CODE, nb FROM (
+            SELECT ACCOUNT_NUMBER, BRANCH_CODE, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            WHERE WAIVE = 'Y'
+            GROUP BY ACCOUNT_NUMBER, BRANCH_CODE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.BRANCH_CODE || ' / ' || r.ACCOUNT_NUMBER,
+                 TO_CHAR(r.nb) || ' composant(s) waivé(s)');
+    END LOOP;
+
+    -- 4.6 CAPITALIZED (intérêt capitalisé = reporté sur le principal)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.6 CAPITALIZED — composants capitalisés]');
+    FOR r IN (
+        SELECT NVL(CAPITALIZED,'(NULL)') CAPITALIZED, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY CAPITALIZED ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CAPITALIZED = ' || r.CAPITALIZED, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.7 LIQUIDATION_MODE (auto/manual) — auto = collecte automatique
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.7 LIQUIDATION_MODE des composants]');
+    FOR r IN (
+        SELECT NVL(LIQUIDATION_MODE,'(NULL)') LIQUIDATION_MODE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY LIQUIDATION_MODE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LIQUIDATION_MODE = ' || r.LIQUIDATION_MODE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.8 SPL_INTEREST (intérêt spécial / dérogatoire)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.8 SPL_INTEREST — intérêts dérogatoires]');
+    FOR r IN (
+        SELECT NVL(SPL_INTEREST,'(NULL)') SPL_INTEREST, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY SPL_INTEREST ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SPL_INTEREST = ' || r.SPL_INTEREST, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(MIN(SPL_INTEREST_AMT),2) mn,
+               ROUND(MAX(SPL_INTEREST_AMT),2) mx,
+               ROUND(AVG(SPL_INTEREST_AMT),2) av,
+               ROUND(SUM(SPL_INTEREST_AMT),2) sm
+        FROM CLTB_ACCOUNT_COMPONENTS
+        WHERE SPL_INTEREST = 'Y' AND SPL_INTEREST_AMT IS NOT NULL
+    ) LOOP
+        print_kv('  SPL_INTEREST_AMT — nb', TO_CHAR(r.nb));
+        print_kv('  SPL_INTEREST_AMT — min', TO_CHAR(r.mn));
+        print_kv('  SPL_INTEREST_AMT — max', TO_CHAR(r.mx));
+        print_kv('  SPL_INTEREST_AMT — moy', TO_CHAR(r.av));
+        print_kv('  SPL_INTEREST_AMT — sum', TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 4.9 Taux négociés (NEGOTIATED_RATE) — dérogations de change
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.9 Taux négociés CR (NEGOTIATED_RATE)]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NEGOTIATED_RATE IS NOT NULL AND NEGOTIATED_RATE > 0;
+    print_kv('  Composants avec NEGOTIATED_RATE renseigné', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NEGOTIATION_REF_NO IS NOT NULL;
+    print_kv('  Composants avec NEGOTIATION_REF_NO', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT ROUND(MIN(NEGOTIATED_RATE),6) mn,
+               ROUND(MAX(NEGOTIATED_RATE),6) mx,
+               ROUND(AVG(NEGOTIATED_RATE),6) av
+        FROM CLTB_ACCOUNT_COMPONENTS
+        WHERE NEGOTIATED_RATE IS NOT NULL AND NEGOTIATED_RATE > 0
+    ) LOOP
+        print_kv('  NEGOTIATED_RATE min', TO_CHAR(r.mn));
+        print_kv('  NEGOTIATED_RATE max', TO_CHAR(r.mx));
+        print_kv('  NEGOTIATED_RATE moy', TO_CHAR(r.av));
+    END LOOP;
+
+    -- 4.9.b Ecart ORG_EXCH_RATE vs EXCHANGE_RATE (dérogation FX)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.9.b Dérogation FX : ORG_EXCH_RATE vs EXCHANGE_RATE]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE ORG_EXCH_RATE IS NOT NULL AND EXCHANGE_RATE IS NOT NULL
+      AND ORG_EXCH_RATE <> 0
+      AND ABS(EXCHANGE_RATE - ORG_EXCH_RATE) / ORG_EXCH_RATE > 0.001;
+    print_kv('  Composants avec écart taux CR > 0,1 %', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE ORG_EXCH_RATE_DR IS NOT NULL AND EXCHANGE_RATE_DR IS NOT NULL
+      AND ORG_EXCH_RATE_DR <> 0
+      AND ABS(EXCHANGE_RATE_DR - ORG_EXCH_RATE_DR) / ORG_EXCH_RATE_DR > 0.001;
+    print_kv('  Composants avec écart taux DR > 0,1 %', TO_CHAR(v_count));
+
+    -- 4.10 Day count convention (impact direct sur revenu d'intérêts)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.10 Day count convention (DAYS_MTH / DAYS_YEAR)]');
+    FOR r IN (
+        SELECT NVL(DAYS_MTH,'(NULL)') DAYS_MTH, NVL(DAYS_YEAR,'(NULL)') DAYS_YEAR, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY DAYS_MTH, DAYS_YEAR
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MONTH/' || r.DAYS_MTH || ' YEAR/' || r.DAYS_YEAR, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.11 IRR_APPLICABLE (composant entrant dans calcul du TAEG)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.11 IRR_APPLICABLE — entre dans le calcul TAEG]');
+    FOR r IN (
+        SELECT NVL(IRR_APPLICABLE,'(NULL)') IRR_APPLICABLE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY IRR_APPLICABLE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  IRR_APPLICABLE = ' || r.IRR_APPLICABLE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.12 PENAL_BASIS_COMP — base de calcul des pénalités
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.12 PENAL_BASIS_COMP — composant servant d''assise aux pénalités]');
+    FOR r IN (
+        SELECT PENAL_BASIS_COMP, nb FROM (
+            SELECT NVL(PENAL_BASIS_COMP,'(NULL)') PENAL_BASIS_COMP, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY PENAL_BASIS_COMP ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PENAL_BASIS_COMP = ' || r.PENAL_BASIS_COMP, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.13 USE_GUARANTOR / VERIFY_FUNDS (impact recouvrement)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.13 Recouvrement : USE_GUARANTOR / VERIFY_FUNDS]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE USE_GUARANTOR = 'Y';
+    print_kv('  USE_GUARANTOR = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE VERIFY_FUNDS = 'Y';
+    print_kv('  VERIFY_FUNDS = Y', TO_CHAR(v_count));
+
+    -- 4.14 Mode de paiement (DR/CR/RE) — canal de collecte
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.14 Canal de collecte CR_PAYMENT_MODE — top 10]');
+    FOR r IN (
+        SELECT CR_PAYMENT_MODE, nb FROM (
+            SELECT NVL(CR_PAYMENT_MODE,'(NULL)') CR_PAYMENT_MODE, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY CR_PAYMENT_MODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CR_PAYMENT_MODE = ' || r.CR_PAYMENT_MODE, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.14.b Canal DR_PAYMENT_MODE — top 10]');
+    FOR r IN (
+        SELECT DR_PAYMENT_MODE, nb FROM (
+            SELECT NVL(DR_PAYMENT_MODE,'(NULL)') DR_PAYMENT_MODE, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY DR_PAYMENT_MODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  DR_PAYMENT_MODE = ' || r.DR_PAYMENT_MODE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.15 Croisement WAIVE × SPL_INTEREST (cumul de dérogations)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.15 Cumul de dérogations (WAIVE=''Y'' ET SPL_INTEREST=''Y'')]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE WAIVE = 'Y' AND SPL_INTEREST = 'Y';
+    print_kv('  Composants cumulant waiver + intérêt spécial', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE WAIVE = 'Y' AND NEGOTIATED_RATE IS NOT NULL AND NEGOTIATED_RATE > 0;
+    print_kv('  Composants waivés ET taux négocié', TO_CHAR(v_count));
 END;
 /

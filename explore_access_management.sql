@@ -597,6 +597,144 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-05. SMTB_ROLE_DETAIL — Privileges role/fonction (matrice fine)
+    -- =========================================================
+    p_section('A-05. SMTB_ROLE_DETAIL — Privileges role/fonction (23K+ lignes attendues)');
+
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_DETAIL;
+    p_kv('Total lignes de privileges role/fonction', TO_CHAR(v_total));
+
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL;
+    p_kv('Nombre de roles distincts avec privileges', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ROLE_FUNCTION) INTO v_count FROM SMTB_ROLE_DETAIL;
+    p_kv('Nombre de fonctions distinctes accessibles', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM SMTB_ROLE_DETAIL;
+    p_kv('Nombre d''agences distinctes (BRANCH_CODE)', TO_CHAR(v_count));
+
+    p_sub('Statut d''autorisation (AUTH_STAT)');
+    FOR r IN (SELECT AUTH_STAT, COUNT(*) nb FROM SMTB_ROLE_DETAIL
+              GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        p_pct('  AUTH_STAT = ' || NVL(r.AUTH_STAT,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Distribution par BRANCH_CODE (top 15)');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb FROM (
+            SELECT BRANCH_CODE, COUNT(*) nb FROM SMTB_ROLE_DETAIL
+            GROUP BY BRANCH_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_pct('  BRANCH = ' || NVL(r.BRANCH_CODE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Top 20 roles avec le plus de privileges (nb de lignes role/fonction)');
+    FOR r IN (
+        SELECT ROLE_ID, nb FROM (
+            SELECT ROLE_ID, COUNT(*) nb FROM SMTB_ROLE_DETAIL
+            GROUP BY ROLE_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_kv('  ROLE = ' || NVL(r.ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' fonctions');
+    END LOOP;
+
+    p_sub('Top 20 fonctions les plus attribuees (ROLE_FUNCTION)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, nb FROM (
+            SELECT ROLE_FUNCTION, COUNT(*) nb FROM SMTB_ROLE_DETAIL
+            GROUP BY ROLE_FUNCTION ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_kv('  FUNC = ' || NVL(r.ROLE_FUNCTION,'(NULL)'), TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('Top 20 fonctions RAD (RAD_FUNCTION_ID) les plus attribuees');
+    FOR r IN (
+        SELECT RAD_FUNCTION_ID, nb FROM (
+            SELECT RAD_FUNCTION_ID, COUNT(*) nb FROM SMTB_ROLE_DETAIL
+            WHERE RAD_FUNCTION_ID IS NOT NULL
+            GROUP BY RAD_FUNCTION_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_kv('  RAD = ' || NVL(r.RAD_FUNCTION_ID,'(NULL)'), TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('Fonctions SENSIBLES — focus gestion des acces / parametres');
+    FOR f IN (
+        SELECT func FROM (
+            SELECT 'SMDUSRDF' AS func, 1 ord FROM DUAL UNION ALL
+            SELECT 'SMDROLDF',        2 FROM DUAL UNION ALL
+            SELECT 'SMDCHPWD',        3 FROM DUAL UNION ALL
+            SELECT 'SMDBRGRT',        4 FROM DUAL UNION ALL
+            SELECT 'SMDAUTH',         5 FROM DUAL UNION ALL
+            SELECT 'SMSPARAM',        6 FROM DUAL UNION ALL
+            SELECT 'SMDPARAM',        7 FROM DUAL UNION ALL
+            SELECT 'SMDCHKDT',        8 FROM DUAL UNION ALL
+            SELECT 'SMDUSRHL',        9 FROM DUAL UNION ALL
+            SELECT 'SMDCLRUS',       10 FROM DUAL UNION ALL
+            SELECT 'STDCIF',         11 FROM DUAL UNION ALL
+            SELECT 'STDCUSAC',       12 FROM DUAL UNION ALL
+            SELECT 'STDACCLS',       13 FROM DUAL UNION ALL
+            SELECT 'STDBRANC',       14 FROM DUAL UNION ALL
+            SELECT 'KYDKYCMN',       15 FROM DUAL UNION ALL
+            SELECT 'STDKYCMN',       16 FROM DUAL UNION ALL
+            SELECT 'STDCUSTF',       17 FROM DUAL ORDER BY ord
+        )
+    ) LOOP
+        SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
+            WHERE UPPER(ROLE_FUNCTION) = f.func OR UPPER(RAD_FUNCTION_ID) = f.func;
+        p_kv('  Fonction ' || f.func, TO_CHAR(v_count) || ' role(s) l''ont dans le scope');
+    END LOOP;
+
+    p_sub('Distribution CONTROL_STRING (pattern de droits) — Top 20');
+    FOR r IN (
+        SELECT CONTROL_STRING, nb FROM (
+            SELECT SUBSTR(CONTROL_STRING, 1, 32) AS CONTROL_STRING, COUNT(*) nb
+            FROM SMTB_ROLE_DETAIL
+            GROUP BY SUBSTR(CONTROL_STRING, 1, 32) ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_pct('  CTRL = ' || NVL(r.CONTROL_STRING,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Volume CONTROL_1..CONTROL_16 actifs (NULL / non nul)');
+    FOR c IN (
+        SELECT LEVEL AS n FROM DUAL CONNECT BY LEVEL <= 16
+    ) LOOP
+        EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM SMTB_ROLE_DETAIL WHERE CONTROL_' || c.n || ' IS NOT NULL AND CONTROL_' || c.n || ' > 0' INTO v_count;
+        p_pct('  CONTROL_' || c.n || ' actif (>0)', v_count, v_total);
+    END LOOP;
+
+    p_sub('Roles ayant acces a TOUTES les agences (heuristique : > 1 BRANCH_CODE)');
+    FOR r IN (
+        SELECT ROLE_ID, nb_branches FROM (
+            SELECT ROLE_ID, COUNT(DISTINCT BRANCH_CODE) nb_branches
+            FROM SMTB_ROLE_DETAIL
+            GROUP BY ROLE_ID
+            HAVING COUNT(DISTINCT BRANCH_CODE) > 1
+            ORDER BY nb_branches DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ROLE = ' || r.ROLE_ID, TO_CHAR(r.nb_branches) || ' agence(s)');
+    END LOOP;
+
+    p_sub('Echantillon 10 lignes');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_ID, ROLE_FUNCTION, BRANCH_CODE, AUTH_STAT,
+                   SUBSTR(CONTROL_STRING, 1, 40) AS ctrl, RAD_FUNCTION_ID
+            FROM SMTB_ROLE_DETAIL
+            ORDER BY ROLE_ID, ROLE_FUNCTION
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('  --- ROLE=' || r.ROLE_ID || ' | FUNC=' || r.ROLE_FUNCTION
+            || ' | BRN=' || NVL(r.BRANCH_CODE,'-') || ' | AUTH=' || NVL(r.AUTH_STAT,'-') || ' ---');
+        p_kv('    CONTROL_STRING', r.ctrl);
+        p_kv('    RAD_FUNCTION_ID', NVL(r.RAD_FUNCTION_ID,'-'));
+    END LOOP;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

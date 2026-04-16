@@ -2064,6 +2064,191 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-14. CSTM_FUNCTION_USERDEF_FIELDS — UDF securite
+    --        Focus : SMDROLDF (privileges roles), SMDUSRDF (identite users),
+    --                STDBRANC (agences), STDACCLS (classes de comptes)
+    -- =========================================================
+    p_section('A-14. CSTM_FUNCTION_USERDEF_FIELDS — UDF dediees securite/acces');
+
+    SELECT COUNT(*) INTO v_total FROM CSTM_FUNCTION_USERDEF_FIELDS;
+    p_kv('Total lignes CSTM_FUNCTION_USERDEF_FIELDS', TO_CHAR(v_total));
+
+    p_sub('Distribution par FUNCTION_ID (focus securite/acces)');
+    FOR r IN (
+        SELECT FUNCTION_ID, COUNT(*) nb FROM CSTM_FUNCTION_USERDEF_FIELDS
+        WHERE FUNCTION_ID IN ('SMDROLDF','SMDUSRDF','STDBRANC','STDACCLS',
+                              'SMDCHPWD','SMDCHKDT','SMDAUTH','SMDPARAM',
+                              'SMDUSRHL','SMSPARAM','SMDUSRDF','STDCIF','STDCUSAC')
+        GROUP BY FUNCTION_ID ORDER BY nb DESC
+    ) LOOP
+        p_kv('  ' || RPAD(r.FUNCTION_ID,12), TO_CHAR(r.nb) || ' UDF');
+    END LOOP;
+
+    -- ---------- SMDROLDF — privileges roles (UDF) ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS WHERE FUNCTION_ID = 'SMDROLDF';
+    p_kv('SMDROLDF — lignes', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        p_sub('SMDROLDF : distribution FIELD_VAL_1 (PRIVILEGE_ACCLASS_LIST)');
+        FOR r IN (
+            SELECT FIELD_VAL_1, COUNT(*) nb FROM (
+                SELECT FIELD_VAL_1, COUNT(*) nb
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'SMDROLDF'
+                GROUP BY FIELD_VAL_1 ORDER BY COUNT(*) DESC
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  PRIV_ACCLASS = ' || NVL(r.FIELD_VAL_1,'(NULL)'), TO_CHAR(r.nb));
+        END LOOP;
+
+        p_sub('SMDROLDF : distribution FIELD_VAL_2 (PRIVILEGE_ROLE)');
+        FOR r IN (
+            SELECT FIELD_VAL_2, COUNT(*) nb FROM (
+                SELECT FIELD_VAL_2, COUNT(*) nb
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'SMDROLDF'
+                GROUP BY FIELD_VAL_2 ORDER BY COUNT(*) DESC
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  PRIV_ROLE = ' || NVL(r.FIELD_VAL_2,'(NULL)'), TO_CHAR(r.nb));
+        END LOOP;
+
+        p_sub('SMDROLDF : echantillon 10 entrees');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) role_id,
+                       FIELD_VAL_1 priv_acclass, FIELD_VAL_2 priv_role
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'SMDROLDF'
+                ORDER BY REC_KEY
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  ROLE=' || NVL(r.role_id,'(NULL)'),
+                 'PRIV_ACCLASS=' || NVL(r.priv_acclass,'-')
+                 || ' | PRIV_ROLE=' || NVL(r.priv_role,'-'));
+        END LOOP;
+
+        p_sub('SMDROLDF : coherence avec SMTB_ROLE_MASTER');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT DISTINCT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) AS role_id
+            FROM CSTM_FUNCTION_USERDEF_FIELDS
+            WHERE FUNCTION_ID = 'SMDROLDF'
+        ) WHERE role_id NOT IN (SELECT ROLE_ID FROM SMTB_ROLE_MASTER);
+        p_kv('  Roles UDF absents de SMTB_ROLE_MASTER', TO_CHAR(v_count));
+    END IF;
+
+    -- ---------- SMDUSRDF — identite user (UDF) ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS WHERE FUNCTION_ID = 'SMDUSRDF';
+    p_kv('SMDUSRDF — lignes', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS
+            WHERE FUNCTION_ID = 'SMDUSRDF' AND (FIELD_VAL_1 IS NULL OR FIELD_VAL_1 = ' ');
+        p_kv('  SMDUSRDF : sans email (FIELD_VAL_1)', TO_CHAR(v_count));
+        SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS
+            WHERE FUNCTION_ID = 'SMDUSRDF' AND (FIELD_VAL_2 IS NULL OR FIELD_VAL_2 = ' ');
+        p_kv('  SMDUSRDF : sans staff_id (FIELD_VAL_2)', TO_CHAR(v_count));
+
+        p_sub('SMDUSRDF : echantillon 10 entrees');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) user_id,
+                       FIELD_VAL_1 email, FIELD_VAL_2 staff_id
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'SMDUSRDF'
+                ORDER BY REC_KEY
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  USER=' || NVL(r.user_id,'(NULL)'),
+                 'EMAIL=' || NVL(r.email,'-') || ' | STAFF=' || NVL(r.staff_id,'-'));
+        END LOOP;
+
+        p_sub('SMDUSRDF : coherence avec SMTB_USER');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT DISTINCT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) AS user_id
+            FROM CSTM_FUNCTION_USERDEF_FIELDS
+            WHERE FUNCTION_ID = 'SMDUSRDF'
+        ) WHERE user_id NOT IN (SELECT USER_ID FROM SMTB_USER);
+        p_kv('  Users UDF absents de SMTB_USER', TO_CHAR(v_count));
+    END IF;
+
+    -- ---------- STDBRANC — agences (UDF) ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS WHERE FUNCTION_ID = 'STDBRANC';
+    p_kv('STDBRANC — lignes', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS
+            WHERE FUNCTION_ID = 'STDBRANC' AND (FIELD_VAL_1 IS NULL OR FIELD_VAL_1 = ' ');
+        p_kv('  STDBRANC sans telephone agence (FIELD_VAL_1)', TO_CHAR(v_count));
+
+        p_sub('STDBRANC : echantillon 10 entrees (code agence / telephone)');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) branch_code,
+                       FIELD_VAL_1 phone
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'STDBRANC'
+                ORDER BY REC_KEY
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  BRANCH=' || NVL(r.branch_code,'(NULL)'), 'TEL=' || NVL(r.phone,'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- STDACCLS — classes de comptes / privilege (UDF) ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_count FROM CSTM_FUNCTION_USERDEF_FIELDS WHERE FUNCTION_ID = 'STDACCLS';
+    p_kv('STDACCLS — lignes', TO_CHAR(v_count));
+
+    IF v_count > 0 THEN
+        p_sub('STDACCLS : distribution FIELD_VAL_1 (privilege)');
+        FOR r IN (
+            SELECT FIELD_VAL_1, COUNT(*) nb FROM (
+                SELECT FIELD_VAL_1, COUNT(*) nb FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'STDACCLS'
+                GROUP BY FIELD_VAL_1 ORDER BY COUNT(*) DESC
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  PRIV = ' || NVL(r.FIELD_VAL_1,'(NULL)'), TO_CHAR(r.nb));
+        END LOOP;
+
+        p_sub('STDACCLS : echantillon 10 entrees');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT SUBSTR(REC_KEY, 1, INSTR(REC_KEY,'~',1,1)-1) acclass,
+                       FIELD_VAL_1 priv
+                FROM CSTM_FUNCTION_USERDEF_FIELDS
+                WHERE FUNCTION_ID = 'STDACCLS' ORDER BY REC_KEY
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  ACCLASS=' || NVL(r.acclass,'(NULL)'), 'PRIVILEGE=' || NVL(r.priv,'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- Fonctions UDF supplementaires (si presentes) ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    p_sub('Autres FUNCTION_ID UDF potentiellement lies a la securite');
+    FOR f IN (
+        SELECT func FROM (
+            SELECT 'SMDCHPWD' func FROM DUAL UNION ALL
+            SELECT 'SMDCHKDT'       FROM DUAL UNION ALL
+            SELECT 'SMDAUTH'        FROM DUAL UNION ALL
+            SELECT 'SMDPARAM'       FROM DUAL UNION ALL
+            SELECT 'SMDUSRHL'       FROM DUAL UNION ALL
+            SELECT 'SMSPARAM'       FROM DUAL UNION ALL
+            SELECT 'STDSTCHN'       FROM DUAL
+        )
+    ) LOOP
+        EXECUTE IMMEDIATE
+            'SELECT COUNT(*) FROM CSTM_FUNCTION_USERDEF_FIELDS WHERE FUNCTION_ID = :1'
+            INTO v_count USING f.func;
+        p_kv('  ' || RPAD(f.func,10), TO_CHAR(v_count) || ' UDF');
+    END LOOP;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

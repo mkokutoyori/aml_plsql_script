@@ -2267,5 +2267,239 @@ BEGIN
     ) LOOP
         print_kv('  CPARTY ' || r.COUNTERPARTY, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 9. ICTM — PARAMETRAGE TAUX D'INTERET (IC)
+    --    Angle Revenue Assurance :
+    --     - ICTM_PR_INT_UDEVALS : taux par produit/classe
+    --       (référentiel "catalogue" des taux appliqués).
+    --     - ICTM_ACC_UDEVALS : taux par compte (dérogations
+    --       individuelles, variance, spread). Un UDE_VARIANCE
+    --       non nul = taux appliqué au client ≠ taux catalogue.
+    --     - ICTM_EXPR : expressions de calcul de revenu IC
+    --       (règles / conditions / formules). Piste d'audit
+    --       : vérifier que chaque RULE_ID est bien autorisée.
+    -- =========================================================
+    print_section('9. ICTM — Paramétrage des taux d''intérêt');
+
+    -- 9.1 Volumétrie globale
+    DBMS_OUTPUT.PUT_LINE('  [9.1 Volumétrie]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_PR_INT_UDEVALS;
+    print_kv('  ICTM_PR_INT_UDEVALS (taux produit/classe)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  ICTM_ACC_UDEVALS (taux compte)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_EXPR;
+    print_kv('  ICTM_EXPR (expressions de calcul)', TO_CHAR(v_count));
+
+    -- 9.2 Taux catalogue par PRODUCT_CODE — top 15
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2 Taux catalogue — top 15 PRODUCT_CODE les plus paramétrés]');
+    FOR r IN (
+        SELECT PRODUCT_CODE, nb FROM (
+            SELECT NVL(PRODUCT_CODE,'(NULL)') PRODUCT_CODE, COUNT(*) nb
+            FROM ICTM_PR_INT_UDEVALS
+            GROUP BY PRODUCT_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PRODUCT ' || r.PRODUCT_CODE, TO_CHAR(r.nb) || ' lignes UDE');
+    END LOOP;
+
+    -- 9.2.b Répartition UDE_ID (types de taux : MAIN_INT_RATE, PENALTY_RATE, ...)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2.b Top 15 UDE_ID (types de taux)]');
+    FOR r IN (
+        SELECT UDE_ID, nb FROM (
+            SELECT NVL(UDE_ID,'(NULL)') UDE_ID, COUNT(*) nb
+            FROM ICTM_PR_INT_UDEVALS
+            GROUP BY UDE_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  UDE_ID = ' || r.UDE_ID, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.2.c Stats UDE_VALUE par UDE_ID principaux
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2.c Stats UDE_VALUE (taux) par UDE_ID]');
+    FOR r IN (
+        SELECT UDE_ID, nb, mn, mx, av FROM (
+            SELECT UDE_ID,
+                   COUNT(*) nb,
+                   ROUND(MIN(UDE_VALUE),4) mn,
+                   ROUND(MAX(UDE_VALUE),4) mx,
+                   ROUND(AVG(UDE_VALUE),4) av
+            FROM ICTM_PR_INT_UDEVALS
+            WHERE UDE_VALUE IS NOT NULL
+            GROUP BY UDE_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.UDE_ID, 'nb=' || TO_CHAR(r.nb)
+                 || ' | min=' || TO_CHAR(r.mn)
+                 || ' | max=' || TO_CHAR(r.mx)
+                 || ' | moy=' || TO_CHAR(r.av));
+    END LOOP;
+
+    -- 9.2.d Plage temporelle des effets (UDE_EFF_DT)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2.d Plage temporelle des taux catalogue]');
+    FOR r IN (
+        SELECT MIN(UDE_EFF_DT) mn, MAX(UDE_EFF_DT) mx FROM ICTM_PR_INT_UDEVALS
+    ) LOOP
+        print_kv('  UDE_EFF_DT min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  UDE_EFF_DT max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 9.2.e Taux catalogue par devise
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2.e Top 10 devises côté taux catalogue]');
+    FOR r IN (
+        SELECT CCY_CODE, nb FROM (
+            SELECT NVL(CCY_CODE,'(NULL)') CCY_CODE, COUNT(*) nb
+            FROM ICTM_PR_INT_UDEVALS
+            GROUP BY CCY_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CCY ' || r.CCY_CODE, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.3 Taux compte (ICTM_ACC_UDEVALS) — dérogations individuelles
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3 Taux compte — ICTM_ACC_UDEVALS]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Total taux compte', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACC) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Comptes distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT PROD) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Produits distincts', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.b Statut d''enregistrement]');
+    FOR r IN (SELECT NVL(AUTH_STAT,'(NULL)') s, COUNT(*) nb
+              FROM ICTM_ACC_UDEVALS GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        print_kv('  AUTH_STAT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(RECORD_STAT,'(NULL)') s, COUNT(*) nb
+              FROM ICTM_ACC_UDEVALS GROUP BY RECORD_STAT ORDER BY nb DESC) LOOP
+        print_kv('  RECORD_STAT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.3.c UDE_VARIANCE — dérogations sur taux (fuite directe)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.c UDE_VARIANCE — variance de taux par compte]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS
+    WHERE UDE_VARIANCE IS NOT NULL AND UDE_VARIANCE <> 0;
+    print_kv('  Comptes avec variance non nulle', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT ROUND(MIN(UDE_VARIANCE),4) mn,
+               ROUND(MAX(UDE_VARIANCE),4) mx,
+               ROUND(AVG(UDE_VARIANCE),4) av
+        FROM ICTM_ACC_UDEVALS
+        WHERE UDE_VARIANCE IS NOT NULL AND UDE_VARIANCE <> 0
+    ) LOOP
+        print_kv('  UDE_VARIANCE min', TO_CHAR(r.mn));
+        print_kv('  UDE_VARIANCE max', TO_CHAR(r.mx));
+        print_kv('  UDE_VARIANCE moy', TO_CHAR(r.av));
+    END LOOP;
+
+    -- 9.3.d Variance négative (taux défavorable banque)
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS WHERE UDE_VARIANCE < 0;
+    print_kv('  Variance NEGATIVE (taux en dessous catalogue)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS WHERE UDE_VARIANCE > 0;
+    print_kv('  Variance POSITIVE (taux au dessus catalogue)', TO_CHAR(v_count));
+
+    -- 9.3.e Répartition des dérogations par PROD
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.e Top 15 PROD avec plus de dérogations (variance <> 0)]');
+    FOR r IN (
+        SELECT PROD, nb FROM (
+            SELECT NVL(PROD,'(NULL)') PROD, COUNT(*) nb
+            FROM ICTM_ACC_UDEVALS
+            WHERE UDE_VARIANCE <> 0
+            GROUP BY PROD ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PROD ' || r.PROD, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.3.f Comptes avec plus grand nombre de taux dérogatoires
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.f Top 15 comptes avec plus de taux dérogatoires]');
+    FOR r IN (
+        SELECT ACC, BRN, nb FROM (
+            SELECT ACC, BRN, COUNT(*) nb
+            FROM ICTM_ACC_UDEVALS
+            WHERE UDE_VARIANCE <> 0
+            GROUP BY ACC, BRN
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.BRN || ' / ' || r.ACC, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.3.g BASE_RATE / BASE_SPREAD — stats
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.g Stats BASE_RATE / BASE_SPREAD sur comptes]');
+    FOR r IN (
+        SELECT COUNT(BASE_RATE) nb_br,
+               ROUND(MIN(BASE_RATE),4) mn_br,
+               ROUND(MAX(BASE_RATE),4) mx_br,
+               ROUND(AVG(BASE_RATE),4) av_br,
+               COUNT(BASE_SPREAD) nb_bs,
+               ROUND(MIN(BASE_SPREAD),4) mn_bs,
+               ROUND(MAX(BASE_SPREAD),4) mx_bs,
+               ROUND(AVG(BASE_SPREAD),4) av_bs
+        FROM ICTM_ACC_UDEVALS
+    ) LOOP
+        print_kv('  BASE_RATE nb / min / max / moy',
+                 TO_CHAR(r.nb_br) || ' / ' || TO_CHAR(r.mn_br) ||
+                 ' / ' || TO_CHAR(r.mx_br) || ' / ' || TO_CHAR(r.av_br));
+        print_kv('  BASE_SPREAD nb / min / max / moy',
+                 TO_CHAR(r.nb_bs) || ' / ' || TO_CHAR(r.mn_bs) ||
+                 ' / ' || TO_CHAR(r.mx_bs) || ' / ' || TO_CHAR(r.av_bs));
+    END LOOP;
+
+    -- 9.3.h Effectivité des taux (dates postérieures / antérieures)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3.h Effectivité UDE_EFF_DT sur comptes]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS WHERE UDE_EFF_DT > SYSDATE;
+    print_kv('  Taux futurs (eff > SYSDATE)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS WHERE UDE_EFF_DT <= SYSDATE;
+    print_kv('  Taux actifs / passés', TO_CHAR(v_count));
+
+    -- 9.4 ICTM_EXPR — expressions de calcul
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.4 ICTM_EXPR — expressions de calcul IC]');
+    SELECT COUNT(DISTINCT RULE_ID) INTO v_count FROM ICTM_EXPR;
+    print_kv('  Nb RULE_ID distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT FRM_NO) INTO v_count FROM ICTM_EXPR;
+    print_kv('  Nb FRM_NO distincts', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_EXPR WHERE COND IS NOT NULL AND COND <> ' ';
+    print_kv('  Lignes avec CONDITION', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ICTM_EXPR WHERE RESULT IS NOT NULL AND RESULT <> ' ';
+    print_kv('  Lignes avec RESULT', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.4.b Top 15 RULE_ID par nb de lignes d''expression]');
+    FOR r IN (
+        SELECT RULE_ID, nb FROM (
+            SELECT NVL(RULE_ID,'(NULL)') RULE_ID, COUNT(*) nb
+            FROM ICTM_EXPR
+            GROUP BY RULE_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  RULE_ID ' || r.RULE_ID, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.5 Alignement catalogue vs compte (taux compte sans catalogue correspondant)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.5 Cohérence catalogue vs compte]');
+    SELECT COUNT(*) INTO v_count
+    FROM ICTM_ACC_UDEVALS a
+    WHERE NOT EXISTS (
+        SELECT 1 FROM ICTM_PR_INT_UDEVALS p
+        WHERE p.PRODUCT_CODE = a.PROD
+          AND p.UDE_ID       = a.UDE_ID
+    );
+    print_kv('  Taux compte sans UDE_ID catalogué pour le produit', TO_CHAR(v_count));
 END;
 /

@@ -2956,5 +2956,432 @@ BEGIN
       AND NEW_LCY_EQUIVALENT IS NOT NULL AND NEW_RATE <> 0
       AND ABS(ACCOUNT_BALANCE * NEW_RATE - NEW_LCY_EQUIVALENT) > 1;
     print_kv('  Ecart ACCOUNT_BALANCE*NEW_RATE vs NEW_LCY > 1', TO_CHAR(v_count));
+
+    ----------------------------------------------------------------
+    -- SECTION 12 : Comptes clients — turnovers, overdraft, dormance
+    --   Revenue Assurance : traquer les comptes dormants mal taris
+    --   les overdrafts non facturés (TOD), les turnovers anormaux
+    --   (base d'assiette commissions) et les statuts de compte qui
+    --   pourraient bloquer la perception de commissions/charges.
+    ----------------------------------------------------------------
+    print_section('SECTION 12 — Comptes clients (turnovers / overdraft / dormance)');
+
+    -- 12.1 Volumétrie STTM_CUST_ACCOUNT
+    DBMS_OUTPUT.PUT_LINE('  [12.1 Volumétrie STTM_CUST_ACCOUNT]');
+    safe_count('STTM_CUST_ACCOUNT', '  Total comptes clients');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE AUTH_STAT='A';
+    print_kv('  Autorisés (A)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE AUTH_STAT='U';
+    print_kv('  Non autorisés (U)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT='C';
+    print_kv('  Clôturés (RECORD_STAT=C)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT='O';
+    print_kv('  Ouverts (RECORD_STAT=O)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE ONCE_AUTH='N';
+    print_kv('  Jamais autorisés (ONCE_AUTH=N)', TO_CHAR(v_count));
+
+    -- 12.2 Répartition par ACCOUNT_CLASS (top 20)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.2 Top ACCOUNT_CLASS (volume de comptes)]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(ACCOUNT_CLASS,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT GROUP BY ACCOUNT_CLASS
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.3 Répartition par ACCOUNT_TYPE / CCY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.3 Répartition ACCOUNT_TYPE]');
+    FOR r IN (SELECT NVL(ACCOUNT_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUST_ACCOUNT GROUP BY ACCOUNT_TYPE ORDER BY nb DESC) LOOP
+        print_kv('  TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.3.b Top 15 devises CCY]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CCY,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT GROUP BY CCY
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CCY = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.4 Statuts RA-sensibles (dormant / frozen / stop_pay / no_cr / no_dr / block / depost)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.4 Statuts RA-sensibles (flags Y)]');
+    FOR r IN (
+        SELECT 'AC_STAT_DORMANT=Y'   lbl, COUNT(*) nb FROM STTM_CUST_ACCOUNT WHERE AC_STAT_DORMANT='Y' UNION ALL
+        SELECT 'AC_STAT_FROZEN=Y',          COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_FROZEN='Y' UNION ALL
+        SELECT 'AC_STAT_STOP_PAY=Y',        COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_STOP_PAY='Y' UNION ALL
+        SELECT 'AC_STAT_NO_CR=Y',           COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_NO_CR='Y' UNION ALL
+        SELECT 'AC_STAT_NO_DR=Y',           COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_NO_DR='Y' UNION ALL
+        SELECT 'AC_STAT_BLOCK=Y',           COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_BLOCK='Y' UNION ALL
+        SELECT 'AC_STAT_DE_POST=Y',         COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_DE_POST='Y' UNION ALL
+        SELECT 'ACCOUNT_AUTO_CLOSED=Y',     COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE ACCOUNT_AUTO_CLOSED='Y' UNION ALL
+        SELECT 'AC_SET_CLOSE=Y',            COUNT(*)    FROM STTM_CUST_ACCOUNT WHERE AC_SET_CLOSE='Y'
+    ) LOOP
+        print_kv('  ' || r.lbl, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.4.b ACCOUNT_DERIVED_STATUS (statut IC — STATUS_CODE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.4.b ACCOUNT_DERIVED_STATUS (top 20)]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(ACCOUNT_DERIVED_STATUS,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT GROUP BY ACCOUNT_DERIVED_STATUS
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.4.c ACC_STATUS (statut IC — évolution)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.4.c ACC_STATUS (IC) top 20]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(ACC_STATUS,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT GROUP BY ACC_STATUS
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.5 Ancienneté & ouverture
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.5 Ouverture des comptes — AC_OPEN_DATE]');
+    FOR r IN (
+        SELECT TO_CHAR(AC_OPEN_DATE,'YYYY') yr, COUNT(*) nb
+        FROM STTM_CUST_ACCOUNT WHERE AC_OPEN_DATE IS NOT NULL
+        GROUP BY TO_CHAR(AC_OPEN_DATE,'YYYY')
+        ORDER BY yr DESC
+    ) LOOP
+        print_kv('  ' || r.yr, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE AC_OPEN_DATE IS NULL;
+    print_kv('  AC_OPEN_DATE IS NULL', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_OPEN_DATE IS NOT NULL AND AC_OPEN_DATE > SYSDATE;
+    print_kv('  AC_OPEN_DATE > SYSDATE (anomalie)', TO_CHAR(v_count));
+
+    -- 12.6 Dormance — paramètre + date + dormancy_days
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.6 Dormance — DORMANT_PARAM / DORMANCY_DATE / DORMANCY_DAYS]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='Y';
+    print_kv('  Comptes dormants', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='Y' AND DORMANCY_DATE IS NULL;
+    print_kv('  Dormants SANS DORMANCY_DATE (anomalie RA)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='N' AND DORMANCY_DATE IS NOT NULL;
+    print_kv('  Non-dormants AVEC DORMANCY_DATE (anomalie RA)', TO_CHAR(v_count));
+
+    FOR r IN (SELECT NVL(DORMANT_PARAM,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUST_ACCOUNT GROUP BY DORMANT_PARAM
+              ORDER BY nb DESC) LOOP
+        print_kv('  DORMANT_PARAM = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.6.b Tranches DORMANCY_DAYS]');
+    FOR r IN (
+        SELECT CASE
+                 WHEN DORMANCY_DAYS IS NULL THEN '(NULL)'
+                 WHEN DORMANCY_DAYS <= 0   THEN '0 ou négatif'
+                 WHEN DORMANCY_DAYS <= 90  THEN '1-90j'
+                 WHEN DORMANCY_DAYS <= 180 THEN '91-180j'
+                 WHEN DORMANCY_DAYS <= 365 THEN '181-365j'
+                 WHEN DORMANCY_DAYS <= 730 THEN '1-2ans'
+                 WHEN DORMANCY_DAYS <=1825 THEN '2-5ans'
+                 ELSE '5+ans'
+               END tr,
+               COUNT(*) nb
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY CASE
+                 WHEN DORMANCY_DAYS IS NULL THEN '(NULL)'
+                 WHEN DORMANCY_DAYS <= 0   THEN '0 ou négatif'
+                 WHEN DORMANCY_DAYS <= 90  THEN '1-90j'
+                 WHEN DORMANCY_DAYS <= 180 THEN '91-180j'
+                 WHEN DORMANCY_DAYS <= 365 THEN '181-365j'
+                 WHEN DORMANCY_DAYS <= 730 THEN '1-2ans'
+                 WHEN DORMANCY_DAYS <=1825 THEN '2-5ans'
+                 ELSE '5+ans'
+               END
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ' || r.tr, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.7 Overdraft (TOD) — limites et dépassements
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.7 Overdraft (TOD) — limites & dépassements]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE TOD_LIMIT IS NOT NULL AND TOD_LIMIT > 0;
+    print_kv('  Comptes avec TOD_LIMIT > 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE TOD_SINCE IS NOT NULL;
+    print_kv('  Comptes en TOD (TOD_SINCE renseigné)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE TOD_SINCE IS NOT NULL AND TOD_LIMIT_START_DATE IS NOT NULL
+      AND TOD_SINCE < TOD_LIMIT_START_DATE;
+    print_kv('  TOD_SINCE AVANT TOD_LIMIT_START_DATE (leak RA)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE TOD_LIMIT_END_DATE IS NOT NULL AND TOD_LIMIT_END_DATE < SYSDATE
+      AND (TOD_LIMIT IS NOT NULL AND TOD_LIMIT > 0);
+    print_kv('  TOD_LIMIT actif mais END_DATE passée', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(TOD_LIMIT),0) INTO v_num FROM STTM_CUST_ACCOUNT WHERE TOD_LIMIT IS NOT NULL;
+    print_kv('  Somme TOD_LIMIT (toutes devises)', TO_CHAR(v_num));
+
+    -- 12.7.b Overdraft réel : ACY_CURR_BALANCE < 0 sans TOD_LIMIT
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE ACY_CURR_BALANCE < 0 AND NVL(TOD_LIMIT,0) = 0;
+    print_kv('  Débiteurs SANS TOD_LIMIT (overdraft non couvert)', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE ACY_CURR_BALANCE < 0 AND TOD_LIMIT IS NOT NULL
+      AND ABS(ACY_CURR_BALANCE) > TOD_LIMIT;
+    print_kv('  Débiteurs au-delà de TOD_LIMIT (dépassement)', TO_CHAR(v_count));
+
+    -- 12.7.c OVERDRAFT_SINCE, OVERLINE_OD_SINCE
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE OVERDRAFT_SINCE IS NOT NULL;
+    print_kv('  OVERDRAFT_SINCE renseigné', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE OVERLINE_OD_SINCE IS NOT NULL;
+    print_kv('  OVERLINE_OD_SINCE renseigné', TO_CHAR(v_count));
+
+    -- 12.8 Balances négatives courantes (top 15 par |LCY_CURR_BALANCE|)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.8 Top 15 comptes débiteurs par |LCY_CURR_BALANCE|]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT BRANCH_CODE, CUST_AC_NO, CCY,
+                   ACY_CURR_BALANCE acy, LCY_CURR_BALANCE lcy,
+                   TOD_LIMIT tod
+            FROM STTM_CUST_ACCOUNT
+            WHERE LCY_CURR_BALANCE IS NOT NULL
+              AND LCY_CURR_BALANCE < 0
+            ORDER BY LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.BRANCH_CODE || '/' || r.CUST_AC_NO,
+                 'CCY=' || r.CCY ||
+                 ' | ACY=' || TO_CHAR(r.acy) ||
+                 ' | LCY=' || TO_CHAR(r.lcy) ||
+                 ' | TOD=' || NVL(TO_CHAR(r.tod),'(NULL)'));
+    END LOOP;
+
+    -- 12.9 Turnovers — MTD / YTD / Today (DR/CR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.9 Turnovers agrégés (STTM_CUST_ACCOUNT)]');
+    SELECT NVL(SUM(ACY_TODAY_TOVER_DR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_TODAY_TOVER_DR', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_TODAY_TOVER_CR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_TODAY_TOVER_CR', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_MTD_TOVER_DR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_MTD_TOVER_DR', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_MTD_TOVER_CR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_MTD_TOVER_CR', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_TOVER_CR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_TOVER_CR (cumul)', TO_CHAR(v_num));
+    SELECT NVL(SUM(LCY_MTD_TOVER_DR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme LCY_MTD_TOVER_DR', TO_CHAR(v_num));
+    SELECT NVL(SUM(LCY_MTD_TOVER_CR),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme LCY_MTD_TOVER_CR', TO_CHAR(v_num));
+
+    -- 12.9.b Comptes MTD déséquilibrés (DR vs CR très asymétrique)
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE LCY_MTD_TOVER_DR IS NOT NULL AND LCY_MTD_TOVER_CR IS NOT NULL
+      AND GREATEST(LCY_MTD_TOVER_DR, LCY_MTD_TOVER_CR) > 0
+      AND LEAST(LCY_MTD_TOVER_DR, LCY_MTD_TOVER_CR) = 0
+      AND GREATEST(LCY_MTD_TOVER_DR, LCY_MTD_TOVER_CR) > 1000000;
+    print_kv('  Comptes MTD unidirectionnels > 1M LCY', TO_CHAR(v_count));
+
+    -- 12.9.c Top 15 comptes par LCY_MTD_TOVER_DR
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.9.c Top 15 comptes par LCY_MTD_TOVER_DR]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT BRANCH_CODE, CUST_AC_NO, CCY,
+                   LCY_MTD_TOVER_DR dr, LCY_MTD_TOVER_CR cr,
+                   TRNOVER_LMT_CODE lmt
+            FROM STTM_CUST_ACCOUNT
+            WHERE LCY_MTD_TOVER_DR IS NOT NULL
+            ORDER BY LCY_MTD_TOVER_DR DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.BRANCH_CODE || '/' || r.CUST_AC_NO,
+                 'CCY=' || r.CCY ||
+                 ' | DR=' || TO_CHAR(r.dr) ||
+                 ' | CR=' || TO_CHAR(r.cr) ||
+                 ' | LMT=' || NVL(r.lmt,'(NULL)'));
+    END LOOP;
+
+    -- 12.9.d Turnover limits (TRNOVER_LMT_CODE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.9.d Répartition TRNOVER_LMT_CODE (top 15)]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(TRNOVER_LMT_CODE,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT GROUP BY TRNOVER_LMT_CODE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.10 Intérêts accrus / dûs (DR_INT_DUE, CHG_DUE, RECEIVABLE_AMOUNT)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.10 Intérêts/charges accrus au niveau compte]');
+    SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_ACCRUED_DR_IC (intérêts débit à facturer)', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_ACCRUED_CR_IC),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme ACY_ACCRUED_CR_IC (intérêts crédit à payer)', TO_CHAR(v_num));
+    SELECT NVL(SUM(DR_INT_DUE),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme DR_INT_DUE', TO_CHAR(v_num));
+    SELECT NVL(SUM(CHG_DUE),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme CHG_DUE (charges dues)', TO_CHAR(v_num));
+    SELECT NVL(SUM(RECEIVABLE_AMOUNT),0) INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Somme RECEIVABLE_AMOUNT', TO_CHAR(v_num));
+
+    -- 12.10.b Comptes avec charges dues non recouvrées mais dormants
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='Y' AND NVL(CHG_DUE,0) > 0;
+    print_kv('  Dormants AVEC CHG_DUE > 0 (leakage)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='Y' AND NVL(DR_INT_DUE,0) > 0;
+    print_kv('  Dormants AVEC DR_INT_DUE > 0 (leakage)', TO_CHAR(v_count));
+
+    -- 12.11 DEFAULT_WAIVER sur comptes (ICCF/charges par défaut waive)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.11 DEFAULT_WAIVER sur STTM_CUST_ACCOUNT]');
+    FOR r IN (SELECT NVL(DEFAULT_WAIVER,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUST_ACCOUNT GROUP BY DEFAULT_WAIVER
+              ORDER BY nb DESC) LOOP
+        print_kv('  DEFAULT_WAIVER = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE DEFAULT_WAIVER='Y';
+    print_kv('  Comptes default_waiver=Y (RA: vérifier justification)', TO_CHAR(v_count));
+
+    -- 12.12 Derniers mouvements (DATE_LAST_CR / DATE_LAST_DR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.12 Dernier mouvement (DATE_LAST_CR / DATE_LAST_DR)]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE DATE_LAST_CR IS NULL AND DATE_LAST_DR IS NULL;
+    print_kv('  Jamais mouvementés (LAST_CR & LAST_DR NULL)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE GREATEST(NVL(DATE_LAST_CR,DATE '1900-01-01'),
+                   NVL(DATE_LAST_DR,DATE '1900-01-01')) < ADD_MONTHS(SYSDATE,-12)
+      AND AC_STAT_DORMANT <> 'Y';
+    print_kv('  Inactifs >12 mois NON dormants (RA: reclasser)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE GREATEST(NVL(DATE_LAST_CR,DATE '1900-01-01'),
+                   NVL(DATE_LAST_DR,DATE '1900-01-01')) < ADD_MONTHS(SYSDATE,-24)
+      AND AC_STAT_DORMANT <> 'Y' AND NVL(CHG_DUE,0)=0;
+    print_kv('  Inactifs >24 mois NON dormants sans CHG_DUE', TO_CHAR(v_count));
+
+    -- 12.13 Historique solde journalier ACTB_ACCBAL_HISTORY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.13 ACTB_ACCBAL_HISTORY (snapshot soldes EOD)]');
+    safe_count('ACTB_ACCBAL_HISTORY', '  Total lignes');
+    SELECT MIN(BKG_DATE), MAX(BKG_DATE) INTO v_num, v_count FROM (
+        SELECT MIN(BKG_DATE) BKG_DATE FROM ACTB_ACCBAL_HISTORY
+        UNION ALL SELECT MAX(BKG_DATE) FROM ACTB_ACCBAL_HISTORY);
+    FOR r IN (SELECT MIN(BKG_DATE) mn, MAX(BKG_DATE) mx,
+                     COUNT(DISTINCT BKG_DATE) nb_j,
+                     COUNT(DISTINCT ACCOUNT) nb_acc
+              FROM ACTB_ACCBAL_HISTORY) LOOP
+        print_kv('  Plage BKG_DATE', TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+        print_kv('  Nb jours distincts', TO_CHAR(r.nb_j));
+        print_kv('  Nb comptes distincts', TO_CHAR(r.nb_acc));
+    END LOOP;
+
+    -- 12.13.b Agrégats derniers 12 mois
+    FOR r IN (SELECT NVL(SUM(ACY_DR_TUR),0) dr, NVL(SUM(ACY_CR_TUR),0) cr,
+                     NVL(SUM(LCY_DR_TUR),0) ldr, NVL(SUM(LCY_CR_TUR),0) lcr
+              FROM ACTB_ACCBAL_HISTORY
+              WHERE BKG_DATE >= ADD_MONTHS(SYSDATE,-12)) LOOP
+        print_kv('  ACY_DR_TUR 12m', TO_CHAR(r.dr));
+        print_kv('  ACY_CR_TUR 12m', TO_CHAR(r.cr));
+        print_kv('  LCY_DR_TUR 12m', TO_CHAR(r.ldr));
+        print_kv('  LCY_CR_TUR 12m', TO_CHAR(r.lcr));
+    END LOOP;
+
+    -- 12.13.c Jours avec solde débiteur (overdraft réel)
+    SELECT COUNT(*) INTO v_count FROM ACTB_ACCBAL_HISTORY
+    WHERE ACY_CLOSING_BAL < 0;
+    print_kv('  Jours/comptes en solde débiteur EOD', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACCOUNT) INTO v_count FROM ACTB_ACCBAL_HISTORY
+    WHERE ACY_CLOSING_BAL < 0;
+    print_kv('  Comptes distincts avec EOD débiteur', TO_CHAR(v_count));
+
+    -- 12.13.d Ecarts OPENING (J) vs CLOSING (J-1)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.13.d Contrôle continuité OPENING_J vs CLOSING_J-1]');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.BRANCH_CODE, a.ACCOUNT, a.BKG_DATE,
+               a.ACY_OPENING_BAL,
+               LAG(a.ACY_CLOSING_BAL) OVER (PARTITION BY a.BRANCH_CODE, a.ACCOUNT
+                                             ORDER BY a.BKG_DATE) prev_close
+        FROM ACTB_ACCBAL_HISTORY a
+        WHERE a.BKG_DATE >= ADD_MONTHS(SYSDATE,-3)
+    ) WHERE prev_close IS NOT NULL
+        AND ABS(ACY_OPENING_BAL - prev_close) > 0.01;
+    print_kv('  Jours avec discontinuité open/close (3 derniers mois)', TO_CHAR(v_count));
+
+    -- 12.14 ACTB_VD_BAL — balances valeur-date
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.14 ACTB_VD_BAL — soldes à date de valeur]');
+    safe_count('ACTB_VD_BAL', '  Total lignes');
+    SELECT COUNT(DISTINCT ACC) INTO v_count FROM ACTB_VD_BAL;
+    print_kv('  Comptes distincts', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ACTB_VD_BAL WHERE HAS_TOV='Y';
+    print_kv('  Lignes HAS_TOV=Y (jour avec mouvement)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ACTB_VD_BAL WHERE BAL < 0;
+    print_kv('  Lignes BAL < 0 (overdraft VD)', TO_CHAR(v_count));
+
+    FOR r IN (SELECT MIN(VAL_DT) mn, MAX(VAL_DT) mx FROM ACTB_VD_BAL) LOOP
+        print_kv('  Plage VAL_DT', TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 12.14.b VAL_DT futures (anomalie)
+    SELECT COUNT(*) INTO v_count FROM ACTB_VD_BAL WHERE VAL_DT > SYSDATE + 365;
+    print_kv('  VAL_DT > SYSDATE+1an (forward extrême)', TO_CHAR(v_count));
+
+    -- 12.15 Cross-check : comptes débiteurs VD mais STTM non signalé
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.15 Cohérence VD/STTM]');
+    SELECT COUNT(DISTINCT v.ACC) INTO v_count FROM ACTB_VD_BAL v
+    JOIN STTM_CUST_ACCOUNT s ON s.CUST_AC_NO = v.ACC AND s.BRANCH_CODE = v.BRN
+    WHERE v.BAL < 0 AND v.VAL_DT = (SELECT MAX(VAL_DT) FROM ACTB_VD_BAL v2 WHERE v2.ACC=v.ACC AND v2.BRN=v.BRN)
+      AND s.OVERDRAFT_SINCE IS NULL;
+    print_kv('  VD négatif actuel mais OVERDRAFT_SINCE vide', TO_CHAR(v_count));
+
+    -- 12.16 Classes de comptes dormants-enabled sans dormants réels
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.16 ACCOUNT_CLASS : dormance paramétrée vs observée]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT c.ACCOUNT_CODE cls,
+                   SUM(CASE WHEN a.AC_STAT_DORMANT='Y' THEN 1 ELSE 0 END) nb_dorm,
+                   COUNT(*) nb_tot
+            FROM STTM_ACCOUNT_CLASS c
+            JOIN STTM_CUST_ACCOUNT a ON a.ACCOUNT_CLASS = c.ACCOUNT_CODE
+            WHERE c.DORMANT_PARAM IS NOT NULL
+            GROUP BY c.ACCOUNT_CODE
+            ORDER BY nb_tot DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.cls,
+                 'dormants=' || TO_CHAR(r.nb_dorm) || ' / total=' || TO_CHAR(r.nb_tot));
+    END LOOP;
+
 END;
 /

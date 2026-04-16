@@ -1598,5 +1598,283 @@ BEGIN
         )
     );
     print_kv('  Comptes sans ligne AMOUNT_PAID associée', TO_CHAR(v_count));
+
+    -- =========================================================
+    -- 7. CLTB_ACCOUNT_APPS_MASTER — PRETS LIFECYCLE
+    --    Angle Revenue Assurance :
+    --     - expositions et cadres contractuels (AMOUNT_FINANCED,
+    --       AMOUNT_DISBURSED, NET_PRINCIPAL, TOTAL_AMOUNT,
+    --       BALLOON_AMOUNT, RESIDUAL_VALUE) = base de calcul
+    --       des intérêts.
+    --     - ACCOUNT_STATUS / DERIVED_STATUS / USER_DEFINED_STATUS
+    --       décrivent le cycle de vie et les provisions.
+    --     - STOP_ACCRUALS, STOP_DSBR, HAS_PROBLEMS =
+    --       indicateurs de dégradation → risque fuite revenu.
+    --     - INTEREST_SUBSIDY_ALLOWED / SUBSIDY_CUSTOMER_ID =
+    --       prêts subventionnés à auditer.
+    --     - UPFRONT_PROFIT_BOOKED = reconnaissance anticipée de
+    --       marge (spécifique islamique / MUR).
+    -- =========================================================
+    print_section('7. CLTB_ACCOUNT_APPS_MASTER — Prêts lifecycle');
+
+    -- 7.1 Volumétrie globale
+    DBMS_OUTPUT.PUT_LINE('  [7.1 Volumétrie & plages temporelles]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Total comptes prêt (CL)', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT CUSTOMER_ID) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Clients distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT PRODUCT_CODE) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  PRODUCT_CODE distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Branches distinctes', TO_CHAR(v_count));
+
+    FOR r IN (SELECT MIN(BOOK_DATE) mn, MAX(BOOK_DATE) mx FROM CLTB_ACCOUNT_APPS_MASTER) LOOP
+        print_kv('  BOOK_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  BOOK_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (SELECT MIN(VALUE_DATE) mn, MAX(VALUE_DATE) mx FROM CLTB_ACCOUNT_APPS_MASTER) LOOP
+        print_kv('  VALUE_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  VALUE_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (SELECT MIN(MATURITY_DATE) mn, MAX(MATURITY_DATE) mx FROM CLTB_ACCOUNT_APPS_MASTER) LOOP
+        print_kv('  MATURITY_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  MATURITY_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 7.2 Volumétrie annuelle (octrois)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.2 Octrois annuels (VALUE_DATE)]');
+    FOR r IN (
+        SELECT TO_CHAR(VALUE_DATE,'YYYY') annee,
+               COUNT(*) nb,
+               ROUND(SUM(AMOUNT_FINANCED),2) sm_fin,
+               ROUND(SUM(AMOUNT_DISBURSED),2) sm_dsb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        WHERE VALUE_DATE IS NOT NULL
+        GROUP BY TO_CHAR(VALUE_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee,
+                 'nb=' || TO_CHAR(r.nb) ||
+                 ' | financé=' || TO_CHAR(r.sm_fin) ||
+                 ' | décaissé=' || TO_CHAR(r.sm_dsb));
+    END LOOP;
+
+    -- 7.3 Statuts (ACCOUNT_STATUS / DERIVED_STATUS / USER_DEFINED_STATUS)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.3 Répartition ACCOUNT_STATUS]');
+    FOR r IN (
+        SELECT NVL(ACCOUNT_STATUS,'(NULL)') ACCOUNT_STATUS, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY ACCOUNT_STATUS ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACCOUNT_STATUS = ' || r.ACCOUNT_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.3.b Répartition DERIVED_STATUS]');
+    FOR r IN (
+        SELECT NVL(DERIVED_STATUS,'(NULL)') DERIVED_STATUS, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY DERIVED_STATUS ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DERIVED_STATUS = ' || r.DERIVED_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.3.c Top 15 USER_DEFINED_STATUS (classification risque)]');
+    FOR r IN (
+        SELECT USER_DEFINED_STATUS, nb FROM (
+            SELECT NVL(USER_DEFINED_STATUS,'(NULL)') USER_DEFINED_STATUS, COUNT(*) nb
+            FROM CLTB_ACCOUNT_APPS_MASTER
+            GROUP BY USER_DEFINED_STATUS ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.USER_DEFINED_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.3.d AUTH_STAT / DELINQUENCY_STATUS]');
+    FOR r IN (SELECT NVL(AUTH_STAT,'(NULL)') AUTH_STAT, COUNT(*) nb
+              FROM CLTB_ACCOUNT_APPS_MASTER GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        print_kv('  AUTH_STAT = ' || r.AUTH_STAT, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(DELINQUENCY_STATUS,'(NULL)') DELINQUENCY_STATUS, COUNT(*) nb
+              FROM CLTB_ACCOUNT_APPS_MASTER GROUP BY DELINQUENCY_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  DELINQUENCY_STATUS = ' || r.DELINQUENCY_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.4 Flags revenue-sensibles
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.4 Flags revenue-sensibles]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE STOP_ACCRUALS = 'Y';
+    print_kv('  STOP_ACCRUALS = Y (intérêts gelés)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE STOP_DSBR = 'Y';
+    print_kv('  STOP_DSBR = Y (décaissement bloqué)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE HAS_PROBLEMS = 'Y';
+    print_kv('  HAS_PROBLEMS = Y (prêt à problème)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE TAKEN_OVER = 'Y';
+    print_kv('  TAKEN_OVER = Y (prêt repris)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE AMORTIZED = 'Y';
+    print_kv('  AMORTIZED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE INSURANCE_FLAG = 'Y';
+    print_kv('  INSURANCE_FLAG = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE STAFF_FINANCE = 'Y';
+    print_kv('  STAFF_FINANCE = Y (prêt personnel banque)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE UPFRONT_PROFIT_BOOKED = 'Y';
+    print_kv('  UPFRONT_PROFIT_BOOKED = Y (profit anticipé)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE OPEN_LINE_LOAN = 'Y';
+    print_kv('  OPEN_LINE_LOAN = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE ROLLOVER_ALLOWED = 'Y';
+    print_kv('  ROLLOVER_ALLOWED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE PACKING_CREDIT = 'Y';
+    print_kv('  PACKING_CREDIT = Y', TO_CHAR(v_count));
+
+    -- 7.5 Subventions d'intérêts
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.5 INTEREST_SUBSIDY / SUBSIDY_CUSTOMER_ID]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE INTEREST_SUBSIDY_ALLOWED = 'Y';
+    print_kv('  INTEREST_SUBSIDY_ALLOWED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE SUBSIDY_CUSTOMER_ID IS NOT NULL;
+    print_kv('  SUBSIDY_CUSTOMER_ID renseigné', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER WHERE RESIDUAL_SUBSIDY_ALLOWED = 'Y';
+    print_kv('  RESIDUAL_SUBSIDY_ALLOWED = Y', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(RESIDUAL_SUBSIDY_VALUE),2),0) INTO v_num FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  SUM RESIDUAL_SUBSIDY_VALUE', TO_CHAR(v_num));
+
+    -- 7.6 Expositions — stats montants
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.6 Stats financements (AMOUNT_FINANCED)]');
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(AMOUNT_FINANCED),2) sm,
+               ROUND(AVG(AMOUNT_FINANCED),2) av,
+               ROUND(MIN(AMOUNT_FINANCED),2) mn,
+               ROUND(MAX(AMOUNT_FINANCED),2) mx
+        FROM CLTB_ACCOUNT_APPS_MASTER WHERE AMOUNT_FINANCED > 0
+    ) LOOP
+        print_kv('  AMOUNT_FINANCED — nb', TO_CHAR(r.nb));
+        print_kv('  AMOUNT_FINANCED — sum', TO_CHAR(r.sm));
+        print_kv('  AMOUNT_FINANCED — moy', TO_CHAR(r.av));
+        print_kv('  AMOUNT_FINANCED — min', TO_CHAR(r.mn));
+        print_kv('  AMOUNT_FINANCED — max', TO_CHAR(r.mx));
+    END LOOP;
+    FOR r IN (
+        SELECT ROUND(SUM(AMOUNT_DISBURSED),2) sm_d,
+               ROUND(SUM(AMOUNT_UTILIZED),2) sm_u,
+               ROUND(SUM(AMT_AVAILABLE),2) sm_a,
+               ROUND(SUM(NET_PRINCIPAL),2) sm_np,
+               ROUND(SUM(TOTAL_AMOUNT),2) sm_t,
+               ROUND(SUM(BALLOON_AMOUNT),2) sm_b,
+               ROUND(SUM(RESIDUAL_AMOUNT),2) sm_r
+        FROM CLTB_ACCOUNT_APPS_MASTER
+    ) LOOP
+        print_kv('  SUM AMOUNT_DISBURSED', TO_CHAR(r.sm_d));
+        print_kv('  SUM AMOUNT_UTILIZED', TO_CHAR(r.sm_u));
+        print_kv('  SUM AMT_AVAILABLE', TO_CHAR(r.sm_a));
+        print_kv('  SUM NET_PRINCIPAL', TO_CHAR(r.sm_np));
+        print_kv('  SUM TOTAL_AMOUNT', TO_CHAR(r.sm_t));
+        print_kv('  SUM BALLOON_AMOUNT', TO_CHAR(r.sm_b));
+        print_kv('  SUM RESIDUAL_AMOUNT', TO_CHAR(r.sm_r));
+    END LOOP;
+
+    -- 7.6.b Cohérence DISBURSED <= FINANCED
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.6.b Cohérence AMOUNT_DISBURSED <= AMOUNT_FINANCED]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE AMOUNT_DISBURSED > AMOUNT_FINANCED + 0.01 AND AMOUNT_FINANCED > 0;
+    print_kv('  Décaissé > financé (anomalie)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE AMOUNT_DISBURSED = 0 AND AMOUNT_FINANCED > 0
+      AND ACCOUNT_STATUS IN ('A','L'); -- Actif / Liquidé
+    print_kv('  Actif/Liquidé mais non décaissé', TO_CHAR(v_count));
+
+    -- 7.7 Volumétrie par PRODUCT_CATEGORY / PRODUCT_CODE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.7 Top 15 PRODUCT_CODE]');
+    FOR r IN (
+        SELECT PRODUCT_CODE, nb, sm FROM (
+            SELECT NVL(PRODUCT_CODE,'(NULL)') PRODUCT_CODE,
+                   COUNT(*) nb, ROUND(SUM(AMOUNT_FINANCED),2) sm
+            FROM CLTB_ACCOUNT_APPS_MASTER
+            GROUP BY PRODUCT_CODE ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PRODUCT ' || r.PRODUCT_CODE, 'nb=' || TO_CHAR(r.nb) || ' | financé=' || TO_CHAR(r.sm));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.7.b Top 10 PRODUCT_CATEGORY]');
+    FOR r IN (
+        SELECT PRODUCT_CATEGORY, nb FROM (
+            SELECT NVL(PRODUCT_CATEGORY,'(NULL)') PRODUCT_CATEGORY, COUNT(*) nb
+            FROM CLTB_ACCOUNT_APPS_MASTER
+            GROUP BY PRODUCT_CATEGORY ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  PRODUCT_CATEGORY = ' || r.PRODUCT_CATEGORY, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.8 Fréquence & tenor
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.8 Fréquence EMI & Tenor]');
+    FOR r IN (
+        SELECT NVL(EMI_FREQ_UNIT,'(NULL)') EMI_FREQ_UNIT, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY EMI_FREQ_UNIT ORDER BY nb DESC
+    ) LOOP
+        print_kv('  EMI_FREQ_UNIT = ' || r.EMI_FREQ_UNIT, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (
+        SELECT NVL(MATURITY_TYPE,'(NULL)') MATURITY_TYPE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY MATURITY_TYPE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MATURITY_TYPE = ' || r.MATURITY_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (
+        SELECT ROUND(MIN(MATURITY_TENOR),2) mn,
+               ROUND(MAX(MATURITY_TENOR),2) mx,
+               ROUND(AVG(MATURITY_TENOR),2) av
+        FROM CLTB_ACCOUNT_APPS_MASTER WHERE MATURITY_TENOR IS NOT NULL
+    ) LOOP
+        print_kv('  MATURITY_TENOR min', TO_CHAR(r.mn));
+        print_kv('  MATURITY_TENOR max', TO_CHAR(r.mx));
+        print_kv('  MATURITY_TENOR moy', TO_CHAR(r.av));
+    END LOOP;
+
+    -- 7.9 Prêts post-maturité non soldés (candidats NPL)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.9 Prêts post-maturité non clôturés]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE MATURITY_DATE < SYSDATE
+      AND ACCOUNT_STATUS NOT IN ('L','C') -- non liquidé / non clos
+      AND MATURITY_DATE IS NOT NULL;
+    print_kv('  Maturité passée & statut non L/C', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE EXPECTED_CLOSURE_DATE < SYSDATE
+      AND ACCOUNT_STATUS NOT IN ('L','C')
+      AND EXPECTED_CLOSURE_DATE IS NOT NULL;
+    print_kv('  Clôture attendue passée & statut non L/C', TO_CHAR(v_count));
+
+    -- 7.10 Downpayment
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.10 Downpayments]');
+    SELECT COUNT(*), NVL(ROUND(SUM(DOWNPAYMENT_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_APPS_MASTER WHERE DOWNPAYMENT_AMOUNT > 0;
+    print_kv('  Comptes avec DOWNPAYMENT_AMOUNT > 0', TO_CHAR(v_count));
+    print_kv('  SUM DOWNPAYMENT_AMOUNT', TO_CHAR(v_num));
+
+    -- 7.11 Concentration par CUSTOMER_ID — top 15 emprunteurs
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.11 Top 15 emprunteurs (par AMOUNT_FINANCED cumulé)]');
+    FOR r IN (
+        SELECT CUSTOMER_ID, nb, sm FROM (
+            SELECT CUSTOMER_ID, COUNT(*) nb, ROUND(SUM(AMOUNT_FINANCED),2) sm
+            FROM CLTB_ACCOUNT_APPS_MASTER
+            WHERE CUSTOMER_ID IS NOT NULL
+            GROUP BY CUSTOMER_ID
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CUST ' || r.CUSTOMER_ID, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
 END;
 /

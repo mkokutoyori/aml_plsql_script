@@ -1513,6 +1513,198 @@ BEGIN
     p_kv('  Actions 30 j sans entete session correspondante', TO_CHAR(v_count));
 
     -- =========================================================
+    -- A-11. SMTB_MENU, SMTB_FUNCTION_DESCRIPTION, SMTB_MODULES,
+    --        SMTB_LANGUAGE, SMTB_FUNC_GROUP — Catalogue fonctionnel
+    -- =========================================================
+    p_section('A-11. Catalogue fonctionnel (MENU / FUNCTION_DESCRIPTION / MODULES / LANGUAGE / FUNC_GROUP)');
+
+    -- ---------- SMTB_MENU ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_MENU;
+    p_kv('Total fonctions declarees (SMTB_MENU)', TO_CHAR(v_total));
+
+    p_sub('Disponibilite (AVAILABLE : 1=oui / 0=non)');
+    FOR r IN (SELECT AVAILABLE, COUNT(*) nb FROM SMTB_MENU
+              GROUP BY AVAILABLE ORDER BY nb DESC) LOOP
+        p_pct('  AVAILABLE = ' || NVL(TO_CHAR(r.AVAILABLE),'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Flags de securite par fonction');
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE LOG_EVENT = 1;
+    p_pct('  LOG_EVENT=1 (evenement journalise)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE LOGGING_REQD = 'Y';
+    p_pct('  LOGGING_REQD=Y (logging explicite requis)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE DUAL_AUTH_REQD = 'Y';
+    p_pct('  DUAL_AUTH_REQD=Y (double autorisation)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE AUTO_AUTH = 'Y';
+    p_pct('  AUTO_AUTH=Y (auto-authorisation autorisee)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE REMARKS_REQD = 'Y';
+    p_pct('  REMARKS_REQD=Y (justification obligatoire)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE FIELD_LOG_REQD = 'Y';
+    p_pct('  FIELD_LOG_REQD=Y (log par champ)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE TANK_MODIFICATIONS = 'Y';
+    p_pct('  TANK_MODIFICATIONS=Y (modifs stockees en tank)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE HO_FUNCTION = 'Y';
+    p_pct('  HO_FUNCTION=Y (fonction head-office uniquement)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE CUST_ACCESS = 1;
+    p_pct('  CUST_ACCESS=1 (fonction personnalisable)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE EOD_FUNCTION = 'Y';
+    p_pct('  EOD_FUNCTION=Y (fonction End-of-Day)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE EXPORT_REQD = 'Y';
+    p_pct('  EXPORT_REQD=Y (export donnees)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE MULTIBRANCH_ACCESS = 'Y';
+    p_pct('  MULTIBRANCH_ACCESS=Y (acces multi-agences)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE DUPLICATE_TASK_CHK = 'Y';
+    p_pct('  DUPLICATE_TASK_CHK=Y (controle doublon)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE ALLOW_ONLY_IN_NORMAL = 'Y';
+    p_pct('  ALLOW_ONLY_IN_NORMAL=Y (hors demo uniquement)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE ALLOW_IN_DEMO = 'Y';
+    p_pct('  ALLOW_IN_DEMO=Y (autorise en demo)', v_count, v_total);
+
+    p_sub('Timeout session par fonction (SESSION_INTERVAL)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE SESSION_INTERVAL IS NULL OR SESSION_INTERVAL = 0;
+    p_pct('  Fonctions sans SESSION_INTERVAL', v_count, v_total);
+    FOR r IN (
+        SELECT ROUND(AVG(SESSION_INTERVAL),2) moy, MIN(SESSION_INTERVAL) mini, MAX(SESSION_INTERVAL) maxi
+        FROM SMTB_MENU WHERE SESSION_INTERVAL > 0
+    ) LOOP
+        p_kv('  Moy / Min / Max SESSION_INTERVAL', NVL(TO_CHAR(r.moy),'-')||' / '||NVL(TO_CHAR(r.mini),'-')||' / '||NVL(TO_CHAR(r.maxi),'-'));
+    END LOOP;
+
+    p_sub('MAX_RES_ROWS (plafond lignes retour) — stats');
+    FOR r IN (
+        SELECT ROUND(AVG(MAX_RES_ROWS),2) moy, MIN(MAX_RES_ROWS) mini, MAX(MAX_RES_ROWS) maxi
+        FROM SMTB_MENU WHERE MAX_RES_ROWS > 0
+    ) LOOP
+        p_kv('  Moy / Min / Max MAX_RES_ROWS', NVL(TO_CHAR(r.moy),'-')||' / '||NVL(TO_CHAR(r.mini),'-')||' / '||NVL(TO_CHAR(r.maxi),'-'));
+    END LOOP;
+
+    p_sub('Distribution MODULE (top 15)');
+    FOR r IN (
+        SELECT MODULE, nb FROM (
+            SELECT MODULE, COUNT(*) nb FROM SMTB_MENU
+            GROUP BY MODULE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_pct('  MODULE = ' || NVL(r.MODULE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Type de fonction (EXECUTABLE_TYPE)');
+    FOR r IN (SELECT EXECUTABLE_TYPE, COUNT(*) nb FROM SMTB_MENU
+              GROUP BY EXECUTABLE_TYPE ORDER BY nb DESC) LOOP
+        p_pct('  EXECUTABLE_TYPE = ' || NVL(r.EXECUTABLE_TYPE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Origine (FUNCTION_ORIGIN) — standard vs custom');
+    FOR r IN (SELECT FUNCTION_ORIGIN, COUNT(*) nb FROM SMTB_MENU
+              GROUP BY FUNCTION_ORIGIN ORDER BY nb DESC) LOOP
+        p_pct('  ORIGIN = ' || NVL(r.FUNCTION_ORIGIN,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Fonctions customisees (CUSTOM_MODIFIED / CLUSTER_MODIFIED)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE CUSTOM_MODIFIED = 'Y';
+    p_pct('  CUSTOM_MODIFIED=Y', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_MENU WHERE CLUSTER_MODIFIED = 'Y';
+    p_pct('  CLUSTER_MODIFIED=Y', v_count, v_total);
+
+    p_sub('Echantillon 10 fonctions sensibles (SM*) — focus gestion des acces');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT FUNCTION_ID, MODULE, AVAILABLE, LOG_EVENT, DUAL_AUTH_REQD,
+                   AUTO_AUTH, REMARKS_REQD, FIELD_LOG_REQD
+            FROM SMTB_MENU
+            WHERE FUNCTION_ID LIKE 'SM%'
+            ORDER BY FUNCTION_ID
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('  --- FUNC=' || r.FUNCTION_ID || ' | MOD=' || NVL(r.MODULE,'-') || ' ---');
+        p_kv('    Available / LogEvent',
+             NVL(TO_CHAR(r.AVAILABLE),'-') || ' / ' || NVL(TO_CHAR(r.LOG_EVENT),'-'));
+        p_kv('    DualAuth / AutoAuth / Remarks / FieldLog',
+             NVL(r.DUAL_AUTH_REQD,'-') || ' / ' || NVL(r.AUTO_AUTH,'-')
+             || ' / ' || NVL(r.REMARKS_REQD,'-') || ' / ' || NVL(r.FIELD_LOG_REQD,'-'));
+    END LOOP;
+
+    -- ---------- SMTB_FUNCTION_DESCRIPTION ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_FUNCTION_DESCRIPTION;
+    p_kv('Total descriptions fonctions (SMTB_FUNCTION_DESCRIPTION)', TO_CHAR(v_total));
+
+    p_sub('Distribution par langue (LANG_CODE)');
+    FOR r IN (SELECT LANG_CODE, COUNT(*) nb FROM SMTB_FUNCTION_DESCRIPTION
+              GROUP BY LANG_CODE ORDER BY nb DESC) LOOP
+        p_pct('  LANG = ' || NVL(r.LANG_CODE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Distribution par MAIN_MENU (top 15)');
+    FOR r IN (
+        SELECT MAIN_MENU, nb FROM (
+            SELECT MAIN_MENU, COUNT(*) nb FROM SMTB_FUNCTION_DESCRIPTION
+            WHERE LANG_CODE IN ('ENG','FRN')
+            GROUP BY MAIN_MENU ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  MAIN_MENU = ' || NVL(r.MAIN_MENU,'(NULL)'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- ---------- SMTB_MODULES ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_MODULES;
+    p_kv('Total modules applicatifs (SMTB_MODULES)', TO_CHAR(v_total));
+
+    p_sub('Statut d''installation (INSTALLED)');
+    FOR r IN (SELECT INSTALLED, COUNT(*) nb FROM SMTB_MODULES
+              GROUP BY INSTALLED ORDER BY nb DESC) LOOP
+        p_pct('  INSTALLED = ' || NVL(r.INSTALLED,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Licence (LICENSE)');
+    FOR r IN (SELECT LICENSE, COUNT(*) nb FROM SMTB_MODULES
+              GROUP BY LICENSE ORDER BY nb DESC) LOOP
+        p_pct('  LICENSE = ' || NVL(r.LICENSE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Statut enregistrement (RECORD_STAT / AUTH_STAT)');
+    FOR r IN (SELECT RECORD_STAT, AUTH_STAT, COUNT(*) nb FROM SMTB_MODULES
+              GROUP BY RECORD_STAT, AUTH_STAT ORDER BY nb DESC) LOOP
+        p_pct('  Rec/Auth = ' || NVL(r.RECORD_STAT,'-') || '/' || NVL(r.AUTH_STAT,'-'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Liste des modules installes (INSTALLED=Y)');
+    FOR r IN (
+        SELECT MODULE_ID, SUBSTR(MODULE_DESC,1,50) mdesc, LICENSE
+        FROM SMTB_MODULES
+        WHERE INSTALLED = 'Y'
+        ORDER BY MODULE_ID
+    ) LOOP
+        p_kv('  ' || RPAD(r.MODULE_ID,8), NVL(r.mdesc,'-') || ' | LIC=' || NVL(r.LICENSE,'-'));
+    END LOOP;
+
+    -- ---------- SMTB_LANGUAGE ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_LANGUAGE;
+    p_kv('Total langues (SMTB_LANGUAGE)', TO_CHAR(v_total));
+    FOR r IN (
+        SELECT LANG_CODE, LANG_NAME, LANG_ISO_CODE, DISPLAY_DIRECTION,
+               RECORD_STAT, AUTH_STAT
+        FROM SMTB_LANGUAGE ORDER BY LANG_CODE
+    ) LOOP
+        p_kv('  ' || r.LANG_CODE || ' (' || NVL(r.LANG_ISO_CODE,'-') || ')',
+             NVL(r.LANG_NAME,'-') || ' | dir=' || NVL(r.DISPLAY_DIRECTION,'-')
+             || ' | rec/auth=' || NVL(r.RECORD_STAT,'-') || '/' || NVL(r.AUTH_STAT,'-'));
+    END LOOP;
+
+    -- ---------- SMTB_FUNC_GROUP ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_FUNC_GROUP;
+    p_kv('Total SMTB_FUNC_GROUP (groupes transactionnels)', TO_CHAR(v_total));
+
+    p_sub('Distribution par TRANSACTION_TYPE');
+    FOR r IN (SELECT TRANSACTION_TYPE, COUNT(*) nb FROM SMTB_FUNC_GROUP
+              GROUP BY TRANSACTION_TYPE ORDER BY nb DESC) LOOP
+        p_pct('  TYPE = ' || NVL(r.TRANSACTION_TYPE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

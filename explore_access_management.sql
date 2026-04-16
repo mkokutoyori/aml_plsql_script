@@ -1872,6 +1872,198 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-13. FBTB_USER / FBTM_BRANCH / FBTM_BRANCH_INFO / SMTB_USER_TILLS
+    --        — Comptes FlexBranch, agences et rattachement caisses
+    -- =========================================================
+    p_section('A-13. FlexBranch users / branches / tills');
+
+    -- ---------- FBTB_USER ----------
+    SELECT COUNT(*) INTO v_total FROM FBTB_USER;
+    p_kv('Total utilisateurs FlexBranch (FBTB_USER)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT USERID) INTO v_count FROM FBTB_USER;
+        p_kv('  USERID distincts', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT BRANCHCODE) INTO v_count FROM FBTB_USER;
+        p_kv('  BRANCHCODE distincts', TO_CHAR(v_count));
+
+        p_sub('Statut utilisateur (USER_STATUS)');
+        FOR r IN (SELECT USER_STATUS, COUNT(*) nb FROM FBTB_USER
+                  GROUP BY USER_STATUS ORDER BY nb DESC) LOOP
+            p_pct('  USER_STATUS = ' || NVL(r.USER_STATUS,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Statut login (LOGINSTATUS)');
+        FOR r IN (SELECT LOGINSTATUS, COUNT(*) nb FROM FBTB_USER
+                  GROUP BY LOGINSTATUS ORDER BY nb DESC) LOOP
+            p_pct('  LOGINSTATUS = ' || NVL(r.LOGINSTATUS,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Mode connexion (ONLINE_TXN)');
+        FOR r IN (SELECT ONLINE_TXN, COUNT(*) nb FROM FBTB_USER
+                  GROUP BY ONLINE_TXN ORDER BY nb DESC) LOOP
+            p_pct('  ONLINE_TXN = ' || NVL(r.ONLINE_TXN,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('LDAP (LDAPUSER)');
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE LDAPUSER = 'Y';
+        p_pct('  LDAPUSER=Y', v_count, v_total);
+
+        p_sub('Acces multi-agences (MULTIBRANCH_ACCESS)');
+        FOR r IN (SELECT MULTIBRANCH_ACCESS, COUNT(*) nb FROM FBTB_USER
+                  GROUP BY MULTIBRANCH_ACCESS ORDER BY nb DESC) LOOP
+            p_pct('  MULTIBRANCH_ACCESS = ' || NVL(r.MULTIBRANCH_ACCESS,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Couverture mot de passe / SALT');
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE PASSWORD IS NULL OR PASSWORD = ' ';
+        p_pct('  Sans PASSWORD', v_count, v_total);
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE SALT IS NULL OR SALT = ' ';
+        p_pct('  Sans SALT', v_count, v_total);
+
+        p_sub('Tentatives echouees (FAILURE_LOGINS)');
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE FAILURE_LOGINS >= 3;
+        p_pct('  >= 3 echecs consecutifs', v_count, v_total);
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE FAILURE_LOGINS >= 5;
+        p_pct('  >= 5 echecs consecutifs', v_count, v_total);
+
+        p_sub('Anciennete de connexion');
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE LAST_ONLINE_LOGIN IS NULL;
+        p_pct('  Jamais connecte ONLINE', v_count, v_total);
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE LAST_ONLINE_LOGIN < SYSDATE - 90;
+        p_pct('  LAST_ONLINE_LOGIN > 90 j', v_count, v_total);
+        SELECT COUNT(*) INTO v_count FROM FBTB_USER WHERE LAST_OFFLINE_LOGIN IS NOT NULL;
+        p_pct('  Avec login OFFLINE au moins une fois', v_count, v_total);
+
+        p_sub('Plafonds transaction (MAXTXNAMT / MAXAUTHAMT) par LIMITCCY');
+        FOR r IN (
+            SELECT LIMITCCY, COUNT(*) nb,
+                   MAX(MAXTXNAMT) maxt, MAX(MAXAUTHAMT) maxa
+            FROM FBTB_USER
+            WHERE MAXTXNAMT > 0 OR MAXAUTHAMT > 0
+            GROUP BY LIMITCCY ORDER BY nb DESC
+        ) LOOP
+            p_kv('  CCY=' || NVL(r.LIMITCCY,'(NULL)') || ' | nb=' || r.nb,
+                 'maxTxn=' || r.maxt || ' | maxAuth=' || r.maxa);
+        END LOOP;
+
+        p_sub('Coherence FBTB_USER <-> SMTB_USER');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT DISTINCT USERID FROM FBTB_USER
+            WHERE USERID NOT IN (SELECT USER_ID FROM SMTB_USER)
+        );
+        p_kv('  Users FBTB absents de SMTB_USER', TO_CHAR(v_count));
+
+        p_sub('Top 15 agences avec le plus d''utilisateurs FlexBranch');
+        FOR r IN (
+            SELECT BRANCHCODE, nb FROM (
+                SELECT BRANCHCODE, COUNT(*) nb FROM FBTB_USER
+                GROUP BY BRANCHCODE ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  BRANCH = ' || NVL(r.BRANCHCODE,'(NULL)'), TO_CHAR(r.nb) || ' user(s)');
+        END LOOP;
+    END IF;
+
+    -- ---------- FBTM_BRANCH ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM FBTM_BRANCH;
+    p_kv('Total agences FlexBranch (FBTM_BRANCH)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Etat EOD par agence (END_OF_INPUT)');
+        FOR r IN (SELECT END_OF_INPUT, COUNT(*) nb FROM FBTM_BRANCH
+                  GROUP BY END_OF_INPUT ORDER BY nb DESC) LOOP
+            p_pct('  END_OF_INPUT = ' || NVL(r.END_OF_INPUT,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Liste des agences');
+        FOR r IN (SELECT BRANCH_CODE, BRANCH_NAME, END_OF_INPUT
+                  FROM FBTM_BRANCH ORDER BY BRANCH_CODE) LOOP
+            p_kv('  ' || RPAD(r.BRANCH_CODE,6), NVL(r.BRANCH_NAME,'-') || ' | EOD=' || NVL(r.END_OF_INPUT,'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- FBTM_BRANCH_INFO ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM FBTM_BRANCH_INFO;
+    p_kv('Total lignes FBTM_BRANCH_INFO', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Detail agences (posting date / LCY / week-end)');
+        FOR r IN (SELECT BRANCH_CODE, BRANCH_NAME,
+                         BANKCODE, BANKNAME,
+                         BRANCH_LCY,
+                         TO_CHAR(CURRENTPOSTINGDATE,'DD/MM/YYYY') cpd,
+                         TO_CHAR(NEXTPOSTINGDATE,'DD/MM/YYYY') npd,
+                         WEEKLYHOLIDAY1, WEEKLYHOLIDAY2, UNTANKINGINTERVAL
+                  FROM FBTM_BRANCH_INFO ORDER BY BRANCH_CODE) LOOP
+            DBMS_OUTPUT.PUT_LINE('  --- BRANCH=' || r.BRANCH_CODE || ' | ' || NVL(r.BRANCH_NAME,'-')
+                || ' (bank ' || NVL(r.BANKCODE,'-') || ') ---');
+            p_kv('    LCY / Posting (cur/next)', NVL(r.BRANCH_LCY,'-') || ' | ' || NVL(r.cpd,'-') || ' / ' || NVL(r.npd,'-'));
+            p_kv('    Holidays / Untank interval',
+                 NVL(r.WEEKLYHOLIDAY1,'-') || ' + ' || NVL(r.WEEKLYHOLIDAY2,'-')
+                 || ' | ' || NVL(TO_CHAR(r.UNTANKINGINTERVAL),'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_USER_TILLS ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_USER_TILLS;
+    p_kv('Total affectations caisse (SMTB_USER_TILLS)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_TILLS;
+        p_kv('  Utilisateurs distincts avec caisse', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT TILL_ID) INTO v_count FROM SMTB_USER_TILLS;
+        p_kv('  Caisses distinctes', TO_CHAR(v_count));
+        SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM SMTB_USER_TILLS;
+        p_kv('  Agences distinctes (BRANCH_CODE)', TO_CHAR(v_count));
+
+        p_sub('Repartition par BRANCH_CODE');
+        FOR r IN (
+            SELECT BRANCH_CODE, COUNT(*) nb FROM SMTB_USER_TILLS
+            GROUP BY BRANCH_CODE ORDER BY nb DESC
+        ) LOOP
+            p_pct('  BRANCH = ' || NVL(r.BRANCH_CODE,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Caisses partagees par plusieurs utilisateurs (RISK : multi-user/till)');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT TILL_ID, BRANCH_CODE, COUNT(DISTINCT USER_ID) nu
+            FROM SMTB_USER_TILLS
+            GROUP BY TILL_ID, BRANCH_CODE
+            HAVING COUNT(DISTINCT USER_ID) > 1
+        );
+        p_kv('  Caisses assignees a > 1 user', TO_CHAR(v_count));
+
+        p_sub('Utilisateurs affectes a plusieurs caisses');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT USER_ID FROM SMTB_USER_TILLS
+            GROUP BY USER_ID HAVING COUNT(DISTINCT TILL_ID) > 1
+        );
+        p_kv('  Users avec > 1 caisse', TO_CHAR(v_count));
+
+        p_sub('Echantillon 10 affectations');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT USER_ID, TILL_ID, BRANCH_CODE
+                FROM SMTB_USER_TILLS ORDER BY BRANCH_CODE, TILL_ID, USER_ID
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  USER=' || r.USER_ID, 'TILL=' || r.TILL_ID || ' | BRN=' || r.BRANCH_CODE);
+        END LOOP;
+
+        p_sub('Coherence SMTB_USER_TILLS <-> SMTB_USER (TILL_ALLOWED=Y)');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT DISTINCT t.USER_ID FROM SMTB_USER_TILLS t
+            JOIN SMTB_USER u ON u.USER_ID = t.USER_ID
+            WHERE NVL(u.TILL_ALLOWED,'N') <> 'Y'
+        );
+        p_kv('  Users avec caisse mais TILL_ALLOWED != Y', TO_CHAR(v_count));
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

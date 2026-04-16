@@ -1180,6 +1180,188 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-09. SMTB_SMS_LOG — Journal des sessions (login/logout, navigation)
+    -- =========================================================
+    p_section('A-09. SMTB_SMS_LOG — Journal des sessions (volume important)');
+
+    SELECT COUNT(*) INTO v_total FROM SMTB_SMS_LOG;
+    p_kv('Total evenements de session', TO_CHAR(v_total));
+
+    p_sub('Bornes temporelles');
+    FOR r IN (
+        SELECT MIN(START_TIME) mn, MAX(START_TIME) mx FROM SMTB_SMS_LOG
+    ) LOOP
+        p_kv('  Plus ancien START_TIME', TO_CHAR(r.mn,'DD/MM/YYYY HH24:MI'));
+        p_kv('  Plus recent START_TIME', TO_CHAR(r.mx,'DD/MM/YYYY HH24:MI'));
+    END LOOP;
+    FOR r IN (
+        SELECT MIN(SYSTEM_START_TIME) mn, MAX(SYSTEM_START_TIME) mx FROM SMTB_SMS_LOG
+    ) LOOP
+        p_kv('  Plus ancien SYSTEM_START_TIME', TO_CHAR(r.mn,'DD/MM/YYYY HH24:MI'));
+        p_kv('  Plus recent SYSTEM_START_TIME', TO_CHAR(r.mx,'DD/MM/YYYY HH24:MI'));
+    END LOOP;
+
+    p_sub('Repartition LOG_TYPE (L=Login, T=Transaction, etc.)');
+    FOR r IN (SELECT LOG_TYPE, COUNT(*) nb FROM SMTB_SMS_LOG
+              GROUP BY LOG_TYPE ORDER BY nb DESC) LOOP
+        p_pct('  LOG_TYPE = ' || NVL(r.LOG_TYPE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Repartition EXIT_FLAG (0=ok / 1=abnormal, convention Flexcube)');
+    FOR r IN (SELECT EXIT_FLAG, COUNT(*) nb FROM SMTB_SMS_LOG
+              GROUP BY EXIT_FLAG ORDER BY nb DESC) LOOP
+        p_pct('  EXIT_FLAG = ' || NVL(TO_CHAR(r.EXIT_FLAG),'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Repartition par MODULE_CODE (top 20)');
+    FOR r IN (
+        SELECT MODULE_CODE, nb FROM (
+            SELECT MODULE_CODE, COUNT(*) nb FROM SMTB_SMS_LOG
+            GROUP BY MODULE_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_pct('  MODULE = ' || NVL(r.MODULE_CODE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Repartition par BRANCH_CODE (top 15)');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb FROM (
+            SELECT BRANCH_CODE, COUNT(*) nb FROM SMTB_SMS_LOG
+            GROUP BY BRANCH_CODE ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_pct('  BRANCH = ' || NVL(r.BRANCH_CODE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Volumetrie par mois (12 derniers mois)');
+    FOR r IN (
+        SELECT TO_CHAR(SYSTEM_START_TIME,'YYYY-MM') mois, COUNT(*) nb
+        FROM SMTB_SMS_LOG
+        WHERE SYSTEM_START_TIME >= ADD_MONTHS(SYSDATE, -12)
+        GROUP BY TO_CHAR(SYSTEM_START_TIME,'YYYY-MM')
+        ORDER BY mois
+    ) LOOP
+        p_kv('  ' || r.mois, TO_CHAR(r.nb) || ' evenement(s)');
+    END LOOP;
+
+    p_sub('Volumetrie par heure de la journee (hotspots)');
+    FOR r IN (
+        SELECT TO_CHAR(SYSTEM_START_TIME,'HH24') heure, COUNT(*) nb
+        FROM SMTB_SMS_LOG
+        WHERE SYSTEM_START_TIME >= SYSDATE - 90
+        GROUP BY TO_CHAR(SYSTEM_START_TIME,'HH24')
+        ORDER BY heure
+    ) LOOP
+        p_kv('  Heure ' || r.heure || 'h', TO_CHAR(r.nb));
+    END LOOP;
+
+    p_sub('Focus LOGIN uniquement (LOG_TYPE=L) — volumetrie 30 j');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+        WHERE LOG_TYPE = 'L' AND SYSTEM_START_TIME >= SYSDATE - 30;
+    p_kv('  Login/logout sur 30 derniers jours', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_SMS_LOG
+        WHERE LOG_TYPE = 'L' AND SYSTEM_START_TIME >= SYSDATE - 30;
+    p_kv('  Utilisateurs uniques connectes sur 30 j', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_SMS_LOG
+        WHERE LOG_TYPE = 'L' AND SYSTEM_START_TIME >= SYSDATE - 7;
+    p_kv('  Utilisateurs uniques connectes sur 7 j', TO_CHAR(v_count));
+
+    p_sub('Top 15 utilisateurs — volume evenements (tous types, 90 j)');
+    FOR r IN (
+        SELECT USER_ID, nb FROM (
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_SMS_LOG
+            WHERE SYSTEM_START_TIME >= SYSDATE - 90
+            GROUP BY USER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  USER = ' || NVL(r.USER_ID,'(NULL)'), TO_CHAR(r.nb) || ' evenement(s) / 90j');
+    END LOOP;
+
+    p_sub('Top 15 fonctions les plus accedees (FUNCTION_ID, 90 j)');
+    FOR r IN (
+        SELECT FUNCTION_ID, nb FROM (
+            SELECT FUNCTION_ID, COUNT(*) nb FROM SMTB_SMS_LOG
+            WHERE SYSTEM_START_TIME >= SYSDATE - 90
+            GROUP BY FUNCTION_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  FUNC = ' || NVL(r.FUNCTION_ID,'(NULL)'), TO_CHAR(r.nb));
+    END LOOP;
+
+    p_sub('Top 15 terminaux (TERMINAL_ID) - 90 j');
+    FOR r IN (
+        SELECT TERMINAL_ID, nb FROM (
+            SELECT TERMINAL_ID, COUNT(*) nb FROM SMTB_SMS_LOG
+            WHERE SYSTEM_START_TIME >= SYSDATE - 90
+            GROUP BY TERMINAL_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  TERM = ' || NVL(r.TERMINAL_ID,'(NULL)'), TO_CHAR(r.nb));
+    END LOOP;
+
+    p_sub('Connexions multi-terminaux par utilisateur (90 j)');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT USER_ID FROM SMTB_SMS_LOG
+        WHERE SYSTEM_START_TIME >= SYSDATE - 90 AND LOG_TYPE = 'L'
+        GROUP BY USER_ID HAVING COUNT(DISTINCT TERMINAL_ID) > 1
+    );
+    p_kv('  Utilisateurs connectes depuis > 1 terminal / 90 j', TO_CHAR(v_count));
+
+    p_sub('Top 10 utilisateurs connectes depuis le plus de terminaux (90 j)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, COUNT(DISTINCT TERMINAL_ID) nt
+            FROM SMTB_SMS_LOG
+            WHERE SYSTEM_START_TIME >= SYSDATE - 90 AND LOG_TYPE = 'L'
+            GROUP BY USER_ID ORDER BY nt DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  USER = ' || r.USER_ID, TO_CHAR(r.nt) || ' terminaux distincts / 90 j');
+    END LOOP;
+
+    p_sub('Connexions hors heures ouvrees (19h-6h) — 90 j');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+        WHERE LOG_TYPE = 'L' AND SYSTEM_START_TIME >= SYSDATE - 90
+          AND (TO_NUMBER(TO_CHAR(SYSTEM_START_TIME,'HH24')) < 6
+               OR TO_NUMBER(TO_CHAR(SYSTEM_START_TIME,'HH24')) >= 19);
+    p_kv('  Connexions nocturnes (<6h ou >=19h) sur 90 j', TO_CHAR(v_count));
+
+    p_sub('Connexions week-end (samedi/dimanche) — 90 j');
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+        WHERE LOG_TYPE = 'L' AND SYSTEM_START_TIME >= SYSDATE - 90
+          AND TO_CHAR(SYSTEM_START_TIME,'D','NLS_DATE_LANGUAGE=ENGLISH') IN ('6','7');
+    p_kv('  Connexions week-end sur 90 j', TO_CHAR(v_count));
+
+    p_sub('Top 10 descriptions d''evenements (DESCRIPTION)');
+    FOR r IN (
+        SELECT DESCRIPTION, nb FROM (
+            SELECT SUBSTR(DESCRIPTION, 1, 60) AS DESCRIPTION, COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE DESCRIPTION IS NOT NULL
+            GROUP BY SUBSTR(DESCRIPTION, 1, 60) ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_pct('  ' || NVL(r.DESCRIPTION,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Echantillon 10 evenements LOGIN recents');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, BRANCH_CODE, TERMINAL_ID, FUNCTION_ID,
+                   TO_CHAR(SYSTEM_START_TIME,'DD/MM/YYYY HH24:MI:SS') dt,
+                   EXIT_FLAG,
+                   SUBSTR(DESCRIPTION, 1, 50) descr
+            FROM SMTB_SMS_LOG
+            WHERE LOG_TYPE = 'L'
+            ORDER BY SYSTEM_START_TIME DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  ' || r.dt || ' | USER=' || r.USER_ID || ' | BRN=' || NVL(r.BRANCH_CODE,'-'),
+             'TERM=' || NVL(r.TERMINAL_ID,'-') || ' | FUNC=' || NVL(r.FUNCTION_ID,'-')
+             || ' | EXIT=' || NVL(TO_CHAR(r.EXIT_FLAG),'-'));
+    END LOOP;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

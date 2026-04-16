@@ -941,5 +941,361 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS
     WHERE WAIVE = 'Y' AND NEGOTIATED_RATE IS NOT NULL AND NEGOTIATED_RATE > 0;
     print_kv('  Composants waivés ET taux négocié', TO_CHAR(v_count));
+
+    -- =========================================================
+    -- 5. CLTB_ACCOUNT_SCHEDULES — ECHEANCES & OVERDUE
+    --    Angle Revenue Assurance :
+    --     - montants dus (ORIG_AMOUNT_DUE, AMOUNT_DUE) vs
+    --       montants effectivement perçus (AMOUNT_SETTLED) vs
+    --       montants mis en suspens, waivés ou passés en
+    --       writeoff : tout écart = fuite potentielle.
+    --     - échéances échues non collectées (AMOUNT_OVERDUE),
+    --       vieillissement de la créance (ageing).
+    --     - intérêts accrus non facturés (ACCRUED_AMOUNT)
+    --       et intérêts en suspens (SUSP_AMT_*) = revenu
+    --       constaté mais non réalisé.
+    --     - MORA_INT (intérêts moratoires) : revenu
+    --       attendu sur retards.
+    -- =========================================================
+    print_section('5. CLTB_ACCOUNT_SCHEDULES — échéances & overdue');
+
+    -- 5.1 Volumétrie globale
+    DBMS_OUTPUT.PUT_LINE('  [5.1 Volumétrie globale des échéances]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  Total lignes échéance', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  Comptes prêt distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COMPONENT_NAME) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  Composants distincts (COMPONENT_NAME)', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT SETTLEMENT_CCY) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  Devises de règlement distinctes', TO_CHAR(v_count));
+
+    -- 5.2 Plage temporelle
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.2 Plage temporelle des échéances]');
+    FOR r IN (
+        SELECT MIN(SCHEDULE_ST_DATE) dt_min, MAX(SCHEDULE_ST_DATE) dt_max
+        FROM CLTB_ACCOUNT_SCHEDULES
+    ) LOOP
+        print_kv('  SCHEDULE_ST_DATE min', TO_CHAR(r.dt_min, 'DD/MM/YYYY'));
+        print_kv('  SCHEDULE_ST_DATE max', TO_CHAR(r.dt_max, 'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (
+        SELECT MIN(SCHEDULE_DUE_DATE) dt_min, MAX(SCHEDULE_DUE_DATE) dt_max
+        FROM CLTB_ACCOUNT_SCHEDULES
+    ) LOOP
+        print_kv('  SCHEDULE_DUE_DATE min', TO_CHAR(r.dt_min, 'DD/MM/YYYY'));
+        print_kv('  SCHEDULE_DUE_DATE max', TO_CHAR(r.dt_max, 'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (
+        SELECT MIN(LAST_PMNT_VALUE_DATE) dt_min, MAX(LAST_PMNT_VALUE_DATE) dt_max
+        FROM CLTB_ACCOUNT_SCHEDULES
+    ) LOOP
+        print_kv('  LAST_PMNT_VALUE_DATE min', TO_CHAR(r.dt_min, 'DD/MM/YYYY'));
+        print_kv('  LAST_PMNT_VALUE_DATE max', TO_CHAR(r.dt_max, 'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 5.3 Répartition SCHEDULE_TYPE / SCH_STATUS / SCHEDULE_FLAG / WAIVER_FLAG
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.3 Répartition SCHEDULE_TYPE]');
+    FOR r IN (
+        SELECT NVL(SCHEDULE_TYPE,'(NULL)') SCHEDULE_TYPE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_SCHEDULES
+        GROUP BY SCHEDULE_TYPE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SCHEDULE_TYPE = ' || r.SCHEDULE_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.3.b Répartition SCH_STATUS]');
+    FOR r IN (
+        SELECT NVL(SCH_STATUS,'(NULL)') SCH_STATUS, COUNT(*) nb
+        FROM CLTB_ACCOUNT_SCHEDULES
+        GROUP BY SCH_STATUS ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SCH_STATUS = ' || r.SCH_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.3.c Répartition SCHEDULE_FLAG]');
+    FOR r IN (
+        SELECT NVL(SCHEDULE_FLAG,'(NULL)') SCHEDULE_FLAG, COUNT(*) nb
+        FROM CLTB_ACCOUNT_SCHEDULES
+        GROUP BY SCHEDULE_FLAG ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SCHEDULE_FLAG = ' || r.SCHEDULE_FLAG, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.3.d Répartition WAIVER_FLAG sur échéance]');
+    FOR r IN (
+        SELECT NVL(WAIVER_FLAG,'(NULL)') WAIVER_FLAG, COUNT(*) nb
+        FROM CLTB_ACCOUNT_SCHEDULES
+        GROUP BY WAIVER_FLAG ORDER BY nb DESC
+    ) LOOP
+        print_kv('  WAIVER_FLAG = ' || r.WAIVER_FLAG, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 5.4 Montants totaux DUS / SETTLES / OVERDUE / WAIVED / WRITEOFF
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.4 Agrégats financiers globaux (LCY_EQUIVALENT)]');
+    FOR r IN (
+        SELECT
+            ROUND(SUM(ORIG_AMOUNT_DUE),2)  sm_orig,
+            ROUND(SUM(AMOUNT_DUE),2)       sm_due,
+            ROUND(SUM(AMOUNT_SETTLED),2)   sm_set,
+            ROUND(SUM(AMOUNT_OVERDUE),2)   sm_over,
+            ROUND(SUM(AMOUNT_WAIVED),2)    sm_waiv,
+            ROUND(SUM(WRITEOFF_AMT),2)     sm_wo,
+            ROUND(SUM(ACCRUED_AMOUNT),2)   sm_acc,
+            ROUND(SUM(LCY_EQUIVALENT),2)   sm_lcy
+        FROM CLTB_ACCOUNT_SCHEDULES
+    ) LOOP
+        print_kv('  SUM ORIG_AMOUNT_DUE', TO_CHAR(r.sm_orig));
+        print_kv('  SUM AMOUNT_DUE', TO_CHAR(r.sm_due));
+        print_kv('  SUM AMOUNT_SETTLED', TO_CHAR(r.sm_set));
+        print_kv('  SUM AMOUNT_OVERDUE', TO_CHAR(r.sm_over));
+        print_kv('  SUM AMOUNT_WAIVED', TO_CHAR(r.sm_waiv));
+        print_kv('  SUM WRITEOFF_AMT', TO_CHAR(r.sm_wo));
+        print_kv('  SUM ACCRUED_AMOUNT', TO_CHAR(r.sm_acc));
+        print_kv('  SUM LCY_EQUIVALENT', TO_CHAR(r.sm_lcy));
+    END LOOP;
+
+    -- 5.4.b Agrégats par COMPONENT_NAME — top 15 en montant dû
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.4.b Top 15 COMPONENT_NAME par AMOUNT_DUE]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb, sm_due, sm_set, sm_over, sm_waiv FROM (
+            SELECT NVL(COMPONENT_NAME,'(NULL)') COMPONENT_NAME,
+                   COUNT(*) nb,
+                   ROUND(SUM(AMOUNT_DUE),2)     sm_due,
+                   ROUND(SUM(AMOUNT_SETTLED),2) sm_set,
+                   ROUND(SUM(AMOUNT_OVERDUE),2) sm_over,
+                   ROUND(SUM(AMOUNT_WAIVED),2)  sm_waiv
+            FROM CLTB_ACCOUNT_SCHEDULES
+            GROUP BY COMPONENT_NAME
+            ORDER BY sm_due DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.COMPONENT_NAME,
+                 'due=' || TO_CHAR(r.sm_due) ||
+                 ' | set=' || TO_CHAR(r.sm_set) ||
+                 ' | over=' || TO_CHAR(r.sm_over) ||
+                 ' | waiv=' || TO_CHAR(r.sm_waiv));
+    END LOOP;
+
+    -- 5.5 OVERDUE — échéances échues non soldées
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.5 Echéances échues non soldées (AMOUNT_OVERDUE > 0)]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_OVERDUE > 0;
+    print_kv('  Nb échéances overdue', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(AMOUNT_OVERDUE),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_OVERDUE > 0;
+    print_kv('  SUM AMOUNT_OVERDUE', TO_CHAR(v_num));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_OVERDUE > 0;
+    print_kv('  Comptes prêt concernés', TO_CHAR(v_count));
+
+    -- 5.5.b Ageing des overdue (days past due)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.5.b Ageing des AMOUNT_OVERDUE vs SYSDATE]');
+    FOR r IN (
+        SELECT
+            CASE
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   30 THEN '0-30 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   60 THEN '31-60 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   90 THEN '61-90 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=  180 THEN '91-180 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=  360 THEN '181-360 j'
+                ELSE '> 360 j'
+            END bucket,
+            COUNT(*) nb,
+            ROUND(SUM(AMOUNT_OVERDUE),2) sm
+        FROM CLTB_ACCOUNT_SCHEDULES
+        WHERE AMOUNT_OVERDUE > 0 AND SCHEDULE_DUE_DATE IS NOT NULL
+        GROUP BY
+            CASE
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   30 THEN '0-30 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   60 THEN '31-60 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=   90 THEN '61-90 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=  180 THEN '91-180 j'
+                WHEN SYSDATE - SCHEDULE_DUE_DATE <=  360 THEN '181-360 j'
+                ELSE '> 360 j'
+            END
+        ORDER BY bucket
+    ) LOOP
+        print_kv('  Bucket ' || r.bucket, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 5.5.c Overdue par COMPONENT_NAME — top 10
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.5.c Top 10 COMPONENT_NAME en overdue]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb, sm FROM (
+            SELECT NVL(COMPONENT_NAME,'(NULL)') COMPONENT_NAME,
+                   COUNT(*) nb, ROUND(SUM(AMOUNT_OVERDUE),2) sm
+            FROM CLTB_ACCOUNT_SCHEDULES
+            WHERE AMOUNT_OVERDUE > 0
+            GROUP BY COMPONENT_NAME
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.COMPONENT_NAME, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 5.6 WAIVED — montants effectivement waivés à l'échéance
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.6 Montants waivés (AMOUNT_WAIVED > 0)]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_WAIVED > 0;
+    print_kv('  Nb échéances avec waiver', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(AMOUNT_WAIVED),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_WAIVED > 0;
+    print_kv('  SUM AMOUNT_WAIVED', TO_CHAR(v_num));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE AMOUNT_WAIVED > 0;
+    print_kv('  Comptes prêt concernés', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.6.b Top 10 COMPONENT_NAME les plus waivés]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb, sm FROM (
+            SELECT NVL(COMPONENT_NAME,'(NULL)') COMPONENT_NAME,
+                   COUNT(*) nb, ROUND(SUM(AMOUNT_WAIVED),2) sm
+            FROM CLTB_ACCOUNT_SCHEDULES
+            WHERE AMOUNT_WAIVED > 0
+            GROUP BY COMPONENT_NAME
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.COMPONENT_NAME, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.6.c Top 15 BRANCHES par volume waivé]');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb, sm FROM (
+            SELECT BRANCH_CODE, COUNT(*) nb, ROUND(SUM(AMOUNT_WAIVED),2) sm
+            FROM CLTB_ACCOUNT_SCHEDULES
+            WHERE AMOUNT_WAIVED > 0
+            GROUP BY BRANCH_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  BRANCHE ' || r.BRANCH_CODE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 5.7 WRITEOFF — passage en perte
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.7 Writeoff — échéances passées en perte]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE WRITEOFF_AMT > 0;
+    print_kv('  Nb échéances writeoff', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(WRITEOFF_AMT),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES WHERE WRITEOFF_AMT > 0;
+    print_kv('  SUM WRITEOFF_AMT', TO_CHAR(v_num));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE WRITEOFF_AMT > 0;
+    print_kv('  Comptes concernés', TO_CHAR(v_count));
+
+    -- 5.8 SUSPENSE — intérêts en suspens (non réalisés)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.8 Suspense (intérêt constaté mais non réalisé)]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE SUSP_AMT_DUE > 0;
+    print_kv('  Nb lignes SUSP_AMT_DUE > 0', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(SUSP_AMT_DUE),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  SUM SUSP_AMT_DUE', TO_CHAR(v_num));
+    SELECT NVL(ROUND(SUM(SUSP_AMT_SETTLED),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  SUM SUSP_AMT_SETTLED', TO_CHAR(v_num));
+    SELECT NVL(ROUND(SUM(SUSP_AMT_LCY),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  SUM SUSP_AMT_LCY', TO_CHAR(v_num));
+
+    -- 5.9 MORA_INT — intérêts moratoires
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.9 MORA_INT (intérêts moratoires sur retard)]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES WHERE MORA_INT > 0;
+    print_kv('  Nb échéances avec MORA_INT > 0', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(MORA_INT),2),0) INTO v_num FROM CLTB_ACCOUNT_SCHEDULES;
+    print_kv('  SUM MORA_INT', TO_CHAR(v_num));
+
+    -- 5.10 EMI_AMOUNT (annuités)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.10 EMI_AMOUNT — stats annuités]');
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(MIN(EMI_AMOUNT),2) mn,
+               ROUND(MAX(EMI_AMOUNT),2) mx,
+               ROUND(AVG(EMI_AMOUNT),2) av
+        FROM CLTB_ACCOUNT_SCHEDULES WHERE EMI_AMOUNT > 0
+    ) LOOP
+        print_kv('  EMI — nb', TO_CHAR(r.nb));
+        print_kv('  EMI — min', TO_CHAR(r.mn));
+        print_kv('  EMI — max', TO_CHAR(r.mx));
+        print_kv('  EMI — moy', TO_CHAR(r.av));
+    END LOOP;
+
+    -- 5.11 Cohérence ORIG_AMOUNT_DUE vs AMOUNT_DUE vs AMOUNT_SETTLED
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.11 Cohérences montants dus / réglés / restants]');
+    -- réglé > dû (anomalie)
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE AMOUNT_SETTLED > ORIG_AMOUNT_DUE + 0.01
+      AND ORIG_AMOUNT_DUE > 0;
+    print_kv('  AMOUNT_SETTLED > ORIG_AMOUNT_DUE', TO_CHAR(v_count));
+    -- dû < settlé + overdue + waived (écart global)
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE ABS(NVL(AMOUNT_SETTLED,0) + NVL(AMOUNT_OVERDUE,0) + NVL(AMOUNT_WAIVED,0)
+              + NVL(WRITEOFF_AMT,0) - NVL(ORIG_AMOUNT_DUE,0)) > 1
+      AND SCH_STATUS IN ('L','P'); -- L=Liquidated, P=Pending
+    print_kv('  Ecart ORIG_DUE vs (SET+OVER+WAIV+WO) > 1 unité', TO_CHAR(v_count));
+    -- échéance passée non soldée ni overdue
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE SCHEDULE_DUE_DATE < SYSDATE
+      AND NVL(AMOUNT_SETTLED,0) = 0
+      AND NVL(AMOUNT_OVERDUE,0) = 0
+      AND NVL(AMOUNT_WAIVED,0) = 0
+      AND NVL(WRITEOFF_AMT,0) = 0
+      AND ORIG_AMOUNT_DUE > 0;
+    print_kv('  Echues non soldées / non overdue (anomalie)', TO_CHAR(v_count));
+
+    -- 5.12 Volumétrie annuelle (échéances créées)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.12 Volumétrie annuelle par SCHEDULE_DUE_DATE]');
+    FOR r IN (
+        SELECT TO_CHAR(SCHEDULE_DUE_DATE,'YYYY') annee,
+               COUNT(*) nb,
+               ROUND(SUM(AMOUNT_DUE),2) sm_due,
+               ROUND(SUM(AMOUNT_OVERDUE),2) sm_over
+        FROM CLTB_ACCOUNT_SCHEDULES
+        WHERE SCHEDULE_DUE_DATE IS NOT NULL
+        GROUP BY TO_CHAR(SCHEDULE_DUE_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee,
+                 'nb=' || TO_CHAR(r.nb) ||
+                 ' | due=' || TO_CHAR(r.sm_due) ||
+                 ' | over=' || TO_CHAR(r.sm_over));
+    END LOOP;
+
+    -- 5.13 Comptes concentrant les impayés (top 15)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.13 Top 15 comptes en overdue (concentration créance)]');
+    FOR r IN (
+        SELECT ACCOUNT_NUMBER, BRANCH_CODE, nb, sm FROM (
+            SELECT ACCOUNT_NUMBER, BRANCH_CODE,
+                   COUNT(*) nb, ROUND(SUM(AMOUNT_OVERDUE),2) sm
+            FROM CLTB_ACCOUNT_SCHEDULES
+            WHERE AMOUNT_OVERDUE > 0
+            GROUP BY ACCOUNT_NUMBER, BRANCH_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.BRANCH_CODE || ' / ' || r.ACCOUNT_NUMBER,
+                 'nb=' || TO_CHAR(r.nb) || ' | sum overdue=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 5.14 Cumul dérogation (waiver composant) vs waiver échéance
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [5.14 Alignement waiver composant vs waiver échéance]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_SCHEDULES s
+    WHERE s.WAIVER_FLAG = 'Y'
+      AND NOT EXISTS (
+          SELECT 1 FROM CLTB_ACCOUNT_COMPONENTS c
+          WHERE c.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER
+            AND c.BRANCH_CODE    = s.BRANCH_CODE
+            AND c.COMPONENT_NAME = s.COMPONENT_NAME
+            AND c.WAIVE = 'Y'
+      );
+    print_kv('  Echéances waivées sans composant marqué WAIVE', TO_CHAR(v_count));
 END;
 /

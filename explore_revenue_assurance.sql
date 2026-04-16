@@ -3675,5 +3675,304 @@ BEGIN
                       WHERE c.CONTRACT_REF_NO = m.CONTRACT_REF_NO);
     print_kv('  SI master SANS aucun cycle', TO_CHAR(v_count));
 
+    ----------------------------------------------------------------
+    -- SECTION 14 : Cohérences globales & anomalies Revenue Assurance
+    --   Synthèse transverse : on croise les tables déjà parcourues
+    --   (ACTB_HISTORY, GLTB_GL_BAL, CLTB_*, LDTB_*, STTM_CUST_ACCOUNT,
+    --    RVTB_ACC_REVAL, SITB_*) pour détecter :
+    --    - intérêts courus non portés en GL
+    --    - échéances dues mais non facturées
+    --    - liquidations partielles orphelines
+    --    - waivers massifs / exceptions RA
+    --    - comptes débiteurs hors OD sans frais
+    --    - FX revaluation orpheline
+    --    - écarts accrual vs paiement
+    ----------------------------------------------------------------
+    print_section('SECTION 14 — Cohérences globales & anomalies RA');
+
+    -- 14.1 ACTB_HISTORY vs GLTB_GL_BAL : mouvements GL cohérents ?
+    DBMS_OUTPUT.PUT_LINE('  [14.1 Rapprochement ACTB_HISTORY <-> GLTB_GL_BAL]');
+    -- Somme LCY par GL pour un échantillon mois récent et compare avec DR_MOV/CR_MOV
+    FOR r IN (
+        SELECT * FROM (
+            SELECT h.AC_NO gl,
+                   NVL(SUM(CASE WHEN h.DRCR_IND='D' THEN h.LCY_AMOUNT END),0) dr_hist,
+                   NVL(SUM(CASE WHEN h.DRCR_IND='C' THEN h.LCY_AMOUNT END),0) cr_hist,
+                   COUNT(*) nb
+            FROM ACTB_HISTORY h
+            WHERE h.TRN_DT >= TRUNC(SYSDATE,'MM')
+              AND h.AC_NO IS NOT NULL
+            GROUP BY h.AC_NO
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        print_kv('  GL ' || r.gl,
+                 'hist_DR=' || TO_CHAR(r.dr_hist) ||
+                 ' | hist_CR=' || TO_CHAR(r.cr_hist) ||
+                 ' | mvts=' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 14.2 Intérêts accrus comptes sans entrée GL correspondante
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.2 Accruals intérêts — matière à facturer]');
+    SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) INTO v_num FROM STTM_CUST_ACCOUNT
+    WHERE NVL(ACY_ACCRUED_DR_IC,0) <> 0;
+    print_kv('  Σ ACY_ACCRUED_DR_IC (intérêts clients à percevoir)', TO_CHAR(v_num));
+    SELECT NVL(SUM(ACY_ACCRUED_CR_IC),0) INTO v_num FROM STTM_CUST_ACCOUNT
+    WHERE NVL(ACY_ACCRUED_CR_IC,0) <> 0;
+    print_kv('  Σ ACY_ACCRUED_CR_IC (intérêts clients à payer)', TO_CHAR(v_num));
+    print_kv('  Net à percevoir (DR - CR)', TO_CHAR(
+        (SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) - NVL(SUM(ACY_ACCRUED_CR_IC),0)
+         FROM STTM_CUST_ACCOUNT)));
+
+    -- 14.3 Débiteurs permanents sans TOD_LIMIT — RA leakage potentiel
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.3 Overdraft tacite — comptes en rouge sans TOD]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE ACY_CURR_BALANCE < 0
+      AND NVL(TOD_LIMIT,0) = 0
+      AND AC_STAT_DORMANT <> 'Y';
+    print_kv('  Actifs débiteurs sans TOD_LIMIT', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(ABS(LCY_CURR_BALANCE)),0) INTO v_num FROM STTM_CUST_ACCOUNT
+    WHERE LCY_CURR_BALANCE < 0
+      AND NVL(TOD_LIMIT,0) = 0;
+    print_kv('  Σ débit LCY sur ces comptes', TO_CHAR(v_num));
+
+    -- 14.4 Comptes dormants avec accruals : recette gelée
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.4 Dormants avec matière imposable]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
+    WHERE AC_STAT_DORMANT='Y'
+      AND (NVL(ACY_ACCRUED_DR_IC,0) > 0 OR NVL(CHG_DUE,0) > 0 OR NVL(DR_INT_DUE,0) > 0);
+    print_kv('  Dormants avec accrued/charges > 0', TO_CHAR(v_count));
+    SELECT NVL(SUM(ACY_ACCRUED_DR_IC + NVL(CHG_DUE,0) + NVL(DR_INT_DUE,0)),0) INTO v_num
+    FROM STTM_CUST_ACCOUNT WHERE AC_STAT_DORMANT='Y';
+    print_kv('  Σ matière gelée (dormants)', TO_CHAR(v_num));
+
+    -- 14.5 Waivers sur comptes clients vs composants de prêt
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.5 Waivers — synthèse RA]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE DEFAULT_WAIVER='Y';
+    print_kv('  Comptes DEFAULT_WAIVER=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
+    print_kv('  Composants prêt WAIVER=Y', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
+    print_kv('  Prêts distincts avec au moins un WAIVER', TO_CHAR(v_count));
+
+    -- 14.6 Echéances prêts dues non payées — unbilled loss
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.6 Echéances prêts en souffrance]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+      AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
+    print_kv('  Ech. CL en retard (AMT_DUE > AMT_SETTLED)', TO_CHAR(v_count));
+    SELECT NVL(SUM(NVL(AMOUNT_DUE,0) - NVL(AMOUNT_SETTLED,0)),0) INTO v_num
+    FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+      AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
+    print_kv('  Σ arriérés CL (AMT_DUE - AMT_SETTLED)', TO_CHAR(v_num));
+
+    -- 14.7 Liquidations sans paiement associé (CLTB_AMOUNT_LIQ orphelines)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.7 Cohérence liquidations / paiements CL]');
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM CLTB_AMOUNT_LIQ l
+      WHERE NOT EXISTS (
+        SELECT 1 FROM CLTB_AMOUNT_PAID p
+        WHERE p.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER
+          AND p.EVENT_SEQ_NO  = l.EVENT_SEQ_NO
+      );
+      print_kv('  Liquidations sans paiement associé', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Liquidations sans paiement associé', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 14.8 Prêts actifs sans composants : paramétrage incomplet
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.8 Prêts actifs sans composants ICCF]');
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER a
+      WHERE NVL(a.MODULE_CODE,'CL') = 'CL'
+        AND a.USER_DEFINED_STATUS <> 'LIQD'
+        AND NOT EXISTS (
+          SELECT 1 FROM CLTB_ACCOUNT_COMPONENTS c
+          WHERE c.ACCOUNT_NUMBER = a.ACCOUNT_NUMBER
+        );
+      print_kv('  Prêts ouverts sans aucun composant', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Prêts ouverts sans composant', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 14.9 RVTB_ACC_REVAL — comptes réévalués mais inexistants dans STTB_ACCOUNT
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.9 Revaluation sur comptes fantômes]');
+    BEGIN
+      SELECT COUNT(DISTINCT r.ACCOUNT) INTO v_count FROM RVTB_ACC_REVAL r
+      WHERE NOT EXISTS (
+        SELECT 1 FROM STTB_ACCOUNT s WHERE s.AC_GL_NO = r.ACCOUNT
+        UNION ALL
+        SELECT 1 FROM STTM_CUST_ACCOUNT c WHERE c.CUST_AC_NO = r.ACCOUNT
+      );
+      print_kv('  Comptes RVTB inconnus en STTB/STTM', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Comptes RVTB inconnus', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 14.10 FX revaluation : P&L cumulé par statut GLMIS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.10 P&L FX par statut GLMIS_UPD_STATUS]');
+    FOR r IN (
+        SELECT NVL(GLMIS_UPD_STATUS,'(NULL)') s,
+               NVL(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),0) pl,
+               COUNT(*) nb
+        FROM RVTB_ACC_REVAL
+        GROUP BY GLMIS_UPD_STATUS
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  GLMIS ' || r.s,
+                 'P&L=' || TO_CHAR(r.pl) || ' | nb=' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 14.11 ACTB_HISTORY : flags AML_EXCEPTION / DONT_SHOWIN_STMT
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.11 ACTB_HISTORY flags sensibles]');
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY WHERE AML_EXCEPTION='Y';
+    print_kv('  AML_EXCEPTION=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY WHERE DONT_SHOWIN_STMT='Y';
+    print_kv('  DONT_SHOWIN_STMT=Y (caché dans relevé)', TO_CHAR(v_count));
+    SELECT NVL(SUM(LCY_AMOUNT),0) INTO v_num FROM ACTB_HISTORY WHERE DONT_SHOWIN_STMT='Y';
+    print_kv('  Σ LCY sur DONT_SHOWIN_STMT=Y', TO_CHAR(v_num));
+
+    -- 14.12 ACTB_HISTORY : EXCH_RATE anormaux
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.12 ACTB_HISTORY — taux de change anormaux]');
+    -- On détecte sans dépendre de CYTM_CCY_DEFN : écart FCY/LCY significatif
+    -- avec EXCH_RATE = 0 ou 1 alors que les montants diffèrent (ccy <> LCY).
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
+    WHERE FCY_AMOUNT IS NOT NULL AND FCY_AMOUNT <> 0
+      AND LCY_AMOUNT IS NOT NULL AND LCY_AMOUNT <> 0
+      AND NVL(EXCH_RATE,0) IN (0,1)
+      AND ABS(LCY_AMOUNT - FCY_AMOUNT) / GREATEST(ABS(FCY_AMOUNT),1) > 0.01;
+    print_kv('  Mouvements EXCH_RATE ∈ {0,1} mais LCY<>FCY (suspect)', TO_CHAR(v_count));
+
+    -- 14.13 Contrats prêts inactifs depuis > 12 mois sans liquidation
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.13 Prêts CL figés (pas de cycle récent)]');
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER a
+      WHERE a.USER_DEFINED_STATUS NOT IN ('LIQD','CANC','CLOS')
+        AND NOT EXISTS (
+          SELECT 1 FROM CLTB_AMOUNT_LIQ l
+          WHERE l.ACCOUNT_NUMBER = a.ACCOUNT_NUMBER
+            AND l.LIQ_DATE >= ADD_MONTHS(SYSDATE,-12)
+        );
+      print_kv('  Prêts actifs sans liquidation 12m', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Prêts actifs sans liquidation 12m', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 14.14 SI inactives mais encore exécutées (cycle post-expiry)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.14 SI exécutées post-expiration]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CYCLE_DETAIL c
+    JOIN SITB_CONTRACT_MASTER m ON m.CONTRACT_REF_NO = c.CONTRACT_REF_NO
+    WHERE m.SI_EXPIRY_DATE IS NOT NULL
+      AND c.RETRY_DATE IS NOT NULL
+      AND c.RETRY_DATE > m.SI_EXPIRY_DATE
+      AND c.AMT_EXECUTED_LCY > 0;
+    print_kv('  Exécutions SI après SI_EXPIRY_DATE (> 0)', TO_CHAR(v_count));
+
+    -- 14.15 GL income mouvementés sur l'exercice (top 10 CR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.15 Top 10 GL ''INCOME'' par CR_MOV_LCY (FIN_YEAR courant)]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT g.GL_CODE, g.CCY_CODE, g.BRANCH_CODE,
+                   NVL(g.CR_MOV_LCY,0) cr_mov_lcy,
+                   NVL(g.DR_MOV_LCY,0) dr_mov_lcy
+            FROM GLTB_GL_BAL g
+            WHERE UPPER(NVL(g.CATEGORY,'')) IN ('I','INCOME','REVENUE','P')
+              AND g.FIN_YEAR = TO_CHAR(SYSDATE,'YYYY')
+            ORDER BY NVL(g.CR_MOV_LCY,0) DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.GL_CODE || '/' || r.BRANCH_CODE || '/' || r.CCY_CODE,
+                 'CR_mov_LCY=' || TO_CHAR(r.cr_mov_lcy) ||
+                 ' | DR_mov_LCY=' || TO_CHAR(r.dr_mov_lcy));
+    END LOOP;
+
+    -- 14.16 Scoring final RA : synthèse des leakages détectés
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [14.16 Synthèse finale — indicateurs RA consolidés]');
+    DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',76,'-'));
+
+    DECLARE
+      v_leak_waiver_cl    NUMBER := 0;
+      v_leak_waiver_acc   NUMBER := 0;
+      v_leak_dormant_chg  NUMBER := 0;
+      v_leak_overdraft    NUMBER := 0;
+      v_leak_si_nocharge  NUMBER := 0;
+      v_leak_si_expired   NUMBER := 0;
+      v_leak_sched_overdue NUMBER := 0;
+      v_amt_sched_overdue  NUMBER := 0;
+      v_amt_accrued        NUMBER := 0;
+    BEGIN
+      BEGIN SELECT COUNT(*) INTO v_leak_waiver_cl FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*) INTO v_leak_waiver_acc FROM STTM_CUST_ACCOUNT WHERE DEFAULT_WAIVER='Y';
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*) INTO v_leak_dormant_chg FROM STTM_CUST_ACCOUNT
+            WHERE AC_STAT_DORMANT='Y' AND NVL(CHG_DUE,0) > 0;
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*) INTO v_leak_overdraft FROM STTM_CUST_ACCOUNT
+            WHERE ACY_CURR_BALANCE < 0 AND NVL(TOD_LIMIT,0) = 0;
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*) INTO v_leak_si_nocharge FROM SITB_CONTRACT_MASTER
+            WHERE NVL(APPLY_CHG_SUXS,'N')='N'
+              AND NVL(APPLY_CHG_REJT,'N')='N'
+              AND NVL(APPLY_CHG_PEXC,'N')='N';
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*) INTO v_leak_si_expired FROM SITB_CONTRACT_MASTER
+            WHERE SI_EXPIRY_DATE IS NOT NULL AND SI_EXPIRY_DATE < TRUNC(SYSDATE);
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT COUNT(*), NVL(SUM(NVL(AMOUNT_DUE,0) - NVL(AMOUNT_SETTLED,0)),0)
+            INTO v_leak_sched_overdue, v_amt_sched_overdue
+            FROM CLTB_ACCOUNT_SCHEDULES
+            WHERE SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+              AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      BEGIN SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) - NVL(SUM(ACY_ACCRUED_CR_IC),0)
+            INTO v_amt_accrued FROM STTM_CUST_ACCOUNT;
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+
+      print_kv('  [W1] Composants prêt avec WAIVER',           TO_CHAR(v_leak_waiver_cl));
+      print_kv('  [W2] Comptes DEFAULT_WAIVER=Y',              TO_CHAR(v_leak_waiver_acc));
+      print_kv('  [D1] Dormants avec CHG_DUE > 0',             TO_CHAR(v_leak_dormant_chg));
+      print_kv('  [O1] Débiteurs sans TOD_LIMIT',              TO_CHAR(v_leak_overdraft));
+      print_kv('  [S1] SI sans APPLY_CHG_*',                   TO_CHAR(v_leak_si_nocharge));
+      print_kv('  [S2] SI expirées',                           TO_CHAR(v_leak_si_expired));
+      print_kv('  [E1] Echéances CL en retard (#)',            TO_CHAR(v_leak_sched_overdue));
+      print_kv('  [E2] Σ arriérés CL (LCY ccy native)',        TO_CHAR(v_amt_sched_overdue));
+      print_kv('  [A1] Net accrued intérêts clients (DR-CR)',  TO_CHAR(v_amt_accrued));
+    END;
+
+    DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',76,'-'));
+    DBMS_OUTPUT.PUT_LINE('  Fin de l''exploration Revenue Assurance.');
+    DBMS_OUTPUT.PUT_LINE('  Les indicateurs ci-dessus doivent être priorisés :');
+    DBMS_OUTPUT.PUT_LINE('   - [W*] waivers à justifier (revue contractuelle)');
+    DBMS_OUTPUT.PUT_LINE('   - [D*] dormance : CHG_DUE à extraire avant radiation');
+    DBMS_OUTPUT.PUT_LINE('   - [O*] overdraft tacite : application de taux OD/pénalités');
+    DBMS_OUTPUT.PUT_LINE('   - [S*] SI : paramétrage frais succès/échec & expirations');
+    DBMS_OUTPUT.PUT_LINE('   - [E*] échéances : recouvrement & pénalités de retard');
+    DBMS_OUTPUT.PUT_LINE('   - [A*] accruals : rapprocher avec le GL revenus');
+
 END;
 /

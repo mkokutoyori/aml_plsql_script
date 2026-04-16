@@ -1876,5 +1876,396 @@ BEGIN
     ) LOOP
         print_kv('  CUST ' || r.CUSTOMER_ID, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 8. LDTB — CONTRATS LOANS / DEPOSITS / MONEY MARKET
+    --    Angle Revenue Assurance :
+    --     - LDTB_CONTRACT_MASTER : inventaire des contrats MM/LD,
+    --       taux principal (MAIN_COMP_RATE, SPREAD), subvention
+    --       (SUBSIDY_PERCENTAGE).
+    --     - LDTB_CONTRACT_ICCF_DETAILS : accruals & liquidations
+    --       par composant ICCF (TILL_DATE_ACCRUAL,
+    --       OUTSTANDING NET, UPFRONT_PROFIT_BOOKED).
+    --     - LDTB_CONTRACT_ACCRUAL_HISTORY : historique des
+    --       accruals (OVERDUE_INTEREST, NET_ACCRUAL).
+    --     - LDTB_CONTRACT_LIQ & LIQ_SUMMARY : paiements,
+    --       prépaiements, pénalités de remboursement anticipé.
+    --     - LDTB_CONTRACT_ROLLOVER : rollovers (si frais/charges
+    --       non appliqués = fuite).
+    --     - LDTB_CONTRACT_PREFERENCE : règles arrondis, holidays,
+    --       TRS_APPLICABLE, VERIFY_FUNDS.
+    -- =========================================================
+    print_section('8. LDTB — Contrats Loans/Deposits/MM & accruals');
+
+    -- 8.1 Volumétrie
+    DBMS_OUTPUT.PUT_LINE('  [8.1 Volumétrie des contrats]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER;
+    print_kv('  LDTB_CONTRACT_MASTER — total', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT PRODUCT) INTO v_count FROM LDTB_CONTRACT_MASTER;
+    print_kv('  Produits distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT MODULE) INTO v_count FROM LDTB_CONTRACT_MASTER;
+    print_kv('  Modules distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COUNTERPARTY) INTO v_count FROM LDTB_CONTRACT_MASTER;
+    print_kv('  Contreparties distinctes', TO_CHAR(v_count));
+
+    FOR r IN (
+        SELECT MIN(BOOKING_DATE) mn, MAX(BOOKING_DATE) mx FROM LDTB_CONTRACT_MASTER
+    ) LOOP
+        print_kv('  BOOKING_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  BOOKING_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (
+        SELECT MIN(VALUE_DATE) mn, MAX(VALUE_DATE) mx FROM LDTB_CONTRACT_MASTER
+    ) LOOP
+        print_kv('  VALUE_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  VALUE_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (
+        SELECT MIN(MATURITY_DATE) mn, MAX(MATURITY_DATE) mx FROM LDTB_CONTRACT_MASTER
+    ) LOOP
+        print_kv('  MATURITY_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  MATURITY_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 8.2 Répartition par MODULE / PRODUCT_TYPE / PAYMENT_METHOD
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.2 Répartition MODULE]');
+    FOR r IN (
+        SELECT NVL(MODULE,'(NULL)') MODULE, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM LDTB_CONTRACT_MASTER GROUP BY MODULE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MODULE = ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.2.b PRODUCT_TYPE]');
+    FOR r IN (
+        SELECT NVL(PRODUCT_TYPE,'(NULL)') PRODUCT_TYPE, COUNT(*) nb
+        FROM LDTB_CONTRACT_MASTER GROUP BY PRODUCT_TYPE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PRODUCT_TYPE = ' || r.PRODUCT_TYPE, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.2.c PAYMENT_METHOD]');
+    FOR r IN (
+        SELECT NVL(PAYMENT_METHOD,'(NULL)') PAYMENT_METHOD, COUNT(*) nb
+        FROM LDTB_CONTRACT_MASTER GROUP BY PAYMENT_METHOD ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PAYMENT_METHOD = ' || r.PAYMENT_METHOD, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 8.3 Statuts
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.3 Statuts contrats]');
+    FOR r IN (SELECT NVL(CONTRACT_STATUS,'(NULL)') CONTRACT_STATUS, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY CONTRACT_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  CONTRACT_STATUS = ' || r.CONTRACT_STATUS, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(CONTRACT_DERIVED_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY CONTRACT_DERIVED_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  CONTRACT_DERIVED_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(USER_DEFINED_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY USER_DEFINED_STATUS ORDER BY nb DESC
+              FETCH FIRST 15 ROWS ONLY) LOOP
+        print_kv('  USER_DEFINED_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(SETTLEMENT_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY SETTLEMENT_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  SETTLEMENT_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(ICCF_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY ICCF_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  ICCF_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(CHARGE_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY CHARGE_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  CHARGE_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(TAX_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_MASTER GROUP BY TAX_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  TAX_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 8.4 Montants — stats MAIN_COMP_AMOUNT / LCY_AMOUNT / ORIGINAL_FACE_VALUE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.4 Stats financières des contrats]');
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(AMOUNT),2)            sm_a,
+               ROUND(SUM(MAIN_COMP_AMOUNT),2)  sm_m,
+               ROUND(SUM(LCY_AMOUNT),2)        sm_l,
+               ROUND(SUM(ORIGINAL_FACE_VALUE),2) sm_o,
+               ROUND(SUM(RISK_FREE_EXP_AMOUNT),2) sm_r,
+               ROUND(SUM(MAX_DRAWDOWN_AMOUNT),2) sm_d
+        FROM LDTB_CONTRACT_MASTER
+    ) LOOP
+        print_kv('  SUM AMOUNT', TO_CHAR(r.sm_a));
+        print_kv('  SUM MAIN_COMP_AMOUNT', TO_CHAR(r.sm_m));
+        print_kv('  SUM LCY_AMOUNT', TO_CHAR(r.sm_l));
+        print_kv('  SUM ORIGINAL_FACE_VALUE', TO_CHAR(r.sm_o));
+        print_kv('  SUM RISK_FREE_EXP_AMOUNT', TO_CHAR(r.sm_r));
+        print_kv('  SUM MAX_DRAWDOWN_AMOUNT', TO_CHAR(r.sm_d));
+    END LOOP;
+
+    -- 8.5 Taux (MAIN_COMP_RATE / MAIN_COMP_SPREAD)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.5 Taux principal contrats]');
+    FOR r IN (
+        SELECT ROUND(MIN(MAIN_COMP_RATE),4) mn,
+               ROUND(MAX(MAIN_COMP_RATE),4) mx,
+               ROUND(AVG(MAIN_COMP_RATE),4) av
+        FROM LDTB_CONTRACT_MASTER
+        WHERE MAIN_COMP_RATE IS NOT NULL AND MAIN_COMP_RATE <> 0
+    ) LOOP
+        print_kv('  MAIN_COMP_RATE min', TO_CHAR(r.mn));
+        print_kv('  MAIN_COMP_RATE max', TO_CHAR(r.mx));
+        print_kv('  MAIN_COMP_RATE moy', TO_CHAR(r.av));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER
+    WHERE MAIN_COMP_RATE IS NULL OR MAIN_COMP_RATE = 0;
+    print_kv('  Contrats avec MAIN_COMP_RATE NULL / 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER
+    WHERE MAIN_COMP_SPREAD IS NOT NULL AND MAIN_COMP_SPREAD <> 0;
+    print_kv('  Contrats avec SPREAD non nul', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER
+    WHERE CUST_MARGIN IS NOT NULL AND CUST_MARGIN <> 0;
+    print_kv('  Contrats avec CUST_MARGIN non nulle', TO_CHAR(v_count));
+
+    -- 8.6 Subvention de taux (SUBSIDY_PERCENTAGE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.6 Subvention de taux (SUBSIDY_PERCENTAGE)]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER
+    WHERE SUBSIDY_PERCENTAGE IS NOT NULL AND SUBSIDY_PERCENTAGE > 0;
+    print_kv('  Contrats subventionnés', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT ROUND(MIN(SUBSIDY_PERCENTAGE),4) mn,
+               ROUND(MAX(SUBSIDY_PERCENTAGE),4) mx,
+               ROUND(AVG(SUBSIDY_PERCENTAGE),4) av
+        FROM LDTB_CONTRACT_MASTER WHERE SUBSIDY_PERCENTAGE > 0
+    ) LOOP
+        print_kv('  SUBSIDY_PERCENTAGE min', TO_CHAR(r.mn));
+        print_kv('  SUBSIDY_PERCENTAGE max', TO_CHAR(r.mx));
+        print_kv('  SUBSIDY_PERCENTAGE moy', TO_CHAR(r.av));
+    END LOOP;
+
+    -- 8.7 Flags revenue-sensibles sur contrats
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.7 Flags contrats — ALLOW_PREPAY / ROLLOVER / AUTO_PROV]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE ALLOW_PREPAY = 'Y';
+    print_kv('  ALLOW_PREPAY = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE ROLLOVER_ALLOWED = 'Y';
+    print_kv('  ROLLOVER_ALLOWED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE ROLLOVER_COUNT > 0;
+    print_kv('  ROLLOVER_COUNT > 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE AUTO_PROV_REQD = 'Y';
+    print_kv('  AUTO_PROV_REQD = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE RB_PENALTY_APPLICABLE = 'Y';
+    print_kv('  RB_PENALTY_APPLICABLE = Y (pénalité remb. anticipé)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE ANNUITY_LOAN = 'Y';
+    print_kv('  ANNUITY_LOAN = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_MASTER WHERE ASSIGNED_CONTRACT = 'Y';
+    print_kv('  ASSIGNED_CONTRACT = Y (cédé)', TO_CHAR(v_count));
+
+    -- 8.8 LDTB_CONTRACT_ICCF_DETAILS — accruals en cours
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.8 ICCF — accruals & intérêts liquidés]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_DETAILS;
+    print_kv('  Total lignes ICCF_DETAILS', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(CURRENT_NET_ACCRUAL),2) sm_cna,
+               ROUND(SUM(TILL_DATE_ACCRUAL),2)   sm_tda,
+               ROUND(SUM(TOTAL_AMOUNT_LIQUIDATED),2) sm_liq
+        FROM LDTB_CONTRACT_ICCF_DETAILS
+    ) LOOP
+        print_kv('  ICCF — nb', TO_CHAR(r.nb));
+        print_kv('  SUM CURRENT_NET_ACCRUAL', TO_CHAR(r.sm_cna));
+        print_kv('  SUM TILL_DATE_ACCRUAL', TO_CHAR(r.sm_tda));
+        print_kv('  SUM TOTAL_AMOUNT_LIQUIDATED', TO_CHAR(r.sm_liq));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_DETAILS WHERE ACCRUAL_REQUIRED = 'Y';
+    print_kv('  Composants ACCRUAL_REQUIRED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_DETAILS WHERE UPFRONT_PROFIT_BOOKED = 'Y';
+    print_kv('  UPFRONT_PROFIT_BOOKED = Y', TO_CHAR(v_count));
+
+    -- 8.8.b Top 15 COMPONENT ICCF
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.8.b Top 15 COMPONENT ICCF par accrual courant]');
+    FOR r IN (
+        SELECT COMPONENT, nb, sm FROM (
+            SELECT NVL(COMPONENT,'(NULL)') COMPONENT, COUNT(*) nb,
+                   ROUND(SUM(CURRENT_NET_ACCRUAL),2) sm
+            FROM LDTB_CONTRACT_ICCF_DETAILS
+            GROUP BY COMPONENT
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.COMPONENT, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 8.9 LDTB_CONTRACT_ACCRUAL_HISTORY — historique accruals
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.9 Historique des accruals — ACCRUAL_HISTORY]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ACCRUAL_HISTORY;
+    print_kv('  Total lignes accrual history', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT MIN(ACCRUAL_TO_DATE) mn, MAX(ACCRUAL_TO_DATE) mx
+        FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+    ) LOOP
+        print_kv('  ACCRUAL_TO_DATE min', TO_CHAR(r.mn,'DD/MM/YYYY'));
+        print_kv('  ACCRUAL_TO_DATE max', TO_CHAR(r.mx,'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(NET_ACCRUAL),2) sm_na,
+               ROUND(SUM(TILL_DATE_ACCRUAL),2) sm_tda,
+               ROUND(SUM(OVERDUE_INTEREST),2) sm_od,
+               ROUND(SUM(OUTSTANDING_ACCRUAL),2) sm_out,
+               ROUND(SUM(AMOUNT_PREPAID),2) sm_pp
+        FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+    ) LOOP
+        print_kv('  SUM NET_ACCRUAL', TO_CHAR(r.sm_na));
+        print_kv('  SUM TILL_DATE_ACCRUAL', TO_CHAR(r.sm_tda));
+        print_kv('  SUM OVERDUE_INTEREST', TO_CHAR(r.sm_od));
+        print_kv('  SUM OUTSTANDING_ACCRUAL', TO_CHAR(r.sm_out));
+        print_kv('  SUM AMOUNT_PREPAID', TO_CHAR(r.sm_pp));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.9.b Répartition TYPE_OF_ACCRUAL]');
+    FOR r IN (
+        SELECT NVL(TYPE_OF_ACCRUAL,'(NULL)') TYPE_OF_ACCRUAL, COUNT(*) nb
+        FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+        GROUP BY TYPE_OF_ACCRUAL ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TYPE_OF_ACCRUAL = ' || r.TYPE_OF_ACCRUAL, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.9.c ACC_ENTRY_PASSED (accrual comptabilisé)]');
+    FOR r IN (
+        SELECT NVL(ACC_ENTRY_PASSED,'(NULL)') s, COUNT(*) nb
+        FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+        GROUP BY ACC_ENTRY_PASSED ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACC_ENTRY_PASSED = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 8.10 LDTB_CONTRACT_LIQ & LIQ_SUMMARY — paiements contrats
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.10 Liquidation contrats — LDTB_CONTRACT_LIQ]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ;
+    print_kv('  Lignes LIQ', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(AMOUNT_DUE),2) sm_due,
+               ROUND(SUM(AMOUNT_PAID),2) sm_pd,
+               ROUND(SUM(INT_PREPAY),2) sm_ip,
+               ROUND(SUM(TAX_PAID),2) sm_tx
+        FROM LDTB_CONTRACT_LIQ
+    ) LOOP
+        print_kv('  SUM AMOUNT_DUE (LIQ)', TO_CHAR(r.sm_due));
+        print_kv('  SUM AMOUNT_PAID (LIQ)', TO_CHAR(r.sm_pd));
+        print_kv('  SUM INT_PREPAY', TO_CHAR(r.sm_ip));
+        print_kv('  SUM TAX_PAID', TO_CHAR(r.sm_tx));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.10.b Écarts AMOUNT_DUE vs AMOUNT_PAID sur LIQ]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ
+    WHERE AMOUNT_DUE > AMOUNT_PAID + 0.01 AND AMOUNT_DUE > 0;
+    print_kv('  Lignes AMOUNT_DUE > AMOUNT_PAID', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ WHERE OVERDUE_DAYS > 0;
+    print_kv('  Lignes OVERDUE_DAYS > 0', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.10.c LIQ_SUMMARY — prépaiements & pénalités]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ_SUMMARY;
+    print_kv('  Lignes LIQ_SUMMARY', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT COUNT(*) nb,
+               ROUND(SUM(TOTAL_PAID),2) sm_tp,
+               ROUND(SUM(TOTAL_PREPAID),2) sm_pp,
+               ROUND(SUM(PREPAYMENT_PENALTY_AMOUNT),2) sm_pen
+        FROM LDTB_CONTRACT_LIQ_SUMMARY
+    ) LOOP
+        print_kv('  SUM TOTAL_PAID', TO_CHAR(r.sm_tp));
+        print_kv('  SUM TOTAL_PREPAID', TO_CHAR(r.sm_pp));
+        print_kv('  SUM PREPAYMENT_PENALTY_AMOUNT', TO_CHAR(r.sm_pen));
+    END LOOP;
+    FOR r IN (
+        SELECT NVL(PAYMENT_STATUS,'(NULL)') s, COUNT(*) nb
+        FROM LDTB_CONTRACT_LIQ_SUMMARY
+        GROUP BY PAYMENT_STATUS ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LIQ_SUMMARY PAYMENT_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 8.11 LDTB_CONTRACT_ROLLOVER — rollovers (re-conditionnement de revenu)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.11 Rollovers contrats]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER;
+    print_kv('  Lignes ROLLOVER', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(ROLLOVER_TYPE,'(NULL)') s, COUNT(*) nb
+        FROM LDTB_CONTRACT_ROLLOVER GROUP BY ROLLOVER_TYPE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ROLLOVER_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER WHERE APPLY_CHARGE = 'Y';
+    print_kv('  Rollover APPLY_CHARGE = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER WHERE APPLY_CHARGE = 'N';
+    print_kv('  Rollover APPLY_CHARGE = N (fuite de frais)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER WHERE APPLY_TAX = 'Y';
+    print_kv('  Rollover APPLY_TAX = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER WHERE APPLY_TAX = 'N';
+    print_kv('  Rollover APPLY_TAX = N', TO_CHAR(v_count));
+
+    -- 8.12 LDTB_CONTRACT_PREFERENCE — arrondis / TRS / verify funds
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.12 Preferences contrats — arrondis, TRS, verify funds]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE;
+    print_kv('  Total lignes PREFERENCE', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE TRS_APPLICABLE = 'Y';
+    print_kv('  TRS_APPLICABLE = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE SUBSIDY_ALLOWED = 'Y';
+    print_kv('  SUBSIDY_ALLOWED = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE TRACK_RECEIVABLE_ALIQ = 'Y';
+    print_kv('  TRACK_RECEIVABLE_ALIQ = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE TRACK_RECEIVABLE_MLIQ = 'Y';
+    print_kv('  TRACK_RECEIVABLE_MLIQ = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE VERIFY_FUNDS = 'Y';
+    print_kv('  VERIFY_FUNDS = Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_PREFERENCE WHERE ROUNDING_REQD = 'Y';
+    print_kv('  ROUNDING_REQD = Y', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(CCY_ROUND_RULE,'(NULL)') s, COUNT(*) nb
+        FROM LDTB_CONTRACT_PREFERENCE
+        GROUP BY CCY_ROUND_RULE ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CCY_ROUND_RULE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 8.13 Volumétrie annuelle & concentration par contrepartie
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.13 Volumétrie annuelle BOOKING_DATE]');
+    FOR r IN (
+        SELECT TO_CHAR(BOOKING_DATE,'YYYY') annee,
+               COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM LDTB_CONTRACT_MASTER WHERE BOOKING_DATE IS NOT NULL
+        GROUP BY TO_CHAR(BOOKING_DATE,'YYYY') ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [8.13.b Top 10 contreparties par exposition]');
+    FOR r IN (
+        SELECT COUNTERPARTY, nb, sm FROM (
+            SELECT NVL(COUNTERPARTY,'(NULL)') COUNTERPARTY,
+                   COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+            FROM LDTB_CONTRACT_MASTER
+            GROUP BY COUNTERPARTY
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CPARTY ' || r.COUNTERPARTY, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
 END;
 /

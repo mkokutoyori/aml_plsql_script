@@ -1021,6 +1021,165 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- A-08. SMTB_PARAMETERS & SMTB_PASSWORD_HISTORY
+    --        — Parametres de securite + historique des mots de passe
+    -- =========================================================
+    p_section('A-08. SMTB_PARAMETERS & SMTB_PASSWORD_HISTORY — Politique MDP & historique');
+
+    -- ---------- SMTB_PARAMETERS ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_PARAMETERS;
+    p_kv('Lignes SMTB_PARAMETERS (doit etre 1 — singleton)', TO_CHAR(v_total));
+
+    IF v_total >= 1 THEN
+        p_sub('Politique de mot de passe');
+        FOR r IN (SELECT * FROM SMTB_PARAMETERS WHERE ROWNUM = 1) LOOP
+            p_kv('  Application (APPLICATION_NAME)', NVL(r.APPLICATION_NAME,'-'));
+            p_kv('  Site (SITE_CODE)', NVL(r.SITE_CODE,'-'));
+            p_kv('  Head office (HEAD_OFFICE)', NVL(r.HEAD_OFFICE,'-'));
+            p_kv('  Activation key', NVL(r.ACTIVATION_KEY,'-'));
+            p_kv('  Release type', NVL(r.RELEASE_TYPE,'-'));
+            DBMS_OUTPUT.PUT_LINE('  -- Politique MDP --');
+            p_kv('  MIN_PWD_LENGTH', TO_CHAR(r.MIN_PWD_LENGTH));
+            p_kv('  MAX_PWD_LENGTH', TO_CHAR(r.MAX_PWD_LENGTH));
+            p_kv('  MIN_PWD_ALPHA_LENGTH', TO_CHAR(r.MIN_PWD_ALPHA_LENGTH));
+            p_kv('  MAX_PWD_ALPHA_LENGTH', TO_CHAR(r.MAX_PWD_ALPHA_LENGTH));
+            p_kv('  MIN_PWD_NUMERIC_LENGTH', TO_CHAR(r.MIN_PWD_NUMERIC_LENGTH));
+            p_kv('  MAX_PWD_NUMERIC_LENGTH', TO_CHAR(r.MAX_PWD_NUMERIC_LENGTH));
+            p_kv('  MIN_SPECIALCHAR_LENGTH', NVL(r.MIN_SPECIALCHAR_LENGTH,'-'));
+            p_kv('  MAX_SPECIALCHAR_LENGTH', NVL(r.MAX_SPECIALCHAR_LENGTH,'-'));
+            p_kv('  MIN_UPPERCASE_CHAR', TO_CHAR(r.MIN_UPPERCASE_CHAR));
+            p_kv('  MIN_LOWERCASE_CHAR', TO_CHAR(r.MIN_LOWERCASE_CHAR));
+            p_kv('  PWD_HAS_CAPS (majuscules obligatoires ?)', NVL(r.PWD_HAS_CAPS,'-'));
+            p_kv('  CONCHAR_PWD_NUM (chars consecutifs interdits)', TO_CHAR(r.CONCHAR_PWD_NUM));
+            p_kv('  PWD_CHANGE_AFTER (jours apres creation)', TO_CHAR(r.PWD_CHANGE_AFTER));
+            p_kv('  FREQ_PWD_CHG (frequence changement, jours)', TO_CHAR(r.FREQ_PWD_CHG));
+            p_kv('  PWD_EXPIRY_MSG_DAYS (alerte avant expiration)', TO_CHAR(r.PWD_EXPIRY_MSG_DAYS));
+            p_kv('  PWD_PREVENT_REUSE (historique reuse)', TO_CHAR(r.PWD_PREVENT_REUSE));
+            p_kv('  ALWAYS_FOR_PWD_CHANGE', NVL(r.ALWAYS_FOR_PWD_CHANGE,'-'));
+            p_kv('  PASSWORD_EXTERNAL (LDAP global)', NVL(r.PASSWORD_EXTERNAL,'-'));
+            DBMS_OUTPUT.PUT_LINE('  -- Politique connexion --');
+            p_kv('  INVALID_LOGINS_CUM (seuil cumulatif)', TO_CHAR(r.INVALID_LOGINS_CUM));
+            p_kv('  INVALID_LOGINS_SUC (seuil successif)', TO_CHAR(r.INVALID_LOGINS_SUC));
+            p_kv('  DORMANCY_DAYS (jours avant dormance)', TO_CHAR(r.DORMANCY_DAYS));
+            p_kv('  SCREEN_SAVER_REQ', NVL(r.SCREEN_SAVER_REQ,'-'));
+            p_kv('  SCREEN_SAVER_TIMEOUT (min)', TO_CHAR(r.SCREEN_SAVER_TIMEOUT));
+            p_kv('  SCREEN_SAVER_MODIFIABLE_FLAG', NVL(r.SCREEN_SAVER_MODIFIABLE_FLAG,'-'));
+            DBMS_OUTPUT.PUT_LINE('  -- Politique autres --');
+            p_kv('  ARCHIVAL_PERIOD (jours conservation)', TO_CHAR(r.ARCHIVAL_PERIOD));
+            p_kv('  DISPLAY_LEGAL_NOTICE', NVL(r.DISPLAY_LEGAL_NOTICE,'-'));
+            IF r.LEGAL_NOTICE IS NOT NULL THEN
+                p_kv('  LEGAL_NOTICE (60 premiers caracteres)', SUBSTR(r.LEGAL_NOTICE, 1, 60));
+            ELSE
+                p_kv('  LEGAL_NOTICE', 'NON CONFIGURE');
+            END IF;
+            DBMS_OUTPUT.PUT_LINE('  -- Maker/Checker --');
+            p_kv('  Record / Auth / Once', r.RECORD_STAT||' / '||r.AUTH_STAT||' / '||NVL(r.ONCE_AUTH,'-'));
+            p_kv('  MAKER_ID', NVL(r.MAKER_ID,'-'));
+            p_kv('  CHECKER_ID', NVL(r.CHECKER_ID,'-'));
+            p_kv('  MAKER_DT_STAMP', TO_CHAR(r.MAKER_DT_STAMP,'DD/MM/YYYY HH24:MI'));
+            p_kv('  CHECKER_DT_STAMP', TO_CHAR(r.CHECKER_DT_STAMP,'DD/MM/YYYY HH24:MI'));
+            p_kv('  MOD_NO', TO_CHAR(r.MOD_NO));
+        END LOOP;
+
+        p_sub('Evaluation rapide vs bonnes pratiques (COBAC / CIS) — reperes');
+        FOR r IN (SELECT * FROM SMTB_PARAMETERS WHERE ROWNUM = 1) LOOP
+            IF r.MIN_PWD_LENGTH IS NULL OR r.MIN_PWD_LENGTH < 8 THEN
+                p_kv('  Longueur mini mot de passe (attendu >= 8)', 'FAIBLE : ' || NVL(TO_CHAR(r.MIN_PWD_LENGTH),'NULL'));
+            ELSE
+                p_kv('  Longueur mini mot de passe', 'OK : ' || r.MIN_PWD_LENGTH);
+            END IF;
+            IF r.FREQ_PWD_CHG IS NULL OR r.FREQ_PWD_CHG > 90 OR r.FREQ_PWD_CHG = 0 THEN
+                p_kv('  Rotation mot de passe (attendu <= 90 j)', 'A REVOIR : ' || NVL(TO_CHAR(r.FREQ_PWD_CHG),'NULL'));
+            ELSE
+                p_kv('  Rotation mot de passe', 'OK : ' || r.FREQ_PWD_CHG || ' j');
+            END IF;
+            IF r.PWD_PREVENT_REUSE IS NULL OR r.PWD_PREVENT_REUSE < 3 THEN
+                p_kv('  Historique reuse (attendu >= 3)', 'A REVOIR : ' || NVL(TO_CHAR(r.PWD_PREVENT_REUSE),'NULL'));
+            ELSE
+                p_kv('  Historique reuse', 'OK : ' || r.PWD_PREVENT_REUSE);
+            END IF;
+            IF r.INVALID_LOGINS_SUC IS NULL OR r.INVALID_LOGINS_SUC = 0 OR r.INVALID_LOGINS_SUC > 5 THEN
+                p_kv('  Seuil tentatives successives (attendu <= 5)', 'A REVOIR : ' || NVL(TO_CHAR(r.INVALID_LOGINS_SUC),'NULL'));
+            ELSE
+                p_kv('  Seuil tentatives successives', 'OK : ' || r.INVALID_LOGINS_SUC);
+            END IF;
+            IF r.DORMANCY_DAYS IS NULL OR r.DORMANCY_DAYS = 0 OR r.DORMANCY_DAYS > 90 THEN
+                p_kv('  Delai dormance (attendu <= 90 j)', 'A REVOIR : ' || NVL(TO_CHAR(r.DORMANCY_DAYS),'NULL'));
+            ELSE
+                p_kv('  Delai dormance', 'OK : ' || r.DORMANCY_DAYS || ' j');
+            END IF;
+            IF r.SCREEN_SAVER_TIMEOUT IS NULL OR r.SCREEN_SAVER_TIMEOUT = 0 OR r.SCREEN_SAVER_TIMEOUT > 15 THEN
+                p_kv('  Timeout ecran (attendu <= 15 min)', 'A REVOIR : ' || NVL(TO_CHAR(r.SCREEN_SAVER_TIMEOUT),'NULL'));
+            ELSE
+                p_kv('  Timeout ecran', 'OK : ' || r.SCREEN_SAVER_TIMEOUT || ' min');
+            END IF;
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_PASSWORD_HISTORY ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_PASSWORD_HISTORY;
+    p_kv('Total lignes SMTB_PASSWORD_HISTORY', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_PASSWORD_HISTORY;
+        p_kv('  Utilisateurs distincts avec historique', TO_CHAR(v_count));
+
+        SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+            WHERE NOT EXISTS (SELECT 1 FROM SMTB_PASSWORD_HISTORY p WHERE p.USER_ID = u.USER_ID);
+        p_kv('  SMTB_USER sans historique MDP', TO_CHAR(v_count));
+
+        p_sub('Distribution du nombre d''occurrences par utilisateur');
+        FOR r IN (
+            SELECT nb_occ, COUNT(*) nb_users FROM (
+                SELECT USER_ID, COUNT(*) nb_occ FROM SMTB_PASSWORD_HISTORY GROUP BY USER_ID
+            ) GROUP BY nb_occ ORDER BY nb_occ
+        ) LOOP
+            p_kv('  Nb_rotations = ' || r.nb_occ, TO_CHAR(r.nb_users) || ' utilisateur(s)');
+        END LOOP;
+
+        p_sub('Top 15 utilisateurs — plus grand historique MDP');
+        FOR r IN (
+            SELECT USER_ID, nb FROM (
+                SELECT USER_ID, COUNT(*) nb FROM SMTB_PASSWORD_HISTORY
+                GROUP BY USER_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  USER = ' || r.USER_ID, TO_CHAR(r.nb) || ' MDP historises');
+        END LOOP;
+
+        p_sub('Couverture SALT (hash sale ?)');
+        SELECT COUNT(*) INTO v_count FROM SMTB_PASSWORD_HISTORY WHERE SALT IS NULL OR SALT = ' ';
+        p_pct('  Lignes SANS SALT', v_count, v_total);
+        SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_PASSWORD_HISTORY
+            WHERE SALT IS NULL OR SALT = ' ';
+        p_kv('  Utilisateurs impactes par SALT manquant', TO_CHAR(v_count));
+
+        p_sub('Detection doublons HASH MDP (signe de reuse ou absence de SALT)');
+        SELECT COUNT(*) INTO v_count FROM (
+            SELECT PASSWORD_USED, COUNT(DISTINCT USER_ID) nu
+            FROM SMTB_PASSWORD_HISTORY
+            WHERE PASSWORD_USED IS NOT NULL
+            GROUP BY PASSWORD_USED HAVING COUNT(DISTINCT USER_ID) > 1
+        );
+        p_kv('  Hash partages par >1 utilisateur (signal faible)', TO_CHAR(v_count));
+
+        p_sub('Top 10 hash partages (exhaustif, anonymise)');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT SUBSTR(PASSWORD_USED, 1, 20) hpref, COUNT(DISTINCT USER_ID) nu
+                FROM SMTB_PASSWORD_HISTORY
+                WHERE PASSWORD_USED IS NOT NULL
+                GROUP BY SUBSTR(PASSWORD_USED, 1, 20)
+                HAVING COUNT(DISTINCT USER_ID) > 1
+                ORDER BY nu DESC
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  Hash prefixe=' || r.hpref, TO_CHAR(r.nu) || ' user(s)');
+        END LOOP;
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

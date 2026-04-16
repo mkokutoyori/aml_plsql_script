@@ -321,6 +321,147 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-03. SMTB_USER_DISABLE & SMTB_USERLOG_DETAILS
+    --        — Desactivations et historique de connexion
+    -- =========================================================
+    p_section('A-03. SMTB_USER_DISABLE & SMTB_USERLOG_DETAILS — Desactivations et connexions');
+
+    -- ---------- SMTB_USER_DISABLE ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_USER_DISABLE;
+    p_kv('Total evenements de desactivation (SMTB_USER_DISABLE)', TO_CHAR(v_total));
+
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_DISABLE;
+    p_kv('Nombre d''utilisateurs distincts concernes', TO_CHAR(v_count));
+
+    p_sub('Repartition par motif (MESSAGE)');
+    FOR r IN (
+        SELECT MESSAGE, nb FROM (
+            SELECT SUBSTR(MESSAGE, 1, 60) AS MESSAGE, COUNT(*) nb
+            FROM SMTB_USER_DISABLE GROUP BY SUBSTR(MESSAGE, 1, 60) ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_pct('  ' || NVL(r.MESSAGE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Terminal de desactivation (TERMINAL_ID) — Top 10');
+    FOR r IN (
+        SELECT TERMINAL_ID, nb FROM (
+            SELECT TERMINAL_ID, COUNT(*) nb FROM SMTB_USER_DISABLE
+            GROUP BY TERMINAL_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_pct('  TERMINAL = ' || NVL(r.TERMINAL_ID,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Distribution temporelle (derniers 12 mois)');
+    FOR r IN (
+        SELECT TO_CHAR(START_TIME, 'YYYY-MM') AS mois, COUNT(*) nb
+        FROM SMTB_USER_DISABLE
+        WHERE START_TIME >= ADD_MONTHS(SYSDATE, -12)
+        GROUP BY TO_CHAR(START_TIME, 'YYYY-MM')
+        ORDER BY mois
+    ) LOOP
+        p_kv('  ' || r.mois, TO_CHAR(r.nb) || ' desactivation(s)');
+    END LOOP;
+
+    p_sub('Top 10 utilisateurs les plus souvent desactives');
+    FOR r IN (
+        SELECT USER_ID, nb FROM (
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_USER_DISABLE
+            GROUP BY USER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  USER_ID = ' || NVL(r.USER_ID,'(NULL)'), TO_CHAR(r.nb) || ' desactivation(s)');
+    END LOOP;
+
+    p_sub('Echantillon 10 evenements recents');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, TERMINAL_ID,
+                   TO_CHAR(START_TIME,'DD/MM/YYYY HH24:MI') dt,
+                   SUBSTR(MESSAGE, 1, 80) msg
+            FROM SMTB_USER_DISABLE
+            ORDER BY START_TIME DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  ' || r.dt || ' | USER=' || r.USER_ID || ' | TERM=' || NVL(r.TERMINAL_ID,'-'),
+             NVL(r.msg,'-'));
+    END LOOP;
+
+    -- ---------- SMTB_USERLOG_DETAILS ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_USERLOG_DETAILS;
+    p_kv('Total lignes SMTB_USERLOG_DETAILS (stats de connexion)', TO_CHAR(v_total));
+
+    p_sub('Couverture : utilisateurs avec stats connexion');
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USERLOG_DETAILS;
+    p_kv('  Utilisateurs distincts traces', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+        WHERE NOT EXISTS (SELECT 1 FROM SMTB_USERLOG_DETAILS l WHERE l.USER_ID = u.USER_ID);
+    p_kv('  Utilisateurs SMTB_USER SANS trace de login', TO_CHAR(v_count));
+
+    p_sub('Derniere connexion (LAST_SIGNED_ON) — anciennete');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON IS NULL;
+    p_pct('  LAST_SIGNED_ON = NULL (jamais connecte)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON >= SYSDATE - 7;
+    p_pct('  Connecte dans les 7 derniers jours', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON >= SYSDATE - 30;
+    p_pct('  Connecte dans les 30 derniers jours', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON < SYSDATE - 90 AND LAST_SIGNED_ON IS NOT NULL;
+    p_pct('  Inactif > 90 jours', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON < SYSDATE - 180 AND LAST_SIGNED_ON IS NOT NULL;
+    p_pct('  Inactif > 180 jours (dormant candidat)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE LAST_SIGNED_ON < SYSDATE - 365 AND LAST_SIGNED_ON IS NOT NULL;
+    p_pct('  Inactif > 365 jours (dormant avere)', v_count, v_total);
+
+    p_sub('Compteurs de logins');
+    FOR r IN (
+        SELECT ROUND(AVG(NO_CUMULATIVE_LOGINS)) avg_cum,
+               MAX(NO_CUMULATIVE_LOGINS) max_cum,
+               ROUND(AVG(NO_SUCCESSIVE_LOGINS)) avg_suc,
+               MAX(NO_SUCCESSIVE_LOGINS) max_suc
+        FROM SMTB_USERLOG_DETAILS
+    ) LOOP
+        p_kv('  NO_CUMULATIVE_LOGINS (moyenne)', TO_CHAR(r.avg_cum));
+        p_kv('  NO_CUMULATIVE_LOGINS (max)', TO_CHAR(r.max_cum));
+        p_kv('  NO_SUCCESSIVE_LOGINS (moyenne)', TO_CHAR(r.avg_suc));
+        p_kv('  NO_SUCCESSIVE_LOGINS (max)', TO_CHAR(r.max_suc));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE NO_SUCCESSIVE_LOGINS >= 3;
+    p_pct('  Utilisateurs avec NO_SUCCESSIVE_LOGINS >= 3 (tentatives echouees consecutives)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS WHERE NO_SUCCESSIVE_LOGINS >= 5;
+    p_pct('  Utilisateurs avec NO_SUCCESSIVE_LOGINS >= 5', v_count, v_total);
+
+    p_sub('Top 10 utilisateurs les plus anciens par inactivite');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID,
+                   TO_CHAR(LAST_SIGNED_ON,'DD/MM/YYYY HH24:MI') last_sign,
+                   NO_CUMULATIVE_LOGINS, NO_SUCCESSIVE_LOGINS
+            FROM SMTB_USERLOG_DETAILS
+            WHERE LAST_SIGNED_ON IS NOT NULL
+            ORDER BY LAST_SIGNED_ON ASC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  USER=' || r.USER_ID || ' | last=' || r.last_sign,
+             'cum=' || r.NO_CUMULATIVE_LOGINS || ' / suc=' || r.NO_SUCCESSIVE_LOGINS);
+    END LOOP;
+
+    p_sub('Top 10 utilisateurs les plus actifs (NO_CUMULATIVE_LOGINS)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, NO_CUMULATIVE_LOGINS, NO_SUCCESSIVE_LOGINS,
+                   TO_CHAR(LAST_SIGNED_ON,'DD/MM/YYYY HH24:MI') last_sign
+            FROM SMTB_USERLOG_DETAILS
+            ORDER BY NO_CUMULATIVE_LOGINS DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  USER=' || r.USER_ID || ' | cum=' || r.NO_CUMULATIVE_LOGINS,
+             'last=' || NVL(r.last_sign,'-') || ' / suc=' || r.NO_SUCCESSIVE_LOGINS);
+    END LOOP;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

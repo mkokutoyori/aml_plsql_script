@@ -338,5 +338,317 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('>>> EXPLORATION TERMINEE — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
+    -- =========================================================
+    -- 3. ACTB_HISTORY — REVENUS & CHARGES COMPTABILISES
+    --    Angle Revenue Assurance : tous les amount tags typés
+    --    "revenue" (intérêts, commissions, frais, pénalités)
+    --    doivent être cohérents avec le paramétrage et le GL.
+    -- =========================================================
+    print_section('3. ACTB_HISTORY — Revenus & charges comptabilisés');
+ 
+    -- 3.1 Plage temporelle
+    DBMS_OUTPUT.PUT_LINE('  [3.1 Plage temporelle des écritures]');
+    FOR r IN (SELECT MIN(TRN_DT) dt_min, MAX(TRN_DT) dt_max FROM ACTB_HISTORY) LOOP
+        print_kv('  Ecriture la plus ancienne (TRN_DT)', TO_CHAR(r.dt_min, 'DD/MM/YYYY'));
+        print_kv('  Ecriture la plus récente (TRN_DT)', TO_CHAR(r.dt_max, 'DD/MM/YYYY'));
+    END LOOP;
+    FOR r IN (SELECT MIN(VALUE_DT) dt_min, MAX(VALUE_DT) dt_max FROM ACTB_HISTORY) LOOP
+        print_kv('  VALUE_DT min', TO_CHAR(r.dt_min, 'DD/MM/YYYY'));
+        print_kv('  VALUE_DT max', TO_CHAR(r.dt_max, 'DD/MM/YYYY'));
+    END LOOP;
+ 
+    -- 3.2 Volumétrie par année / mois / module
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.2 Volumétrie annuelle (écritures & total LCY)]');
+    FOR r IN (
+        SELECT TO_CHAR(TRN_DT, 'YYYY') annee, COUNT(*) nb,
+               ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY
+        WHERE TRN_DT IS NOT NULL
+        GROUP BY TO_CHAR(TRN_DT, 'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee || ' — nb écritures', TO_CHAR(r.nb));
+        print_kv('  ' || r.annee || ' — total LCY', TO_CHAR(r.sm));
+    END LOOP;
+ 
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.2.b Répartition MODULE (hors AML) — total LCY par module]');
+    FOR r IN (
+        SELECT MODULE, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY
+        GROUP BY MODULE
+        ORDER BY sm DESC NULLS LAST
+    ) LOOP
+        print_kv('  MODULE = ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.3 Focus sur les AMOUNT_TAG typés revenue
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.3 Top 25 AMOUNT_TAG par volume LCY (DR+CR)]');
+    FOR r IN (
+        SELECT AMOUNT_TAG, nb, sm FROM (
+            SELECT AMOUNT_TAG,
+                   COUNT(*) nb,
+                   ROUND(SUM(LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY
+            GROUP BY AMOUNT_TAG
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 25
+    ) LOOP
+        print_kv('  TAG ' || r.AMOUNT_TAG, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.4 Revenus = tags marqués INTEREST/CHARGE/COMMISSION dans CSTB_AMOUNT_TAG
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.4 Revenus comptabilisés par type (jointure CSTB_AMOUNT_TAG)]');
+    -- Intérêts
+    SELECT COUNT(*), NVL(ROUND(SUM(h.LCY_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND t.INTEREST_ALLOWED = 'Y'
+    );
+    print_kv('  Ecritures INTEREST — nb', TO_CHAR(v_count));
+    print_kv('  Ecritures INTEREST — sum LCY', TO_CHAR(v_num));
+ 
+    -- Charges (frais)
+    SELECT COUNT(*), NVL(ROUND(SUM(h.LCY_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND t.CHARGE_ALLOWED = 'Y'
+    );
+    print_kv('  Ecritures CHARGE — nb', TO_CHAR(v_count));
+    print_kv('  Ecritures CHARGE — sum LCY', TO_CHAR(v_num));
+ 
+    -- Commissions
+    SELECT COUNT(*), NVL(ROUND(SUM(h.LCY_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND t.COMMISSION_ALLOWED = 'Y'
+    );
+    print_kv('  Ecritures COMMISSION — nb', TO_CHAR(v_count));
+    print_kv('  Ecritures COMMISSION — sum LCY', TO_CHAR(v_num));
+ 
+    -- Taxes
+    SELECT COUNT(*), NVL(ROUND(SUM(h.LCY_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND t.TAX_ALLOWED = 'Y'
+    );
+    print_kv('  Ecritures TAX — nb', TO_CHAR(v_count));
+    print_kv('  Ecritures TAX — sum LCY', TO_CHAR(v_num));
+ 
+    -- Unrealised (produit non réalisé)
+    SELECT COUNT(*), NVL(ROUND(SUM(h.LCY_AMOUNT),2),0)
+      INTO v_count, v_num
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND t.UNREALISED = 'Y'
+    );
+    print_kv('  Ecritures UNREALISED — nb', TO_CHAR(v_count));
+    print_kv('  Ecritures UNREALISED — sum LCY', TO_CHAR(v_num));
+ 
+    -- 3.5 Revenus par année x MODULE (intérêts + commissions + charges)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.5 Revenus comptabilisés par année × MODULE]');
+    FOR r IN (
+        SELECT TO_CHAR(h.TRN_DT, 'YYYY') annee, h.MODULE,
+               COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY h
+        WHERE EXISTS (
+            SELECT 1 FROM CSTB_AMOUNT_TAG t
+            WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+              AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+        )
+          AND h.TRN_DT IS NOT NULL
+        GROUP BY TO_CHAR(h.TRN_DT, 'YYYY'), h.MODULE
+        ORDER BY annee, sm DESC NULLS LAST
+    ) LOOP
+        print_kv('  ' || r.annee || ' / ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.6 Revenus par branche (top 15)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.6 Top 15 AGENCES par revenus (sum LCY tags revenue)]');
+    FOR r IN (
+        SELECT AC_BRANCH, sm, nb FROM (
+            SELECT h.AC_BRANCH, COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY h
+            WHERE EXISTS (
+                SELECT 1 FROM CSTB_AMOUNT_TAG t
+                WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+                  AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+            )
+            GROUP BY h.AC_BRANCH
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  AGENCE ' || r.AC_BRANCH, 'sum=' || TO_CHAR(r.sm) || ' | nb=' || TO_CHAR(r.nb));
+    END LOOP;
+ 
+    -- 3.7 Revenus par devise (top 10)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.7 Top 10 devises sur écritures revenue]');
+    FOR r IN (
+        SELECT AC_CCY, nb, sm_lcy, sm_fcy FROM (
+            SELECT h.AC_CCY, COUNT(*) nb,
+                   ROUND(SUM(h.LCY_AMOUNT),2) sm_lcy,
+                   ROUND(SUM(h.FCY_AMOUNT),2) sm_fcy
+            FROM ACTB_HISTORY h
+            WHERE EXISTS (
+                SELECT 1 FROM CSTB_AMOUNT_TAG t
+                WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+                  AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+            )
+            GROUP BY h.AC_CCY
+            ORDER BY sm_lcy DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CCY ' || r.AC_CCY, 'LCY=' || TO_CHAR(r.sm_lcy) || ' | FCY=' || TO_CHAR(r.sm_fcy) || ' | nb=' || TO_CHAR(r.nb));
+    END LOOP;
+ 
+    -- 3.8 Écritures manuelles (MODULE = MM / GL / JE) - piste d'ajustements suspects
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.8 Écritures potentiellement manuelles (MODULE=GL,MM,JE)]');
+    FOR r IN (
+        SELECT MODULE, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY
+        WHERE MODULE IN ('GL','MM','JE','MG','XL')
+        GROUP BY MODULE
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MODULE = ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.9 Répartition DRCR_IND sur écritures revenue
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.9 Sens DR/CR des écritures revenue]');
+    FOR r IN (
+        SELECT h.DRCR_IND, COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY h
+        WHERE EXISTS (
+            SELECT 1 FROM CSTB_AMOUNT_TAG t
+            WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+              AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+        )
+        GROUP BY h.DRCR_IND
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DRCR_IND = ' || r.DRCR_IND, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.10 Contrôles de cohérence FCY / EXCH_RATE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.10 Cohérence FCY / LCY / EXCH_RATE]');
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
+    WHERE FCY_AMOUNT = 0 AND LCY_AMOUNT <> 0;
+    print_kv('  FCY=0 mais LCY <> 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
+    WHERE EXCH_RATE IS NULL OR EXCH_RATE = 0;
+    print_kv('  EXCH_RATE NULL / 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY
+    WHERE FCY_AMOUNT > 0 AND LCY_AMOUNT > 0
+      AND EXCH_RATE IS NOT NULL AND EXCH_RATE > 0
+      AND ABS(FCY_AMOUNT * EXCH_RATE - LCY_AMOUNT) > 1;
+    print_kv('  Ecart FCY*EXCH_RATE vs LCY > 1 unité', TO_CHAR(v_count));
+ 
+    -- 3.11 Top 15 TRN_CODE pour les tags revenue
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.11 Top 15 TRN_CODE sur écritures revenue]');
+    FOR r IN (
+        SELECT TRN_CODE, nb, sm FROM (
+            SELECT h.TRN_CODE, COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY h
+            WHERE EXISTS (
+                SELECT 1 FROM CSTB_AMOUNT_TAG t
+                WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+                  AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+            )
+            GROUP BY h.TRN_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  TRN_CODE ' || r.TRN_CODE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.12 Top 15 PRODUCT générateurs de revenu
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.12 Top 15 PRODUCT par revenus générés]');
+    FOR r IN (
+        SELECT PRODUCT, nb, sm FROM (
+            SELECT h.PRODUCT, COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY h
+            WHERE EXISTS (
+                SELECT 1 FROM CSTB_AMOUNT_TAG t
+                WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+                  AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+            )
+            GROUP BY h.PRODUCT
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PRODUCT ' || r.PRODUCT, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.13 Top 10 USER_ID passant des écritures revenue (back-office / système)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.13 Top 10 USER_ID sur écritures revenue]');
+    FOR r IN (
+        SELECT USER_ID, nb, sm FROM (
+            SELECT h.USER_ID, COUNT(*) nb, ROUND(SUM(h.LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY h
+            WHERE EXISTS (
+                SELECT 1 FROM CSTB_AMOUNT_TAG t
+                WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+                  AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+            )
+            GROUP BY h.USER_ID
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  USER ' || r.USER_ID, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.14 Écritures reversées (EVENT = REVR / RVRV / DRVR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.14 Écritures de reversal (impact revenue négatif)]');
+    FOR r IN (
+        SELECT EVENT, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+        FROM ACTB_HISTORY
+        WHERE EVENT LIKE '%REV%' OR EVENT LIKE '%RVR%'
+        GROUP BY EVENT
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  EVENT = ' || r.EVENT, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+ 
+    -- 3.15 Rapprochement GL d'origine ORIG_PNL_GL (si existe)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [3.15 Top 10 ORIG_PNL_GL — comptes résultat utilisés]');
+    FOR r IN (
+        SELECT ORIG_PNL_GL, nb, sm FROM (
+            SELECT ORIG_PNL_GL, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
+            FROM ACTB_HISTORY
+            WHERE ORIG_PNL_GL IS NOT NULL AND ORIG_PNL_GL <> ' '
+            GROUP BY ORIG_PNL_GL
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ORIG_PNL_GL ' || r.ORIG_PNL_GL, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
 END;
 /

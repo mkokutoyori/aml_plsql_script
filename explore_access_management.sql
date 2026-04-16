@@ -462,6 +462,141 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-04. SMTB_ROLE_MASTER & SMTB_ROLE_BRANCHES — Referentiel des roles
+    -- =========================================================
+    p_section('A-04. SMTB_ROLE_MASTER & SMTB_ROLE_BRANCHES — Referentiel des roles');
+
+    -- ---------- SMTB_ROLE_MASTER ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_MASTER;
+    p_kv('Total roles definis', TO_CHAR(v_total));
+
+    p_sub('Statut d''enregistrement (RECORD_STAT)');
+    FOR r IN (SELECT RECORD_STAT, COUNT(*) nb FROM SMTB_ROLE_MASTER GROUP BY RECORD_STAT ORDER BY nb DESC) LOOP
+        p_pct('  RECORD_STAT = ' || NVL(r.RECORD_STAT,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Statut d''autorisation (AUTH_STAT)');
+    FOR r IN (SELECT AUTH_STAT, COUNT(*) nb FROM SMTB_ROLE_MASTER GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        p_pct('  AUTH_STAT = ' || NVL(r.AUTH_STAT,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Once auth (ONCE_AUTH)');
+    FOR r IN (SELECT ONCE_AUTH, COUNT(*) nb FROM SMTB_ROLE_MASTER GROUP BY ONCE_AUTH ORDER BY nb DESC) LOOP
+        p_pct('  ONCE_AUTH = ' || NVL(r.ONCE_AUTH,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Perimetre ouvert (tous/all)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE BRANCHES_ALLOWED = 'Y';
+    p_pct('  Roles avec BRANCHES_ALLOWED=Y (toutes agences)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE ACCCLASS_ALLOWED = 'Y';
+    p_pct('  Roles avec ACCCLASS_ALLOWED=Y (toutes classes)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE BRANCH_VLT_ROLE = 'Y';
+    p_pct('  Roles cles coffre-fort (BRANCH_VLT_ROLE=Y)', v_count, v_total);
+
+    p_sub('Categorie de role (BRANCH_ROLE_CAT)');
+    FOR r IN (SELECT BRANCH_ROLE_CAT, COUNT(*) nb FROM SMTB_ROLE_MASTER
+              GROUP BY BRANCH_ROLE_CAT ORDER BY nb DESC) LOOP
+        p_pct('  CAT = ' || NVL(r.BRANCH_ROLE_CAT,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Niveau hierarchique du role (BRANCH_ROLE_LEVEL)');
+    FOR r IN (SELECT BRANCH_ROLE_LEVEL, COUNT(*) nb FROM SMTB_ROLE_MASTER
+              GROUP BY BRANCH_ROLE_LEVEL ORDER BY BRANCH_ROLE_LEVEL NULLS FIRST) LOOP
+        p_pct('  LEVEL = ' || NVL(TO_CHAR(r.BRANCH_ROLE_LEVEL),'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Role centralisation / authorisation');
+    FOR r IN (SELECT CENTRALISATION_ROLE, COUNT(*) nb FROM SMTB_ROLE_MASTER
+              GROUP BY CENTRALISATION_ROLE ORDER BY nb DESC) LOOP
+        p_pct('  CENTRALISATION_ROLE = ' || NVL(r.CENTRALISATION_ROLE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+    FOR r IN (SELECT BRANCH_AUTH_ROLE, COUNT(*) nb FROM SMTB_ROLE_MASTER
+              GROUP BY BRANCH_AUTH_ROLE ORDER BY nb DESC) LOOP
+        p_pct('  BRANCH_AUTH_ROLE = ' || NVL(r.BRANCH_AUTH_ROLE,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Frequence reset mot de passe branche (BRANCH_PWD_RESET_FREQ, jours)');
+    FOR r IN (SELECT BRANCH_PWD_RESET_FREQ, COUNT(*) nb FROM SMTB_ROLE_MASTER
+              GROUP BY BRANCH_PWD_RESET_FREQ ORDER BY BRANCH_PWD_RESET_FREQ NULLS FIRST) LOOP
+        p_pct('  FREQ = ' || NVL(TO_CHAR(r.BRANCH_PWD_RESET_FREQ),'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Traces maker/checker des roles');
+    SELECT COUNT(DISTINCT MAKER_ID) INTO v_count FROM SMTB_ROLE_MASTER;
+    p_kv('  Nombre distinct de MAKER_ID', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT CHECKER_ID) INTO v_count FROM SMTB_ROLE_MASTER;
+    p_kv('  Nombre distinct de CHECKER_ID', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    p_pct('  MAKER_ID = CHECKER_ID (auto-validation)', v_count, v_total);
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER WHERE CHECKER_ID IS NULL OR CHECKER_ID = ' ';
+    p_pct('  Roles sans CHECKER_ID', v_count, v_total);
+
+    p_sub('Top 10 makers de roles');
+    FOR r IN (
+        SELECT MAKER_ID, nb FROM (
+            SELECT MAKER_ID, COUNT(*) nb FROM SMTB_ROLE_MASTER
+            GROUP BY MAKER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_pct('  MAKER_ID = ' || NVL(r.MAKER_ID,'(NULL)'), r.nb, v_total);
+    END LOOP;
+
+    p_sub('Echantillon 15 roles');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_ID,
+                   SUBSTR(ROLE_DESCRIPTION, 1, 55) descr,
+                   RECORD_STAT, AUTH_STAT,
+                   BRANCHES_ALLOWED, ACCCLASS_ALLOWED,
+                   BRANCH_VLT_ROLE, BRANCH_ROLE_CAT, BRANCH_ROLE_LEVEL
+            FROM SMTB_ROLE_MASTER
+            ORDER BY ROLE_ID
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        DBMS_OUTPUT.PUT_LINE('  --- ROLE=' || r.ROLE_ID || ' | ' || NVL(r.descr,'-') || ' ---');
+        p_kv('    Record/Auth', r.RECORD_STAT||' / '||r.AUTH_STAT);
+        p_kv('    Branches / AcClass allowed', NVL(r.BRANCHES_ALLOWED,'-')||' / '||NVL(r.ACCCLASS_ALLOWED,'-'));
+        p_kv('    Coffre / Cat / Level',
+             NVL(r.BRANCH_VLT_ROLE,'-')||' / '||NVL(r.BRANCH_ROLE_CAT,'-')||' / '||NVL(TO_CHAR(r.BRANCH_ROLE_LEVEL),'-'));
+    END LOOP;
+
+    -- ---------- SMTB_ROLE_BRANCHES ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_BRANCHES;
+    p_kv('Total affectations role <-> agence (SMTB_ROLE_BRANCHES)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Top 15 agences avec plus de roles attribues');
+        FOR r IN (
+            SELECT BRANCH, nb FROM (
+                SELECT BRANCH, COUNT(*) nb FROM SMTB_ROLE_BRANCHES
+                GROUP BY BRANCH ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  BRANCH = ' || NVL(r.BRANCH,'(NULL)'), TO_CHAR(r.nb) || ' role(s)');
+        END LOOP;
+
+        p_sub('Top 15 roles avec le plus d''agences');
+        FOR r IN (
+            SELECT ROLE_ID, nb FROM (
+                SELECT ROLE_ID, COUNT(*) nb FROM SMTB_ROLE_BRANCHES
+                GROUP BY ROLE_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  ROLE = ' || NVL(r.ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' agence(s)');
+        END LOOP;
+
+        p_sub('Echantillon 10 affectations');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT ROLE_ID, BRANCH FROM SMTB_ROLE_BRANCHES ORDER BY ROLE_ID, BRANCH
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  ROLE=' || r.ROLE_ID, 'BRANCH=' || r.BRANCH);
+        END LOOP;
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

@@ -1705,6 +1705,173 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-12. SMTB_MSGS_RIGHTS / SMTB_QUEUES / SMTB_QUEUE_RIGHTS /
+    --        SMTB_ACTION_CONTROLS / SMTB_STAGE_FIELD_VALUE
+    --        — Droits sur messages SWIFT, files et actions controlees
+    -- =========================================================
+    p_section('A-12. Droits messages SWIFT / files / actions / stages');
+
+    -- ---------- SMTB_MSGS_RIGHTS ----------
+    SELECT COUNT(*) INTO v_total FROM SMTB_MSGS_RIGHTS;
+    p_kv('Total droits messagerie (SMTB_MSGS_RIGHTS)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        SELECT COUNT(DISTINCT USER_ROLE_ID) INTO v_count FROM SMTB_MSGS_RIGHTS;
+        p_kv('  Beneficiaires distincts (user/role)', TO_CHAR(v_count));
+
+        p_sub('Type de beneficiaire (USER_ROLE_FLAG : U=User, R=Role)');
+        FOR r IN (SELECT USER_ROLE_FLAG, COUNT(*) nb FROM SMTB_MSGS_RIGHTS
+                  GROUP BY USER_ROLE_FLAG ORDER BY nb DESC) LOOP
+            p_pct('  FLAG = ' || NVL(r.USER_ROLE_FLAG,'(NULL)'), r.nb, v_total);
+        END LOOP;
+
+        p_sub('Decompte des droits accordes (Y) par action');
+        FOR a IN (
+            SELECT col FROM (
+                SELECT 'GENERATE' col, 1 ord FROM DUAL UNION ALL
+                SELECT 'HOLD',             2 FROM DUAL UNION ALL
+                SELECT 'CANCEL',           3 FROM DUAL UNION ALL
+                SELECT 'TEST_INPUT',       4 FROM DUAL UNION ALL
+                SELECT 'CHANGE_NODE',      5 FROM DUAL UNION ALL
+                SELECT 'CHANGE_ADDR',      6 FROM DUAL UNION ALL
+                SELECT 'RELEASE',          7 FROM DUAL UNION ALL
+                SELECT 'REINSTATE',        8 FROM DUAL UNION ALL
+                SELECT 'CHANGE_MEDIA',     9 FROM DUAL UNION ALL
+                SELECT 'CHANGE_PRIOR',    10 FROM DUAL UNION ALL
+                SELECT 'BRANCH_MOVE',     11 FROM DUAL UNION ALL
+                SELECT 'PRINT',           12 FROM DUAL UNION ALL
+                SELECT 'TEST_CHECK',      13 FROM DUAL UNION ALL
+                SELECT 'HOLD_AUTH',       14 FROM DUAL UNION ALL
+                SELECT 'CANCEL_AUTH',     15 FROM DUAL UNION ALL
+                SELECT 'RELEASE_AUTH',    16 FROM DUAL UNION ALL
+                SELECT 'REINSTATE_AUTH',  17 FROM DUAL UNION ALL
+                SELECT 'FT_UPLOAD',       18 FROM DUAL UNION ALL
+                SELECT 'LINK_CONTRACT',   19 FROM DUAL UNION ALL
+                SELECT 'MOVE_QUEUE',      20 FROM DUAL UNION ALL
+                SELECT 'CHANGE_MSG',      21 FROM DUAL UNION ALL
+                SELECT 'SUPPRESS',        22 FROM DUAL UNION ALL
+                SELECT 'DELETE_MSG',      23 FROM DUAL UNION ALL
+                SELECT 'AUTH_RIGHTS',     24 FROM DUAL ORDER BY ord
+            )
+        ) LOOP
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM SMTB_MSGS_RIGHTS WHERE ' || a.col || ' = ''Y'''
+                INTO v_count;
+            p_pct('  ' || RPAD(a.col, 20), v_count, v_total);
+        END LOOP;
+
+        p_sub('Top 10 beneficiaires avec le plus de droits cumulables');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT USER_ROLE_ID,
+                       (CASE WHEN GENERATE='Y' THEN 1 ELSE 0 END
+                      + CASE WHEN HOLD='Y'     THEN 1 ELSE 0 END
+                      + CASE WHEN CANCEL='Y'   THEN 1 ELSE 0 END
+                      + CASE WHEN RELEASE='Y'  THEN 1 ELSE 0 END
+                      + CASE WHEN REINSTATE='Y' THEN 1 ELSE 0 END
+                      + CASE WHEN CHANGE_MSG='Y' THEN 1 ELSE 0 END
+                      + CASE WHEN SUPPRESS='Y' THEN 1 ELSE 0 END
+                      + CASE WHEN DELETE_MSG='Y' THEN 1 ELSE 0 END
+                      + CASE WHEN AUTH_RIGHTS='Y' THEN 1 ELSE 0 END) AS score
+                FROM SMTB_MSGS_RIGHTS
+                ORDER BY score DESC
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  Beneficiaire = ' || r.USER_ROLE_ID, 'score=' || r.score || ' droit(s) sensibles');
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_QUEUES ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_QUEUES;
+    p_kv('Total files d''attente (SMTB_QUEUES)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Liste des files declarees');
+        FOR r IN (
+            SELECT QUEUE, SUBSTR(DESCRIPTION,1,50) descr,
+                   RECORD_STAT, AUTH_STAT, COLLECTION_QUEUE
+            FROM SMTB_QUEUES ORDER BY QUEUE
+        ) LOOP
+            p_kv('  ' || RPAD(r.QUEUE,20), NVL(r.descr,'-') || ' | RS/AS='||NVL(r.RECORD_STAT,'-')
+                 ||'/'||NVL(r.AUTH_STAT,'-')||' | COL='||NVL(r.COLLECTION_QUEUE,'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_QUEUE_RIGHTS ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_QUEUE_RIGHTS;
+    p_kv('Total droits sur files (SMTB_QUEUE_RIGHTS)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Repartition par file (QUEUE) et type beneficiaire');
+        FOR r IN (SELECT QUEUE, USER_ROLE_FLAG, COUNT(*) nb
+                  FROM SMTB_QUEUE_RIGHTS
+                  GROUP BY QUEUE, USER_ROLE_FLAG
+                  ORDER BY QUEUE, nb DESC) LOOP
+            p_kv('  QUEUE=' || r.QUEUE || ' | FLAG=' || NVL(r.USER_ROLE_FLAG,'-'),
+                 TO_CHAR(r.nb) || ' beneficiaire(s)');
+        END LOOP;
+
+        p_sub('Top 15 beneficiaires (USER_ROLE_ID)');
+        FOR r IN (
+            SELECT USER_ROLE_ID, nb FROM (
+                SELECT USER_ROLE_ID, COUNT(*) nb FROM SMTB_QUEUE_RIGHTS
+                GROUP BY USER_ROLE_ID ORDER BY nb DESC
+            ) WHERE ROWNUM <= 15
+        ) LOOP
+            p_kv('  Beneficiaire = ' || NVL(r.USER_ROLE_ID,'(NULL)'), TO_CHAR(r.nb) || ' file(s)');
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_ACTION_CONTROLS ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_ACTION_CONTROLS;
+    p_kv('Total controles d''actions (SMTB_ACTION_CONTROLS)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Liste des actions controlees');
+        FOR r IN (
+            SELECT SERIAL_NO, ACTION_NAME, ACTION_PARENT,
+                   SUBSTR(CONTROL_STRING, 1, 30) cs,
+                   SUBSTR(TYPE_STRING, 1, 20) ts
+            FROM SMTB_ACTION_CONTROLS ORDER BY SERIAL_NO
+        ) LOOP
+            p_kv('  SN=' || r.SERIAL_NO || ' | ACTION=' || RPAD(NVL(r.ACTION_NAME,'-'),18)
+                 || ' | PARENT=' || NVL(r.ACTION_PARENT,'-'),
+                 'CTRL=' || NVL(r.cs,'-') || ' | TYPE=' || NVL(r.ts,'-'));
+        END LOOP;
+    END IF;
+
+    -- ---------- SMTB_STAGE_FIELD_VALUE ----------
+    DBMS_OUTPUT.PUT_LINE('');
+    SELECT COUNT(*) INTO v_total FROM SMTB_STAGE_FIELD_VALUE;
+    p_kv('Total valeurs stage (SMTB_STAGE_FIELD_VALUE)', TO_CHAR(v_total));
+
+    IF v_total > 0 THEN
+        p_sub('Distribution par PROCESS_CODE / STAGE');
+        FOR r IN (SELECT PROCESS_CODE, COUNT(DISTINCT STAGE) nst, COUNT(*) nb
+                  FROM SMTB_STAGE_FIELD_VALUE
+                  GROUP BY PROCESS_CODE ORDER BY nb DESC) LOOP
+            p_kv('  PROC=' || NVL(r.PROCESS_CODE,'(NULL)'),
+                 TO_CHAR(r.nst) || ' stage(s) / ' || TO_CHAR(r.nb) || ' lignes');
+        END LOOP;
+
+        p_sub('Echantillon 10 lignes');
+        FOR r IN (
+            SELECT * FROM (
+                SELECT PROCESS_CODE, STAGE, PAYLOAD_FIELD,
+                       SUBSTR(XPATH_EXPRESSION, 1, 60) xp
+                FROM SMTB_STAGE_FIELD_VALUE
+                ORDER BY PROCESS_CODE, STAGE
+            ) WHERE ROWNUM <= 10
+        ) LOOP
+            p_kv('  PROC=' || r.PROCESS_CODE || ' | STAGE=' || r.STAGE,
+                 'FIELD=' || NVL(r.PAYLOAD_FIELD,'-') || ' | XPATH=' || NVL(r.xp,'-'));
+        END LOOP;
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

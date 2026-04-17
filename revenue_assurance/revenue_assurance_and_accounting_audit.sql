@@ -4685,6 +4685,202 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S21 -- Maker/Checker violations and self-authorization patterns
+    -- =================================================================
+    -- [F-200] MAKER_ID = CHECKER_ID (self-authorization).
+    -- [F-201] Recurring (maker, checker) pairings above threshold.
+    -- [F-202] Maker/checker cycles completed in < 5 seconds.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_200     PLS_INTEGER := 0;
+        l_n_201     PLS_INTEGER := 0;
+        l_n_202     PLS_INTEGER := 0;
+        l_maker     VARCHAR2(30);
+        l_checker   VARCHAR2(30);
+        l_trn_ref   VARCHAR2(30);
+        l_gl        VARCHAR2(30);
+        l_amt       NUMBER;
+        l_cnt       NUMBER;
+        l_secs      NUMBER;
+        l_sev       VARCHAR2(10);
+    BEGIN
+        IF NOT f_section_enabled('S21') THEN
+            log_info('Section S21 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S21',
+                'Maker/Checker violations and self-authorization');
+
+            -- [F-200] Self-authorized postings --------------------------
+            l_sql :=
+                'SELECT h.TRN_REF_NO, h.MAKER_ID, h.GL_CODE, '
+             || '       NVL(h.LCY_AMOUNT,0) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND h.MAKER_ID IS NOT NULL '
+             || '   AND h.CHECKER_ID IS NOT NULL '
+             || '   AND h.MAKER_ID = h.CHECKER_ID '
+             || '   AND (:p_branch IS NULL '
+             || '        OR h.BRANCH_CODE = :p_branch) '
+             || ' ORDER BY ABS(NVL(h.LCY_AMOUNT,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur INTO l_trn_ref, l_maker, l_gl, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_200 >= NVL(p_top_n, 50);
+
+                    l_sev := f_promote_severity('HIGH', ABS(NVL(l_amt, 0)));
+                    IF SUBSTR(NVL(l_gl,'0'),1,1) IN ('5','6','7') THEN
+                        l_sev := 'CRITICAL';
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S21',
+                        p_code       => 'RA-S21-F200',
+                        p_severity   => l_sev,
+                        p_message    => 'Self-authorization: maker=checker '
+                                     || 'on GL=' || NVL(l_gl,'?')
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_trn_ref,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'USR=' || f_mask_pii(l_maker)
+                    );
+                    l_n_200 := l_n_200 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S21 F-200 unavailable (MAKER_ID/'
+                        || 'CHECKER_ID may be missing): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-201] Recurring maker-checker pairings ------------------
+            l_sql :=
+                'SELECT h.MAKER_ID, h.CHECKER_ID, '
+             || '       COUNT(*) AS CNT, '
+             || '       SUM(NVL(h.LCY_AMOUNT,0)) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND h.MAKER_ID IS NOT NULL '
+             || '   AND h.CHECKER_ID IS NOT NULL '
+             || '   AND h.MAKER_ID <> h.CHECKER_ID '
+             || '   AND (:p_branch IS NULL '
+             || '        OR h.BRANCH_CODE = :p_branch) '
+             || ' GROUP BY h.MAKER_ID, h.CHECKER_ID '
+             || 'HAVING COUNT(*) >= 50 '
+             || ' ORDER BY COUNT(*) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur INTO l_maker, l_checker, l_cnt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_201 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S21',
+                        p_code       => 'RA-S21-F201',
+                        p_severity   =>
+                            CASE WHEN l_cnt > 500 THEN 'HIGH'
+                                 ELSE 'MEDIUM' END,
+                        p_message    => 'Recurring maker-checker pair: '
+                                     || 'cnt=' || TO_CHAR(l_cnt)
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => f_mask_pii(l_maker)
+                                     || '->' || f_mask_pii(l_checker),
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'PAIR_CNT=' || TO_CHAR(l_cnt)
+                    );
+                    l_n_201 := l_n_201 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S21 F-201 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-202] Maker/checker cycles completed < 5 seconds -------
+            l_sql :=
+                'SELECT h.TRN_REF_NO, h.MAKER_ID, h.CHECKER_ID, '
+             || '       NVL(h.LCY_AMOUNT,0) AS AMT, '
+             || '       (h.CHECKER_DT_STAMP - h.MAKER_DT_STAMP) * 86400 '
+             || '                                    AS SECS '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND h.MAKER_DT_STAMP IS NOT NULL '
+             || '   AND h.CHECKER_DT_STAMP IS NOT NULL '
+             || '   AND h.CHECKER_DT_STAMP >= h.MAKER_DT_STAMP '
+             || '   AND (h.CHECKER_DT_STAMP - h.MAKER_DT_STAMP) * 86400 '
+             || '       < 5 '
+             || '   AND h.MAKER_ID <> h.CHECKER_ID '
+             || ' ORDER BY (h.CHECKER_DT_STAMP - h.MAKER_DT_STAMP) ASC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur
+                     INTO l_trn_ref, l_maker, l_checker, l_amt, l_secs;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_202 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S21',
+                        p_code       => 'RA-S21-F202',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Auto-approval (<5s): secs='
+                                     || TO_CHAR(ROUND(l_secs, 2))
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_trn_ref,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'MK=' || f_mask_pii(l_maker)
+                                     || ' CK=' || f_mask_pii(l_checker)
+                    );
+                    l_n_202 := l_n_202 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S21 F-202 unavailable (timestamp '
+                        || 'columns may not exist): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-200 findings (self-auth)',     TO_CHAR(l_n_200));
+            print_kv('F-201 findings (recurring pair)', TO_CHAR(l_n_201));
+            print_kv('F-202 findings (cycle <5s)',     TO_CHAR(l_n_202));
+
+            print_section_footer('S21',
+                l_n_200 + l_n_201 + l_n_202);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S21', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S21', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

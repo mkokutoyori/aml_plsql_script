@@ -2049,6 +2049,156 @@ Chaque finding produit par §7.F ou §7.G DOIT citer le **principe comptable** q
 
 ---
 
+## 15. Dispositif anti-fraude
+
+### 15.1 Cadre et définition
+
+Au sens du présent BRD, une **fraude** désigne tout acte intentionnel visant à obtenir un avantage indu, direct ou indirect, au détriment de la banque, d'un client, ou de la réglementation. Elle peut être :
+
+- **Interne** (employé, dirigeant, prestataire) ;
+- **Externe** (client, contrepartie, tiers) ;
+- **Mixte** (collusion interne / externe).
+
+Le présent dispositif vise la **détection** des schémas de fraude via l'analyse des données FCUBS ; il ne se substitue pas à un programme de lutte contre la fraude (*fraud risk management*) couvrant aussi la prévention, la réponse et la formation.
+
+### 15.2 Articulation avec les autres dispositifs
+
+| Dispositif | Objet | Relation avec le présent script |
+|---|---|---|
+| **AML / CFT** | Blanchiment de capitaux, financement du terrorisme | Complémentaire — périmètre distinct ; certains constats (S29, S33) peuvent alimenter les cellules AML. |
+| **Contrôle interne permanent** | COSO / COBAC R-2009/02 | Amont — ce script intervient en détection, pas en prévention. |
+| **Audit interne** | Mission ponctuelles | Le rapport est un **outil** pour l'Audit Interne, pas un substitut. |
+| **Contrôle de gestion** | Reporting | Utilise les agrégats, pas les findings individuels. |
+| **Cybersécurité / SOC** | Intrusion, logs techniques | Complémentaire — ce script voit la couche métier, le SOC voit la couche technique. |
+
+### 15.3 Typologies de fraude couvertes
+
+Les contrôles §7.G matérialisent les typologies suivantes, synthétisées ici pour faciliter l'intelligence « par schéma » :
+
+| # | Typologie | Contrôle §7 associé | Indicateurs / red flags |
+|---|---|---|---|
+| **T1** | **Structuring** (fragmentation sous seuil) | S29 `[F-281]` | Montants juste sous un seuil d'autorisation/reporting ; répétitions rapprochées. |
+| **T2** | **Cycling / blanchiment comptable** | S29 `[F-280]` | Flux circulaires A→B→C→A sur fenêtre courte. |
+| **T3** | **Round-tripping** | S29 `[F-282]`, S30 `[F-290]` | Opération + annulation en < 24h sans justification. |
+| **T4** | **Kiting** (fraude de décalage) | S32 | Pics de solde sur dates d'arrêté. |
+| **T5** | **Backdating / post-dating** | S26 `[F-252]`, S30 `[F-292]` | `BKG_DATE` ≠ `TRN_DT`, écart > tolérance. |
+| **T6** | **Auto-authorisation (break SoD)** | S21 `[F-200]` | `MAKER_ID = CHECKER_ID`. |
+| **T7** | **Ghost user** | S22 | Utilisateur exité encore actif. |
+| **T8** | **Conflits d'intérêts** | S33 `[F-320/321]` | Employé opérant sur son propre compte ; waivers auto-appliqués. |
+| **T9** | **Compte-outil interne** | S33 `[F-323]` | Compte créé/clos sur courte durée par le même opérateur. |
+| **T10** | **Modification pré-débit** | S34 | RIB/bénéficiaire/contact modifié peu avant un gros débit. |
+| **T11** | **Réactivation frauduleuse** | S34 `[F-332]` | Dormancy removed → débit immédiat. |
+| **T12** | **Fee skimming** | S04, S10 | Waivers récurrents sur composantes de frais. |
+| **T13** | **Rate override non autorisé** | S10 `[F-091]` | Taux manuel < minimum produit. |
+| **T14** | **Écritures hors heures** | S31 | Postings weekend / nuit / férié concentrés. |
+| **T15** | **Contre-passations de masquage** | S30 `[F-291]` | Paires maker/checker récurrentes sur GL sensibles. |
+| **T16** | **Manipulation de résultat (fin de période)** | S17, S30 `[F-292]` | Écritures manuelles sur classes 6/7 concentrées les derniers jours. |
+| **T17** | **Abus de comptes d'attente** | S18, S30 | Dépôt prolongé sur 38x utilisé comme « purgatoire » de dissimulation. |
+| **T18** | **Collusion SoD** | S23, S21 `[F-201]` | Paires récurrentes maker/checker, combinaisons de rôles toxiques. |
+| **T19** | **Fraude FX (spread)** | S15 | `DEAL_RATE` proche du mid, frais annulés. |
+| **T20** | **Paramétrage rétroactif** | S27 | Changement de taux/grille affectant les périodes antérieures. |
+
+### 15.4 Processus d'escalade des findings de fraude
+
+Les findings de sévérité `CRITICAL` issus de §7.G DOIVENT suivre un **circuit d'escalade** distinct, en raison de leur caractère sensible :
+
+```
+  [Script génère F-NNN CRITICAL de §7.G]
+              |
+              v
+  [Audit Interne — triage sous 48h ouvrées]
+              |
+              +-- Faux positif — clôturé avec justification écrite
+              |
+              +-- A investiguer — ouvre un dossier Fraud Review
+                           |
+                           v
+                  [Cellule Fraud Risk + Compliance + Risk]
+                           |
+                           +-- Fraude avérée — saisine DG + RH / juridique
+                           +-- Erreur/anomalie — retour au correctif comptable
+```
+
+- **Confidentialité** : le rapport contenant des findings §7.G est diffusé selon une liste **restreinte** (Audit, Compliance, Risk, DG). Il n'est **pas** diffusé aux opérationnels.
+- **Non-divulgation** au suspect avant investigation.
+- **Traçabilité** : tout dossier ouvert reçoit un identifiant `FRD-YYYY-NNN` référencé dans le retour vers le script (métadonnée optionnelle en v2).
+
+### 15.5 Indicateurs globaux anti-fraude
+
+Le rapport DOIT exposer, dans `GLOBAL INDICATORS` (§8.6), un bloc dédié :
+
+```
+FRAUD DETECTION SUMMARY
+-----------------------
+ Findings §7.G  CRITICAL : NN   HIGH : MM
+ Typologies    covered    : NN / 20
+ Sensitive accounts hit   : NN  (of which CRITICAL : MM)
+ Employees flagged        : NN  (distinct user IDs)
+ Reference-data tampering : NN events
+```
+
+### 15.6 Paramètres dédiés anti-fraude
+
+| Paramètre | Usage | Défaut |
+|---|---|---|
+| `p_structuring_threshold_lcy` | Seuil en-dessous duquel détecter le structuring S29. | 10 000 000 LCY |
+| `p_reversal_window_hours` | Fenêtre des contre-passations suspectes S30. | 24 |
+| `p_business_hours_from` | Début heures ouvrées S31. | 07:00 |
+| `p_business_hours_to` | Fin heures ouvrées S31. | 19:00 |
+| `p_weekend_days` | Codes jours de week-end. | `'SAT,SUN'` |
+| `p_holiday_list` | Liste ad-hoc de jours fériés. | NULL |
+| `p_tamper_window_hours` | Fenêtre modification référentiel → débit S34. | 24 |
+| `p_cycle_max_length` | Longueur max des cycles détectés S29. | 5 |
+| `p_exclude_technical_users` | Liste d'USER_ID techniques à exclure des contrôles SoD/fraude. | Liste à fournir |
+
+### 15.7 Limites et précautions
+
+- **Faux positifs** — les schémas de fraude ont souvent des **homologues légitimes** (opération de régularisation, contre-passation technique batch, heures de travail étendues). Tout finding DOIT être investigué contradictoirement.
+- **Effet publication** — la communication sur la détection de fraude peut **alerter** un acteur fraudeur et détruire des preuves. La diffusion DOIT être maîtrisée.
+- **Droits des personnes** — les utilisateurs cités dans un finding ont droit à un traitement **équitable** ; les identifiants peuvent être masqués dans les versions non restreintes du rapport.
+- **Persistance** — ce script ne persiste **pas** les dossiers de fraude ; cela relève d'un outil GRC dédié.
+- **Pas de scoring prédictif** — la v1 ne fait pas de *machine learning* ; l'évaluation humaine reste centrale.
+
+### 15.8 Revue périodique du dispositif
+
+- **Trimestrielle** : revue des typologies couvertes vs typologies observées ; ajout de contrôles si besoin.
+- **Annuelle** : benchmark avec le *fraud landscape* CEMAC et les publications COBAC.
+- **Ad hoc** : après chaque incident avéré, un **post-mortem** évalue si le dispositif aurait dû détecter l'incident, et renforce §7.G en conséquence.
+
+### 15.9 Gouvernance dédiée
+
+Un **Comité Fraude** (mensuel) réunit : Audit Interne (pilote), Compliance, Risk Management, Sécurité SI, Commercial, RH. Il est :
+- destinataire des rapports contenant des findings §7.G `CRITICAL`/`HIGH` ;
+- responsable du triage et de l'ouverture des dossiers Fraud Review ;
+- garant de l'anonymisation / confidentialité.
+
+### 15.10 Synthèse Typologies ↔ Contrôles §7.G
+
+| Typologie | Contrôle | Sévérité typique |
+|---|---|---|
+| T1 Structuring | S29 | HIGH |
+| T2 Cycling | S29 | CRITICAL |
+| T3 Round-trip | S29, S30 | HIGH |
+| T4 Kiting | S32 | CRITICAL |
+| T5 Backdating | S26, S30 | HIGH |
+| T6 Auto-authorisation | S21 | CRITICAL |
+| T7 Ghost user | S22 | CRITICAL |
+| T8 Conflit d'intérêts | S33 | CRITICAL |
+| T9 Compte-outil | S33 | CRITICAL |
+| T10 Modification pré-débit | S34 | CRITICAL |
+| T11 Réactivation frauduleuse | S34 | CRITICAL |
+| T12 Fee skimming | S04, S10 | HIGH |
+| T13 Rate override | S10 | HIGH |
+| T14 Écritures hors heures | S31 | HIGH |
+| T15 Contre-passation de masquage | S30 | HIGH |
+| T16 Manipulation de résultat | S17, S30 | CRITICAL |
+| T17 Abus de suspense | S18, S30 | HIGH |
+| T18 Collusion SoD | S21, S23 | CRITICAL |
+| T19 Fraude FX | S15 | HIGH |
+| T20 Paramétrage rétroactif | S27 | HIGH |
+
+---
+
 
 ### Annexe A — Références
 

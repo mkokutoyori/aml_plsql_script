@@ -1872,7 +1872,98 @@ Le présent BRD entre en vigueur après signature ou validation documentée des 
 
 ---
 
-## Annexes
+## 13. Comptes sensibles et schémas comptables de référence
+
+### 13.1 Définition des « comptes sensibles »
+
+Un **compte sensible** est un compte (client ou GL) dont une anomalie a un impact **disproportionné** au regard de la matérialité habituelle — soit par sa nature comptable (charges/produits, résultat, fonds propres), soit par son usage fonctionnel (suspense, comptes internes, comptes dirigeants), soit par son profil de risque (utilisateurs techniques, mandats spéciaux).
+
+Tout contrôle des §7 DOIT **flagger** tout finding portant sur un compte sensible avec un **bonus de sévérité** (promotion automatique vers la sévérité supérieure).
+
+### 13.2 Registre des comptes sensibles
+
+| Catégorie | Exemples FCUBS / PCEC | Règle d'identification | Niveau |
+|---|---|---|---|
+| **Comptes de résultat** | GL de classes 6 et 7 | `GL code first digit IN ('6','7')` | HIGH+ |
+| **Suspense / attente** | GL PCEC/38, comptes `SUSPENSE_*` | Préfixe GL `38*` ou libellé contenant `SUSP`/`WAIT`/`PENDING`/`CLEARING` | CRITICAL |
+| **Comptes internes / bureau** | Comptes internal office, GL internes | `STTM_CUST_ACCOUNT.INTERNAL_FLAG = 'Y'` ou famille dédiée | CRITICAL |
+| **Fonds propres / réserves** | PCEC/5 | `GL code first digit = '5'` | CRITICAL |
+| **Comptes dirigeants / employés** | Comptes clients dont `CUSTOMER_NO` lié à un `USER_ID` | Jointure référentielle (§7.Z) | CRITICAL |
+| **Comptes « exceptionnels »** | Charges/produits exceptionnels, abandons | GL PCEC/67/77 ou libellés `EXCEPT` | HIGH+ |
+| **Comptes d'écart / régularisation** | PCEC/38, comptes `DIFF_*`, `ADJ_*` | Préfixe ou libellé | HIGH+ |
+| **Comptes de change interne** | Position FX, `PCEC/33`/équivalent interne | Famille GL dédiée | HIGH |
+| **Comptes NOSTRO / VOSTRO** | PCEC/1 (interbancaire) | Famille GL dédiée | HIGH |
+| **Comptes nouveaux ouverts récemment** | Tout compte ouvert < 30 jours | `STTM_CUST_ACCOUNT.BOOK_DATE > SYSDATE − 30` | MEDIUM+ |
+| **Comptes dormants puis réactivés** | Réactivation récente | Événement `DORMANCY_REMOVED` puis activité | HIGH+ |
+| **Comptes blocklist/watchlist** | Comptes désignés par Compliance | Liste externe (si fournie) | CRITICAL |
+
+> La **liste exhaustive** des GL sensibles propres à la banque (code exacts et libellés) DOIT être validée avec la Comptabilité, l'Audit Interne et le Contrôle de Gestion, puis documentée dans un fichier de référence `sensitive_accounts_register.md` (à produire). En attendant cette liste figée, le script applique les **règles d'identification heuristiques** ci-dessus.
+
+### 13.3 Schémas comptables de référence (accounting schemas)
+
+Un **schéma comptable** décrit la paire (ou le n-uplet) d'écritures attendues pour une opération donnée. Le script S24 compare les écritures réelles à ces schémas.
+
+> Convention d'écriture ci-dessous : `DR <GL ou famille>` / `CR <GL ou famille>` ; les montants sont en LCY sauf mention contraire.
+
+| Opération | Schéma attendu | Source FCUBS |
+|---|---|---|
+| **Octroi de crédit** (décaissement) | DR `PCEC/201` (créance client) / CR `PCEC/251` ou `PCEC/252` (compte client) | `CLTB_ACCOUNT_MASTER`, `ACTB_HISTORY` |
+| **Remboursement principal** | DR compte client / CR créance client | `CLTB_LIQ`, `ACTB_HISTORY` |
+| **Paiement intérêts débiteurs (loan)** | DR compte client / CR `PCEC/702` | `CLTB_LIQ`, `ICTB_LIQ_DETAILS` |
+| **Intérêts créditeurs (dépôt rémunéré)** | DR `PCEC/602` / CR compte client | `ICTB_LIQ_DETAILS` |
+| **Accrual intérêts perçus (ICNE actif)** | DR `PCEC/38` (régularisation) / CR `PCEC/702` | `ICTB_ACCRUALS_TEMP` |
+| **Accrual intérêts versés (ICNE passif)** | DR `PCEC/602` / CR `PCEC/38` | `ICTB_ACCRUALS_TEMP` |
+| **Facturation frais tenue de compte** | DR compte client / CR `PCEC/706` | `ICTB_LIQ_DETAILS` |
+| **Commission virement** | DR compte client / CR `PCEC/706` | `FTTB_CONTRACT_MASTER`, `ACTB_HISTORY` |
+| **SI exécution (transfert)** | DR compte émetteur / CR compte bénéficiaire | `SITB_EXEC_LOG`, `ACTB_HISTORY` |
+| **SI frais d'exécution** | DR compte émetteur / CR `PCEC/706` | `SITB_EXEC_LOG` |
+| **Change (FX deal clientèle)** | DR compte client devise 1 / CR compte client devise 2 + DR/CR `PCEC/706`/`PCEC/702` pour la marge | `FXTB_CONTRACT_MASTER` |
+| **Revalorisation FX** | DR/CR GL FCY / CR/DR `PCEC/7` ou `PCEC/6` (gain/perte de reval) | Batch EOD |
+| **Écriture manuelle de régularisation** | Toute combinaison documentée par `TRN_CODE` manuel | `MOTB_CONTRACT_MASTER` |
+| **Passage en douteux / provisionnement** | DR `PCEC/29` / CR `PCEC/201` puis DR `PCEC/6` (dotation) / CR `PCEC/29` (provision) | Selon circulaire provisionnement |
+| **Apurement compte suspense** | DR/CR `PCEC/38` / CR/DR GL cible final (classe 1/2/6/7) | Écritures d'apurement |
+
+### 13.4 Formalisation du registre des schémas
+
+Pour être exploitable par S24, chaque schéma DOIT être formalisé selon la structure suivante (fichier interne `accounting_schemes_register.md`) :
+
+```
+SCHEMA_ID        : LOAN_DISBURSE
+TRN_CODE(S)      : LOAN, DISB, CL01
+LEG_1  DR_CR=DR  GL_FAMILY=PCEC/201     SIGN=POS
+LEG_2  DR_CR=CR  GL_FAMILY=PCEC/251|252 SIGN=POS
+AMOUNT_RULE      : LEG_1.LCY = LEG_2.LCY
+BRANCH_RULE      : LEG_1.BRANCH = LEG_2.BRANCH
+VALUE_DATE_RULE  : LEG_1.VALUE_DATE = LEG_2.VALUE_DATE
+```
+
+Le script S24 lit (en mémoire / hard-codé en première itération) l'ensemble de ces schémas et flagge toute écriture qui **ne matche aucun** schéma connu, ou qui **matche un schéma mais viole une règle** (montant, agence, value date).
+
+### 13.5 Méthode de contrôle de conformité des schémas
+
+1. **Énumération** des `TRN_REF_NO` sur la période `[p_date_from, p_date_to]`.
+2. **Groupement** des jambes d'un même `TRN_REF_NO` (DR + CR).
+3. **Identification** du schéma attendu via `TRN_CODE` + produit.
+4. **Vérification** des GL (via préfixe PCEC) et des règles (montants, dates, agences).
+5. **Émission** d'un finding par violation (`[F-230/231/232]`).
+
+> En l'absence de schéma formalisé pour un `TRN_CODE` donné, le script **n'émet pas** de violation arbitraire : il émet un finding `INFO` signalant l'absence de schéma référencé, à traiter en v1.x.
+
+### 13.6 Gouvernance du registre
+
+- Le **registre des comptes sensibles** (§13.2) est maintenu par Comptabilité + Audit Interne + Contrôle de Gestion ; il DOIT être revu **trimestriellement**.
+- Le **registre des schémas comptables** (§13.3) est maintenu par Comptabilité + équipe FCUBS ; il DOIT être revu **après chaque upgrade** ou changement de paramétrage produit.
+- Toute **modification** des registres DOIT être horodatée, versionnée et justifiée.
+
+### 13.7 Articulation avec les contrôles §7
+
+| Registre | Sections §7 directement concernées |
+|---|---|
+| Comptes sensibles | S01, S04, S10, S11, S17, S18, S20, S21, S22, S23, S29, S30, S31, S32, S33, S34 (promotion automatique de sévérité) |
+| Schémas comptables | S24 (principal), S16 (cohérence), S25 (non-compensation), S28 (nature GL) |
+
+---
+
 
 ### Annexe A — Références
 

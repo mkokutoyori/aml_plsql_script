@@ -1964,9 +1964,10 @@ BEGIN
               FROM LDTB_CONTRACT_MASTER GROUP BY CONTRACT_DERIVED_STATUS ORDER BY nb DESC) LOOP
         print_kv('  CONTRACT_DERIVED_STATUS = ' || r.s, TO_CHAR(r.nb));
     END LOOP;
-    FOR r IN (SELECT NVL(USER_DEFINED_STATUS,'(NULL)') s, COUNT(*) nb
-              FROM LDTB_CONTRACT_MASTER GROUP BY USER_DEFINED_STATUS ORDER BY nb DESC
-              FETCH FIRST 15 ROWS ONLY) LOOP
+    FOR r IN (SELECT * FROM (
+                SELECT NVL(USER_DEFINED_STATUS,'(NULL)') s, COUNT(*) nb
+                FROM LDTB_CONTRACT_MASTER GROUP BY USER_DEFINED_STATUS ORDER BY nb DESC
+              ) WHERE ROWNUM <= 15) LOOP
         print_kv('  USER_DEFINED_STATUS = ' || r.s, TO_CHAR(r.nb));
     END LOOP;
     FOR r IN (SELECT NVL(SETTLEMENT_STATUS,'(NULL)') s, COUNT(*) nb
@@ -3721,9 +3722,9 @@ BEGIN
     SELECT NVL(SUM(ACY_ACCRUED_CR_IC),0) INTO v_num FROM STTM_CUST_ACCOUNT
     WHERE NVL(ACY_ACCRUED_CR_IC,0) <> 0;
     print_kv('  Σ ACY_ACCRUED_CR_IC (intérêts clients à payer)', TO_CHAR(v_num));
-    print_kv('  Net à percevoir (DR - CR)', TO_CHAR(
-        (SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) - NVL(SUM(ACY_ACCRUED_CR_IC),0)
-         FROM STTM_CUST_ACCOUNT)));
+    SELECT NVL(SUM(ACY_ACCRUED_DR_IC),0) - NVL(SUM(ACY_ACCRUED_CR_IC),0)
+      INTO v_num FROM STTM_CUST_ACCOUNT;
+    print_kv('  Net à percevoir (DR - CR)', TO_CHAR(v_num));
 
     -- 14.3 Débiteurs permanents sans TOD_LIMIT — RA leakage potentiel
     DBMS_OUTPUT.PUT_LINE('');

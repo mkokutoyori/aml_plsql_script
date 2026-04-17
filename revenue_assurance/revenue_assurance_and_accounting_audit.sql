@@ -714,9 +714,161 @@ BEGIN
 
     log_info('Section 3 (init & echo) completed. run_id=' || v_run_id);
 
+    -- =================================================================
+    -- SECTION 4 - VERIFICATION DE L'ENVIRONNEMENT
+    -- -----------------------------------------------------------------
+    -- 4.1 Version Oracle : imprime la banniere V$VERSION. L'absence
+    --     d'acces est degradee en [WARN] (le script continue).
+    -- 4.2 Presence / privileges SELECT sur les tables FCUBS attendues.
+    --     - Liste "requise"   : manquant => [WARN] + couverture reduite.
+    --     - Liste "optionnelle" : manquant => [INFO] (les sections
+    --       concernees seront automatiquement neutralisees).
+    -- 4.3 Resume de couverture (nb tables OK/miss) + origine de la
+    --     date metier.
+    -- NB : sonde = 'SELECT COUNT(*) FROM <t> WHERE ROWNUM <= 0'. Cette
+    -- sonde ne ramene jamais de ligne de donnees (ROWNUM <= 0) et reste
+    -- instantanee, ce qui la rend safe pour un audit read-only.
+    -- =================================================================
+    DECLARE
+        l_tab_req     SYS.ODCIVARCHAR2LIST;
+        l_tab_opt     SYS.ODCIVARCHAR2LIST;
+        l_status      VARCHAR2(30);
+        l_n_req_ok    PLS_INTEGER := 0;
+        l_n_req_miss  PLS_INTEGER := 0;
+        l_n_opt_ok    PLS_INTEGER := 0;
+        l_n_opt_miss  PLS_INTEGER := 0;
+        l_banner      VARCHAR2(200);
+
+        -- f_probe : execute une sonde SELECT COUNT(*) sur une table.
+        -- Renvoie 'OK' si accessible, 'MISSING' / 'NO_PRIV' /
+        -- 'STALE_LINK' / 'ERR<code>' sinon.
+        FUNCTION f_probe(p_tab IN VARCHAR2) RETURN VARCHAR2 IS
+            l_x PLS_INTEGER;
+        BEGIN
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM ' || p_tab || ' WHERE ROWNUM <= 0'
+                INTO l_x;
+            RETURN 'OK';
+        EXCEPTION
+            WHEN OTHERS THEN
+                IF SQLCODE = -942 THEN
+                    RETURN 'MISSING';
+                ELSIF SQLCODE = -1031 THEN
+                    RETURN 'NO_PRIV';
+                ELSIF SQLCODE = -980 THEN
+                    RETURN 'STALE_LINK';
+                ELSE
+                    RETURN 'ERR' || TO_CHAR(SQLCODE);
+                END IF;
+        END f_probe;
+    BEGIN
+        IF NOT f_section_enabled('ENV') THEN
+            log_info('Section ENV skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('ENV', 'Environment verification');
+
+            -- 4.1 Version Oracle ---------------------------------------
+            l_banner := safe_scalar_varchar2('ENV',
+                'SELECT BANNER FROM V$VERSION WHERE BANNER LIKE ''Oracle%'' AND ROWNUM = 1');
+            IF l_banner IS NULL THEN
+                l_banner := safe_scalar_varchar2('ENV',
+                    'SELECT PRODUCT || '' '' || VERSION '
+                    || ' FROM PRODUCT_COMPONENT_VERSION '
+                    || ' WHERE PRODUCT LIKE ''Oracle%'' AND ROWNUM = 1');
+            END IF;
+            print_kv('Oracle banner', NVL(l_banner, '<unknown>'));
+            IF l_banner IS NULL THEN
+                log_warn('Oracle version banner unavailable (V$VERSION privilege missing?).');
+            END IF;
+
+            -- 4.2.a Tables FCUBS REQUISES ------------------------------
+            l_tab_req := SYS.ODCIVARCHAR2LIST(
+                'SMTB_BANK_PARAMETERS',        -- date metier
+                'STTM_CUST_ACCOUNT',           -- comptes (detail)
+                'STTM_CUST_ACCOUNT_MASTER',    -- comptes (master)
+                'STTM_CUSTOMER',               -- clients
+                'STTM_CURRENCY',               -- devises
+                'STTM_BRANCH',                 -- agences
+                'GLTM_MASTER',                 -- referentiel GL
+                'GLTB_GL_BAL',                 -- soldes GL
+                'ACTB_HISTORY'                 -- lignes comptables
+            );
+            FOR i IN 1 .. l_tab_req.COUNT LOOP
+                l_status := f_probe(l_tab_req(i));
+                IF l_status = 'OK' THEN
+                    l_n_req_ok := l_n_req_ok + 1;
+                    print_kv('REQ ' || l_tab_req(i), 'OK');
+                ELSE
+                    l_n_req_miss := l_n_req_miss + 1;
+                    print_kv('REQ ' || l_tab_req(i), l_status);
+                    log_warn('Required FCUBS object not accessible: '
+                        || l_tab_req(i) || ' status=' || l_status);
+                END IF;
+            END LOOP;
+
+            -- 4.2.b Tables FCUBS OPTIONNELLES --------------------------
+            l_tab_opt := SYS.ODCIVARCHAR2LIST(
+                'STTM_ACCOUNT_CLASS',
+                'STTM_PRODUCT',
+                'CLTB_CONTRACT_MASTER',
+                'CLTB_SCHEDULE',
+                'CLTB_SCHEDULES_HIST',
+                'LDTB_CONTRACT_MASTER',
+                'LDTB_SCHEDULE',
+                'SITB_CONTRACTS_MASTER',
+                'SITB_EXECUTION_LOG',
+                'ICTB_ACC_LIQ_DETAILS',
+                'ICTB_LIQUIDATION',
+                'ICTB_ACCOUNTS',
+                'MOTB_CONTRACT_MASTER',
+                'FXTB_CONTRACT_MASTER',
+                'SMTB_USER',
+                'SMTB_USER_ROLE',
+                'SMTB_ROLE_DETAIL',
+                'ACVW_ALL_AC_ENTRIES'
+            );
+            FOR i IN 1 .. l_tab_opt.COUNT LOOP
+                l_status := f_probe(l_tab_opt(i));
+                IF l_status = 'OK' THEN
+                    l_n_opt_ok := l_n_opt_ok + 1;
+                ELSE
+                    l_n_opt_miss := l_n_opt_miss + 1;
+                    log_info('Optional FCUBS object not accessible: '
+                        || l_tab_opt(i) || ' status=' || l_status);
+                END IF;
+            END LOOP;
+
+            -- 4.3 Synthese ---------------------------------------------
+            print_kv('Required tables OK',
+                TO_CHAR(l_n_req_ok) || '/' || TO_CHAR(l_tab_req.COUNT));
+            print_kv('Required tables missing', TO_CHAR(l_n_req_miss));
+            print_kv('Optional tables OK',
+                TO_CHAR(l_n_opt_ok) || '/' || TO_CHAR(l_tab_opt.COUNT));
+            print_kv('Optional tables missing', TO_CHAR(l_n_opt_miss));
+            print_kv('Business date source',
+                CASE WHEN p_as_of_date IS NOT NULL THEN 'p_as_of_date (override)'
+                     ELSE 'SMTB_BANK_PARAMETERS or SYSDATE fallback'
+                END);
+
+            IF l_n_req_miss > 0 THEN
+                log_warn('Required FCUBS tables are missing; audit coverage is reduced.');
+            END IF;
+
+            print_section_footer('ENV', 0);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('ENV', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('ENV', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error during init/echo (section 3): '
+        DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '
             || SUBSTR(SQLERRM, 1, 400));
 END;
 /

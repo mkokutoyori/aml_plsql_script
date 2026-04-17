@@ -1019,6 +1019,123 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S01 - DECOUVERTS NON CAPTURES (overdraft leakage)
+    -- -----------------------------------------------------------------
+    -- Objectif :
+    --   Detecte les comptes clients presentant un solde debiteur (en
+    --   LCY) a la date d'arrete, dont la classe de compte n'est pas
+    --   configuree comme "decouvert autorise". Ce sont des positions
+    --   ou la banque devrait percevoir un interet debiteur mais ou la
+    --   configuration produit l'empeche (leakage).
+    --
+    -- Impact indicatif (en LCY) :
+    --   approx_leakage = ABS(BAL_LCY) * 0.05 * (nb_jours_periode / 360)
+    --
+    --   0.05   : taux annuel indicatif (cf. BRD §7.A).
+    --   360    : base jours standard marche CEMAC.
+    --   L'impact reel depend du produit IC effectivement configure ;
+    --   les findings sont a confronter aux extractions ICTB_*.
+    -- =================================================================
+    DECLARE
+        l_cur        SYS_REFCURSOR;
+        l_ac_no      VARCHAR2(30);
+        l_cust_no    VARCHAR2(20);
+        l_branch     VARCHAR2(10);
+        l_ccy        VARCHAR2(3);
+        l_accl       VARCHAR2(10);
+        l_bal_lcy    NUMBER;
+        l_n_findings PLS_INTEGER := 0;
+        l_days       NUMBER;
+        l_impact     NUMBER;
+        l_rate_ind   CONSTANT NUMBER := 0.05;
+        l_base       CONSTANT NUMBER := 360;
+        l_sql        VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S01') THEN
+            log_info('Section S01 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S01',
+                'Overdraft leakage (uncaptured debit balances)');
+
+            l_days := GREATEST(1, (v_date_to - v_date_from) + 1);
+
+            -- Requete dynamique : evite la resolution de STTM_CUST_ACCOUNT
+            -- au PARSE du bloc (defensif - cf. §4 ENV).
+            l_sql :=
+                'SELECT CUST_AC_NO, CUST_NO, BRANCH_CODE, CCY, ACCOUNT_CLASS, '
+             || '       NVL(LCY_CURR_BALANCE,0) AS BAL_LCY '
+             || '  FROM STTM_CUST_ACCOUNT '
+             || ' WHERE NVL(LCY_CURR_BALANCE,0) < 0 '
+             || '   AND UPPER(NVL(ACCOUNT_CLASS,''?'')) NOT IN '
+             || '       (''OD'',''OVDFT'',''TOD'',''ODRA'',''ODCORP'',''ODSME'') '
+             || '   AND (:p_branch IS NULL OR BRANCH_CODE = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR CUST_NO     = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR CUST_AC_NO  = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR CCY         = :p_ccy) '
+             || ' ORDER BY ABS(NVL(LCY_CURR_BALANCE,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_cust_no, l_branch, l_ccy, l_accl, l_bal_lcy;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_findings >= NVL(p_top_n, 50);
+
+                    l_impact := ROUND(
+                        ABS(l_bal_lcy) * l_rate_ind * l_days / l_base, 2);
+
+                    IF l_impact >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S01',
+                            p_code       => 'RA-S01-01',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'Negative LCY balance on non-overdraft '
+                                         || 'account_class=' || NVL(l_accl, '?')
+                                         || ' ccy=' || NVL(l_ccy, '?')
+                                         || ' bal=' || f_fmt_lcy(l_bal_lcy)
+                                         || ' days=' || TO_CHAR(l_days),
+                            p_entity     => l_ac_no,
+                            p_impact_lcy => l_impact,
+                            p_evidence   => 'BR=' || NVL(l_branch, '?')
+                                         || ' CUST=' || NVL(f_mask_pii(l_cust_no), '?')
+                        );
+                        l_n_findings := l_n_findings + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S01',
+                        'Main query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('Indicative rate',       TO_CHAR(l_rate_ind));
+            print_kv('Day-count base',        TO_CHAR(l_base));
+            print_kv('Period length (days)',  TO_CHAR(l_days));
+            print_kv('Top-N cap',             TO_CHAR(NVL(p_top_n, 50)));
+
+            print_section_footer('S01', l_n_findings);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S01', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S01', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

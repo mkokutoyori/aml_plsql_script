@@ -1456,6 +1456,190 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S04 - ACCOUNT CHARGES WAIVED BEYOND POLICY THRESHOLDS
+    -- -----------------------------------------------------------------
+    -- [F-030] Waivers recurrents par compte (volume de remise).
+    -- [F-032] Concentration de waivers par utilisateur (top N).
+    --
+    -- Sources :
+    --   - ICTB_LIQ_DETAILS : colonne waiver (nom variable selon version
+    --                        FCUBS ; on essaie WAIVED_AMOUNT puis
+    --                        WAIVER_AMOUNT ; log_warn si aucune ne
+    --                        repond).
+    --   - Periode : LIQUIDATION_DATE / VALUE_DATE dans [date_from; date_to].
+    --
+    -- Impact LCY : somme waived.
+    -- Severite : MEDIUM, HIGH si ratio waived / total > 30 % ou
+    -- concentration utilisateur > 50 %.
+    -- =================================================================
+    DECLARE
+        l_cur        SYS_REFCURSOR;
+        l_col_waiver VARCHAR2(30) := NULL;
+        l_sql        VARCHAR2(4000);
+        l_key        VARCHAR2(200);
+        l_sum_w      NUMBER;
+        l_sum_t      NUMBER;
+        l_ratio      NUMBER;
+        l_n          NUMBER;
+        l_n_030      PLS_INTEGER := 0;
+        l_n_032      PLS_INTEGER := 0;
+        l_sev        VARCHAR2(10);
+
+        -- f_col_exists : detecte l'existence d'une colonne sur une
+        -- table accessible. Utilise ALL_TAB_COLUMNS.
+        FUNCTION f_col_exists(p_tab IN VARCHAR2, p_col IN VARCHAR2)
+            RETURN BOOLEAN IS
+            l_x PLS_INTEGER;
+        BEGIN
+            EXECUTE IMMEDIATE
+                'SELECT COUNT(*) FROM ALL_TAB_COLUMNS '
+                || ' WHERE TABLE_NAME = :1 AND COLUMN_NAME = :2'
+                INTO l_x USING UPPER(p_tab), UPPER(p_col);
+            RETURN (NVL(l_x, 0) > 0);
+        EXCEPTION
+            WHEN OTHERS THEN
+                RETURN FALSE;
+        END f_col_exists;
+    BEGIN
+        IF NOT f_section_enabled('S04') THEN
+            log_info('Section S04 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S04',
+                'Charge waivers beyond policy thresholds');
+
+            -- Detection du nom de colonne waiver reel.
+            IF f_col_exists('ICTB_LIQ_DETAILS', 'WAIVED_AMOUNT') THEN
+                l_col_waiver := 'WAIVED_AMOUNT';
+            ELSIF f_col_exists('ICTB_LIQ_DETAILS', 'WAIVER_AMOUNT') THEN
+                l_col_waiver := 'WAIVER_AMOUNT';
+            ELSIF f_col_exists('ICTB_LIQ_DETAILS', 'WAIVED_AMT') THEN
+                l_col_waiver := 'WAIVED_AMT';
+            END IF;
+
+            IF l_col_waiver IS NULL THEN
+                log_warn('S04 F-030/F-032: no waiver column on ICTB_LIQ_DETAILS'
+                    || ' (try WAIVED_AMOUNT / WAIVER_AMOUNT / WAIVED_AMT).');
+            ELSE
+                print_kv('Waiver column detected', l_col_waiver);
+
+                -- [F-030] Top waivers par compte ----------------------
+                l_sql :=
+                    'SELECT d.ACCOUNT, SUM(NVL(d.' || l_col_waiver || ',0)) AS W_LCY, '
+                 || '       SUM(NVL(d.AMOUNT,0)) AS T_LCY, COUNT(*) AS N '
+                 || '  FROM ICTB_LIQ_DETAILS d '
+                 || ' WHERE NVL(d.' || l_col_waiver || ',0) > 0 '
+                 || '   AND NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) '
+                 || '       BETWEEN :d1 AND :d2 '
+                 || '   AND (:p_acc IS NULL OR d.ACCOUNT = :p_acc) '
+                 || ' GROUP BY d.ACCOUNT '
+                 || ' ORDER BY SUM(NVL(d.' || l_col_waiver || ',0)) DESC';
+
+                BEGIN
+                    OPEN l_cur FOR l_sql USING
+                        v_date_from, v_date_to,
+                        p_account_no, p_account_no;
+
+                    LOOP
+                        FETCH l_cur INTO l_key, l_sum_w, l_sum_t, l_n;
+                        EXIT WHEN l_cur%NOTFOUND
+                               OR l_n_030 >= NVL(p_top_n, 50);
+
+                        l_ratio := CASE WHEN NVL(l_sum_t,0) = 0 THEN NULL
+                                        ELSE ROUND(100 * l_sum_w
+                                                   / NULLIF(l_sum_t, 0), 2)
+                                   END;
+                        l_sev := CASE WHEN NVL(l_ratio, 0) > 30 THEN 'HIGH'
+                                      ELSE 'MEDIUM' END;
+
+                        IF l_sum_w >= NVL(p_materiality_lcy, 0) THEN
+                            print_finding(
+                                p_section    => 'S04',
+                                p_code       => 'RA-S04-F030',
+                                p_severity   => l_sev,
+                                p_message    => 'Recurring waivers on charges: waived='
+                                             || f_fmt_lcy(l_sum_w)
+                                             || ' total=' || f_fmt_lcy(l_sum_t)
+                                             || ' ratio=' || NVL(TO_CHAR(l_ratio,
+                                                  'FM990.00','NLS_NUMERIC_CHARACTERS=''.,'''),
+                                                  'N/A') || '%'
+                                             || ' n=' || TO_CHAR(l_n),
+                                p_entity     => l_key,
+                                p_impact_lcy => l_sum_w,
+                                p_evidence   => 'col=' || l_col_waiver
+                            );
+                            l_n_030 := l_n_030 + 1;
+                        END IF;
+                    END LOOP;
+                    CLOSE l_cur;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        IF l_cur%ISOPEN THEN
+                            CLOSE l_cur;
+                        END IF;
+                        log_error('S04',
+                            'F-030 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+                END;
+
+                -- [F-032] Concentration par utilisateur ---------------
+                l_sql :=
+                    'SELECT d.MAKER_ID, SUM(NVL(d.' || l_col_waiver || ',0)) AS W_LCY, '
+                 || '       COUNT(*) AS N '
+                 || '  FROM ICTB_LIQ_DETAILS d '
+                 || ' WHERE NVL(d.' || l_col_waiver || ',0) > 0 '
+                 || '   AND NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) '
+                 || '       BETWEEN :d1 AND :d2 '
+                 || ' GROUP BY d.MAKER_ID '
+                 || ' ORDER BY SUM(NVL(d.' || l_col_waiver || ',0)) DESC';
+
+                BEGIN
+                    OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                    LOOP
+                        FETCH l_cur INTO l_key, l_sum_w, l_n;
+                        EXIT WHEN l_cur%NOTFOUND
+                               OR l_n_032 >= NVL(p_top_n, 50);
+
+                        IF l_sum_w >= NVL(p_materiality_lcy, 0) THEN
+                            print_finding(
+                                p_section    => 'S04',
+                                p_code       => 'RA-S04-F032',
+                                p_severity   => 'MEDIUM',
+                                p_message    => 'Waiver concentration by user: waived='
+                                             || f_fmt_lcy(l_sum_w)
+                                             || ' n=' || TO_CHAR(l_n),
+                                p_entity     => l_key,
+                                p_impact_lcy => l_sum_w,
+                                p_evidence   => 'col=' || l_col_waiver
+                            );
+                            l_n_032 := l_n_032 + 1;
+                        END IF;
+                    END LOOP;
+                    CLOSE l_cur;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        IF l_cur%ISOPEN THEN
+                            CLOSE l_cur;
+                        END IF;
+                        log_error('S04',
+                            'F-032 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+                END;
+            END IF;
+
+            print_kv('F-030 findings (per account)', TO_CHAR(l_n_030));
+            print_kv('F-032 findings (per user)',    TO_CHAR(l_n_032));
+
+            print_section_footer('S04', l_n_030 + l_n_032);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S04', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S04', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

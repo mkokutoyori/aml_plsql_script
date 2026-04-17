@@ -511,3 +511,92 @@ Quelques invariants qui reviennent partout :
 | `MODULE` | Module d'origine (`LD`, `CL`, `IC`, `CH`, `GL`, `MM`, `FX`, ...) |
 
 Ces patterns, bien maîtrisés, permettent d'anticiper les colonnes présentes sans avoir à systématiquement interroger `fcubs.csv`.
+
+---
+
+## 6. Approche séquentielle & exploration préalable
+
+### 6.1 Travail séquentiel, sans sous-agent
+
+La rédaction des scripts d'audit se fait **strictement en séquentiel**, sans lancer d'agents parallèles (`Agent`, `subagent_type`, etc.). Plusieurs raisons :
+
+- **Reproductibilité** : chaque étape doit être rejouable à l'identique à partir de l'historique Git. Un sous-agent introduit de l'incertitude et des décisions non-tracées.
+- **Contexte partagé** : la rédaction d'une section d'audit dépend des décisions prises dans les sections précédentes (conventions de nommage, paramètres, helpers). Un sous-agent ignore ce contexte.
+- **Responsabilité** : le développeur principal garde la main sur chaque décision d'architecture, et peut y revenir librement.
+- **Lisibilité du Git log** : un commit = une décision attribuable.
+
+**Règle** : toute la rédaction se fait dans le thread principal, via les outils Read/Edit/Write/Bash. Les agents spécialisés ne sont utilisés que pour des tâches annexes (revue indépendante, recherche documentaire large).
+
+### 6.2 Un commit = une section
+
+Chaque section rédigée — qu'il s'agisse d'un chapitre du BRD, d'une section du script d'audit, ou d'une partie du document de bonnes pratiques — donne lieu à :
+
+1. Une écriture/édition de fichier isolée.
+2. Un commit Git avec message préfixé du nom du livrable et du numéro de section (ex. `bonnes_pratiques §5: Verification du dictionnaire`).
+3. Un push immédiat sur la branche de développement.
+
+Cela permet au client de suivre l'avancement, de commenter section par section, et de revenir en arrière sans tout perdre en cas de désaccord.
+
+### 6.3 Exploration préalable — workflow
+
+Avant d'écrire un contrôle d'audit ambitieux, la donnée cible doit être comprise. Si une hypothèse n'est pas vérifiable par la seule lecture de `fcubs.csv` (distribution des valeurs, qualité des données, présence effective de patterns), alors :
+
+**Workflow standard** :
+
+1. **Je rédige un mini-script d'exploration** (`explore_<sujet>.sql`) — 30 à 100 lignes — qui répond à UNE question précise.
+2. **Je livre ce script** au client avec une consigne claire sur ce qu'il doit faire tourner et où poster la sortie.
+3. **Le client exécute** et me renvoie la sortie (fichier texte).
+4. **J'analyse** la sortie, j'ajuste mes hypothèses.
+5. **Je rédige le contrôle d'audit final** en connaissance de cause.
+
+Exemple typique : avant d'auditer les taux anormaux sur les prêts, je ne sais pas si la colonne `NEGOTIATED_RATE` contient des valeurs décimales (0.12 = 12 %) ou en pourcentage (12). Plutôt que de deviner, je demande :
+
+```sql
+-- explore_negotiated_rate.sql
+SELECT MIN(NEGOTIATED_RATE), MAX(NEGOTIATED_RATE),
+       AVG(NEGOTIATED_RATE), MEDIAN(NEGOTIATED_RATE),
+       COUNT(*), COUNT(NEGOTIATED_RATE)
+FROM CLTB_ACCOUNT_COMPONENTS
+WHERE NEGOTIATED_RATE IS NOT NULL;
+```
+
+Le client retourne la sortie, je vois `MIN=0.02, MAX=0.35`, je sais donc que les taux sont en **décimal**, et j'écris mon contrôle en conséquence (`> 0.25` pour « taux > 25 % »).
+
+### 6.4 Mini-scripts d'exploration — conventions
+
+Les mini-scripts d'exploration ad-hoc :
+
+- Sont placés dans `revenue_assurance/exploration/` (créer le sous-répertoire si besoin).
+- Sont nommés `explore_<sujet>.sql` (ex. `explore_negotiated_rate.sql`).
+- Ne modifient **jamais** la base (pas de DML, pas de DDL).
+- Tiennent sur un seul écran si possible.
+- Imprimes les résultats avec `DBMS_OUTPUT` ou `SELECT ... FROM DUAL` pour lecture directe en SQL*Plus.
+- Sont committés dans Git (traçabilité des questions posées).
+
+Une fois la question résolue, le mini-script reste dans le repo comme documentation vivante.
+
+### 6.5 Ne pas sur-anticiper
+
+Pas d'abstractions prématurées. Pas de structures génériques sur-paramétrables en prévision de besoins futurs. Le script doit répondre au besoin **actuel** de façon claire et directe. Si une abstraction devient utile, elle sera introduite au moment où le besoin apparaît, pas avant.
+
+### 6.6 Documenter les hypothèses non vérifiées
+
+Si, faute de temps ou d'accès à la base, une hypothèse n'est pas vérifiée empiriquement, elle doit apparaître en **commentaire explicite** dans le script, précédée du mot-clé `-- ASSUMPTION:` :
+
+```sql
+-- ASSUMPTION: NEGOTIATED_RATE est exprimé en décimal (0.12 = 12 %).
+--   À confirmer avec le métier si les seuils de détection paraissent incohérents.
+WHERE NEGOTIATED_RATE > 0.25
+```
+
+Cela signale à la relecture qu'un point reste ouvert, sans bloquer la livraison.
+
+### 6.7 Livraisons incrémentales
+
+Un script d'audit complet peut compter 3 000+ lignes et couvrir 20+ sections. **Ne jamais le rédiger d'un seul jet**. Procéder par incréments :
+
+1. Une section / un thème par itération.
+2. Le client valide la logique sur un échantillon.
+3. On passe à la section suivante.
+
+Cette discipline permet de détecter très tôt les désalignements métier et évite de refondre un gros livrable à la dernière minute.

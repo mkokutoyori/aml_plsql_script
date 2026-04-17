@@ -153,7 +153,7 @@ DECLARE
     v_date_from      DATE;
     v_date_to        DATE;
     v_as_of_date     DATE;
-    v_run_id         VARCHAR2(20);
+    v_run_id         VARCHAR2(60);
     v_db_user        VARCHAR2(60);
     v_instance_name  VARCHAR2(60);
     v_business_date  DATE;
@@ -602,8 +602,10 @@ BEGIN
             v_instance_name := NULL;
     END;
 
-    v_run_id := TO_CHAR(SYSDATE, 'YYYYMMDD-HH24MISS')
-                || '-' || NVL(SYS_CONTEXT('USERENV','SESSIONID'), '0');
+    v_run_id := SUBSTR(
+                    TO_CHAR(SYSDATE, 'YYYYMMDD-HH24MISS')
+                 || '-' || NVL(SYS_CONTEXT('USERENV','SESSIONID'), '0'),
+                    1, 60);
 
     -- 3.3 Date metier FCUBS --------------------------------------------
     v_business_date := safe_scalar_date(

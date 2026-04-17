@@ -5290,5 +5290,281 @@ BEGIN
       AND NVL(a.RECORD_STAT,'O')='O';
     print_kv('  Classes END_DATE passée utilisées par cptes ouverts', TO_CHAR(v_count));
 
+    ----------------------------------------------------------------
+    -- SECTION 20 : Automatic Process / EOD jobs / MIS
+    --   Revenue Assurance : les jobs EOD portent l'accrual, la
+    --   liquidation automatique et la réévaluation. Un job bloqué
+    --   = revenu non comptabilisé. On regarde aussi :
+    --    - LDTB_AUTO_FUNCTION_DETAILS / PROCESS_QUEUE : avancement
+    --    - LDTB_COMPUTATION_HANDOFF : handoff accrual → compta
+    --    - LDTB_ACCRUAL_FOR_LIMITS : accrual utilisé pour exposition
+    --    - LDTB_CONTRACT_BALANCE : encours contrats
+    --    - LDTB_HOLIDAY_CURRENCIES : jours fériés devises
+    --    - MITB_CLASS_MAPPING : ventilation MIS des revenus
+    ----------------------------------------------------------------
+    print_section('SECTION 20 — Automatic Process, EOD jobs & MIS');
+
+    -- 20.1 LDTB_AUTOMATIC_PROCESS_MASTER
+    DBMS_OUTPUT.PUT_LINE('  [20.1 LDTB_AUTOMATIC_PROCESS_MASTER]');
+    safe_count('LDTB_AUTOMATIC_PROCESS_MASTER', '  Total processes définis');
+    FOR r IN (SELECT NVL(MODULE,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_AUTOMATIC_PROCESS_MASTER GROUP BY MODULE
+              ORDER BY nb DESC) LOOP
+        print_kv('  MODULE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTOMATIC_PROCESS_MASTER WHERE INVOKE_DURING_EOD='Y';
+    print_kv('  INVOKE_DURING_EOD=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTOMATIC_PROCESS_MASTER WHERE INVOKE_DURING_BOD='Y';
+    print_kv('  INVOKE_DURING_BOD=Y', TO_CHAR(v_count));
+
+    -- 20.2 LDTB_AUTOMATIC_PROCESS_QUEUE — exécutions
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.2 LDTB_AUTOMATIC_PROCESS_QUEUE]');
+    safe_count('LDTB_AUTOMATIC_PROCESS_QUEUE', '  Total entrées queue');
+
+    FOR r IN (SELECT NVL(PROCESS_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_AUTOMATIC_PROCESS_QUEUE GROUP BY PROCESS_STATUS
+              ORDER BY nb DESC) LOOP
+        print_kv('  PROCESS_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 20.2.b Plage PROCESSING_DATE
+    FOR r IN (SELECT MIN(PROCESSING_DATE) mn, MAX(PROCESSING_DATE) mx
+              FROM LDTB_AUTOMATIC_PROCESS_QUEUE) LOOP
+        print_kv('  Plage PROCESSING_DATE',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 20.2.c Jobs en erreur / halt récent
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTOMATIC_PROCESS_QUEUE
+    WHERE UPPER(NVL(PROCESS_STATUS,'')) IN ('E','H','F','ERROR','FAILED','HALTED');
+    print_kv('  Jobs en statut erreur/halt', TO_CHAR(v_count));
+
+    -- 20.2.d Jobs longs (>6h)
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTOMATIC_PROCESS_QUEUE
+    WHERE START_TIME IS NOT NULL AND END_TIME IS NOT NULL
+      AND (END_TIME - START_TIME) * 24 > 6;
+    print_kv('  Jobs > 6h de durée', TO_CHAR(v_count));
+
+    -- 20.2.e Jobs ouverts (START sans END)
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTOMATIC_PROCESS_QUEUE
+    WHERE START_TIME IS NOT NULL AND END_TIME IS NULL;
+    print_kv('  Jobs ouverts (START sans END)', TO_CHAR(v_count));
+
+    -- 20.2.f Top 10 jobs par durée moyenne
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.2.f Top 10 jobs par durée moyenne (sec)]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT PROCESS_NAME,
+                   COUNT(*) nb_exec,
+                   ROUND(AVG((END_TIME - START_TIME) * 86400),1) avg_sec,
+                   ROUND(MAX((END_TIME - START_TIME) * 86400),1) max_sec
+            FROM LDTB_AUTOMATIC_PROCESS_QUEUE
+            WHERE START_TIME IS NOT NULL AND END_TIME IS NOT NULL
+            GROUP BY PROCESS_NAME
+            ORDER BY avg_sec DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.PROCESS_NAME,
+                 'nb=' || TO_CHAR(r.nb_exec) ||
+                 ' | avg=' || TO_CHAR(r.avg_sec) || 's' ||
+                 ' | max=' || TO_CHAR(r.max_sec) || 's');
+    END LOOP;
+
+    -- 20.3 LDTB_AUTO_FUNCTION_SETUP — parallélisme EOD
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.3 LDTB_AUTO_FUNCTION_SETUP — parallélisme]');
+    safe_count('LDTB_AUTO_FUNCTION_SETUP', '  Total setups');
+    FOR r IN (
+        SELECT MODULE,
+               NVL(PARALLELIZE_AUTO_FUNCTION,'(NULL)') par,
+               NVL(MAX_PARALLEL_PROCESSORS,0) mp,
+               NVL(MAX_HALTED_PROCESSORS,0) mh,
+               NVL(WAIT_TIME_FOR_PROCESSORS,0) wt
+        FROM LDTB_AUTO_FUNCTION_SETUP
+    ) LOOP
+        print_kv('  ' || r.MODULE,
+                 'par=' || r.par || ' | max_proc=' || TO_CHAR(r.mp) ||
+                 ' | max_halt=' || TO_CHAR(r.mh) ||
+                 ' | wait=' || TO_CHAR(r.wt));
+    END LOOP;
+
+    -- 20.4 LDTB_AUTO_FUNCTION_DETAILS — avancement accrual par branche
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.4 LDTB_AUTO_FUNCTION_DETAILS]');
+    safe_count('LDTB_AUTO_FUNCTION_DETAILS', '  Total lignes');
+
+    -- 20.4.b Branches en retard sur accrual (>30j)
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTO_FUNCTION_DETAILS
+    WHERE CURRENT_PROCESSING_DATE IS NOT NULL
+      AND CURRENT_PROCESSING_DATE < TRUNC(SYSDATE) - 30;
+    print_kv('  Branches accrual en retard >30j', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count FROM LDTB_AUTO_FUNCTION_DETAILS
+    WHERE NVL(WORK_IN_PROGRESS,'N')='Y';
+    print_kv('  Branches WORK_IN_PROGRESS=Y (verrouillées)', TO_CHAR(v_count));
+
+    -- 20.4.c Écart PREVIOUS vs CURRENT_PROCESS_TILL_DATE
+    FOR r IN (
+        SELECT BRANCH,
+               PREVIOUS_PROCESS_TILL_DATE prev_d,
+               CURRENT_PROCESS_TILL_DATE  curr_d,
+               CURRENT_PROCESSING_DATE    proc_d
+        FROM LDTB_AUTO_FUNCTION_DETAILS
+        WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.BRANCH,
+                 'prev=' || TO_CHAR(r.prev_d,'YYYY-MM-DD') ||
+                 ' curr=' || TO_CHAR(r.curr_d,'YYYY-MM-DD') ||
+                 ' proc=' || TO_CHAR(r.proc_d,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 20.5 LDTB_COMPUTATION_HANDOFF — handoff accrual → compta
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.5 LDTB_COMPUTATION_HANDOFF]');
+    safe_count('LDTB_COMPUTATION_HANDOFF', '  Total lignes pending');
+    SELECT COUNT(DISTINCT CONTRACT_REF_NO) INTO v_count FROM LDTB_COMPUTATION_HANDOFF;
+    print_kv('  Contrats en handoff', TO_CHAR(v_count));
+    SELECT NVL(SUM(AMOUNT),0) INTO v_num FROM LDTB_COMPUTATION_HANDOFF;
+    print_kv('  Σ AMOUNT en handoff', TO_CHAR(v_num));
+
+    FOR r IN (SELECT MIN(EFFECTIVE_DATE) mn, MAX(EFFECTIVE_DATE) mx
+              FROM LDTB_COMPUTATION_HANDOFF) LOOP
+        print_kv('  Plage EFFECTIVE_DATE handoff',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 20.5.b Handoff ancien (> 7j) — signe batch bloqué
+    SELECT COUNT(*) INTO v_count FROM LDTB_COMPUTATION_HANDOFF
+    WHERE EFFECTIVE_DATE IS NOT NULL
+      AND EFFECTIVE_DATE < TRUNC(SYSDATE) - 7;
+    print_kv('  Handoffs > 7j non traités (leak RA)', TO_CHAR(v_count));
+
+    -- 20.6 LDTB_ACCRUAL_FOR_LIMITS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.6 LDTB_ACCRUAL_FOR_LIMITS]');
+    safe_count('LDTB_ACCRUAL_FOR_LIMITS', '  Total lignes');
+    SELECT NVL(SUM(TOTAL_CURRENT_NET_ACCRUAL),0) INTO v_num FROM LDTB_ACCRUAL_FOR_LIMITS;
+    print_kv('  Σ TOTAL_CURRENT_NET_ACCRUAL (limites exposition)', TO_CHAR(v_num));
+
+    -- 20.7 LDTB_CONTRACT_BALANCE — encours contrat
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.7 LDTB_CONTRACT_BALANCE]');
+    safe_count('LDTB_CONTRACT_BALANCE', '  Total lignes');
+    SELECT NVL(SUM(CURRENT_FACE_VALUE),0) INTO v_num FROM LDTB_CONTRACT_BALANCE;
+    print_kv('  Σ CURRENT_FACE_VALUE', TO_CHAR(v_num));
+    SELECT NVL(SUM(PRINCIPAL_OUTSTANDING_BAL),0) INTO v_num FROM LDTB_CONTRACT_BALANCE;
+    print_kv('  Σ PRINCIPAL_OUTSTANDING_BAL', TO_CHAR(v_num));
+
+    -- 20.7.b Face_value < 0 ou outstanding > face (anomalie)
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_BALANCE
+    WHERE CURRENT_FACE_VALUE IS NOT NULL AND CURRENT_FACE_VALUE < 0;
+    print_kv('  FACE_VALUE < 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_BALANCE
+    WHERE PRINCIPAL_OUTSTANDING_BAL IS NOT NULL AND CURRENT_FACE_VALUE IS NOT NULL
+      AND PRINCIPAL_OUTSTANDING_BAL > CURRENT_FACE_VALUE + 0.01;
+    print_kv('  PRINCIPAL_OUTSTANDING > FACE_VALUE (anomalie)', TO_CHAR(v_count));
+
+    -- 20.8 LDTB_CONTRACT_CONTROL — traçabilité process
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.8 LDTB_CONTRACT_CONTROL]');
+    safe_count('LDTB_CONTRACT_CONTROL', '  Total lignes');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(PROCESS_CODE,'(NULL)') s, COUNT(*) nb
+            FROM LDTB_CONTRACT_CONTROL GROUP BY PROCESS_CODE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PROCESS_CODE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 20.8.b Top 10 utilisateurs saisissant (ENTRY_BY)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.8.b Top 10 utilisateurs - saisies contrat]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(ENTRY_BY,'(NULL)') s, COUNT(*) nb
+            FROM LDTB_CONTRACT_CONTROL GROUP BY ENTRY_BY
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 20.9 LDTB_HOLIDAY_CURRENCIES
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.9 LDTB_HOLIDAY_CURRENCIES]');
+    safe_count('LDTB_HOLIDAY_CURRENCIES', '  Total lignes');
+    SELECT COUNT(DISTINCT CONTRACT_REF_NO) INTO v_count FROM LDTB_HOLIDAY_CURRENCIES;
+    print_kv('  Contrats avec devises holiday', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT CCY) INTO v_count FROM LDTB_HOLIDAY_CURRENCIES;
+    print_kv('  Devises holiday distinctes', TO_CHAR(v_count));
+
+    -- 20.10 MITB_CLASS_MAPPING — ventilation MIS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.10 MITB_CLASS_MAPPING — ventilation analytique]');
+    safe_count('MITB_CLASS_MAPPING', '  Total mappings MIS');
+    SELECT COUNT(DISTINCT CUSTOMER) INTO v_count FROM MITB_CLASS_MAPPING;
+    print_kv('  Clients couverts', TO_CHAR(v_count));
+
+    FOR r IN (SELECT NVL(CALC_METHOD,'(NULL)') s, COUNT(*) nb
+              FROM MITB_CLASS_MAPPING GROUP BY CALC_METHOD
+              ORDER BY nb DESC) LOOP
+        print_kv('  CALC_METHOD = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 20.10.b Clients clés sans MIS mapping (leakage analytique)
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER c
+    WHERE c.AUTH_STAT='A'
+      AND NOT EXISTS (SELECT 1 FROM MITB_CLASS_MAPPING m
+                      WHERE m.CUSTOMER = c.CUSTOMER_NO);
+    print_kv('  Clients autorisés sans MIS mapping', TO_CHAR(v_count));
+
+    -- 20.10.c Top 5 devises MIS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [20.10.c Top 5 devises MIS]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CCY,'(NULL)') s, COUNT(*) nb
+            FROM MITB_CLASS_MAPPING GROUP BY CCY
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 5
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    ----------------------------------------------------------------
+    -- CLOTURE : bannière fin exploration
+    ----------------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('>>> FIN DE L''EXPLORATION REVENUE ASSURANCE (20 SECTIONS)');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('  Sections couvertes :');
+    DBMS_OUTPUT.PUT_LINE('   0.  En-tête / volumétrie générale');
+    DBMS_OUTPUT.PUT_LINE('   1.  Volumétrie RA');
+    DBMS_OUTPUT.PUT_LINE('   2.  Référentiels revenue');
+    DBMS_OUTPUT.PUT_LINE('   3.  ACTB_HISTORY');
+    DBMS_OUTPUT.PUT_LINE('   4.  CLTB_ACCOUNT_COMPONENTS & waivers prêts');
+    DBMS_OUTPUT.PUT_LINE('   5.  CLTB_ACCOUNT_SCHEDULES — échéances & overdue');
+    DBMS_OUTPUT.PUT_LINE('   6.  CLTB_AMOUNT_PAID/RECD/LIQ');
+    DBMS_OUTPUT.PUT_LINE('   7.  CLTB_ACCOUNT_APPS_MASTER lifecycle');
+    DBMS_OUTPUT.PUT_LINE('   8.  LDTB contrats & accruals');
+    DBMS_OUTPUT.PUT_LINE('   9.  ICTM paramétrage taux');
+    DBMS_OUTPUT.PUT_LINE('   10. GLTB_GL_BAL revenus GL');
+    DBMS_OUTPUT.PUT_LINE('   11. RVTB_ACC_REVAL réévaluation FX');
+    DBMS_OUTPUT.PUT_LINE('   12. Comptes clients — turnovers/overdraft/dormance');
+    DBMS_OUTPUT.PUT_LINE('   13. SITB Standing Instructions & frais');
+    DBMS_OUTPUT.PUT_LINE('   14. Cohérences globales & anomalies RA');
+    DBMS_OUTPUT.PUT_LINE('   15. LDTB ICCF détaillé — calculs/rollovers/accruals');
+    DBMS_OUTPUT.PUT_LINE('   16. Clientèle & KYC');
+    DBMS_OUTPUT.PUT_LINE('   17. Produits & paramétrage');
+    DBMS_OUTPUT.PUT_LINE('   18. Sécurité & audit trail');
+    DBMS_OUTPUT.PUT_LINE('   19. Branches, facilités, codes & chéquiers');
+    DBMS_OUTPUT.PUT_LINE('   20. Automatic Process / EOD jobs & MIS');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+
 END;
 /

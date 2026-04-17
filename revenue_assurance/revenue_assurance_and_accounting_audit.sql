@@ -2541,6 +2541,167 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S11 - SI WITHOUT APPLY_CHG_* FLAGS SET
+    -- -----------------------------------------------------------------
+    -- [F-100] SI contracts dont au moins un flag APPLY_CHG_* est NULL
+    --         ou 'N' -> frais non preleves a l'execution / au rejet.
+    -- [F-101] SI configures pour facturer (APPLY_CHG_FLAG='Y') mais
+    --         aucun evenement de charge cote ICTB_LIQ_DETAILS sur la
+    --         periode -> frais parametre mais non realise.
+    --
+    -- Impact indicatif :
+    --   [F-100] : nb_exec_non_chargees * 500 LCY (tarif standard SI).
+    --   [F-101] : nb_exec * 500 LCY (idem).
+    -- =================================================================
+    DECLARE
+        l_cur         SYS_REFCURSOR;
+        l_ref         VARCHAR2(30);
+        l_prod        VARCHAR2(10);
+        l_cpty        VARCHAR2(20);
+        l_n_exec      NUMBER;
+        l_flag_flag   VARCHAR2(1);
+        l_flag_rejt   VARCHAR2(1);
+        l_flag_liq    VARCHAR2(1);
+        l_n_100       PLS_INTEGER := 0;
+        l_n_101       PLS_INTEGER := 0;
+        l_si_fee_std  CONSTANT NUMBER := 500;
+        l_impact      NUMBER;
+        l_sql         VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S11') THEN
+            log_info('Section S11 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S11',
+                'Standing Instructions without APPLY_CHG_* flags');
+
+            -- [F-100] Flags manquants / 'N' --------------------
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY, '
+             || '       NVL(c.APPLY_CHG_FLAG,    ''N''), '
+             || '       NVL(c.APPLY_CHG_REJT,    ''N''), '
+             || '       NVL(c.APPLY_CHG_ON_LIQ,  ''N''), '
+             || '       ( SELECT COUNT(*) FROM SITB_EXEC_LOG l '
+             || '          WHERE l.CONTRACT_REF_NO = c.CONTRACT_REF_NO '
+             || '            AND l.EXEC_DATE BETWEEN :d1 AND :d2 ) AS N_EXEC '
+             || '  FROM SITB_CONTRACTS c '
+             || ' WHERE ( NVL(c.APPLY_CHG_FLAG,    ''N'') = ''N'' '
+             || '    OR  NVL(c.APPLY_CHG_REJT,    ''N'') = ''N'' '
+             || '    OR  NVL(c.APPLY_CHG_ON_LIQ,  ''N'') = ''N'' ) '
+             || '   AND NVL(c.AUTH_STAT,''?'') = ''A'' '
+             || ' ORDER BY ( SELECT COUNT(*) FROM SITB_EXEC_LOG l '
+             || '             WHERE l.CONTRACT_REF_NO = c.CONTRACT_REF_NO '
+             || '               AND l.EXEC_DATE BETWEEN :d1b AND :d2b ) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_date_from, v_date_to,
+                    v_date_from, v_date_to;
+
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cpty,
+                        l_flag_flag, l_flag_rejt, l_flag_liq, l_n_exec;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_100 >= NVL(p_top_n, 50);
+
+                    l_impact := ROUND(NVL(l_n_exec, 0) * l_si_fee_std, 2);
+
+                    print_finding(
+                        p_section    => 'S11',
+                        p_code       => 'RA-S11-F100',
+                        p_severity   => CASE WHEN NVL(l_n_exec,0) > 12
+                                             THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'SI with missing APPLY_CHG flags: FLAG='
+                                     || l_flag_flag || ' REJT=' || l_flag_rejt
+                                     || ' LIQ=' || l_flag_liq
+                                     || ' n_exec=' || NVL(TO_CHAR(l_n_exec),'0'),
+                        p_entity     => l_ref,
+                        p_impact_lcy => l_impact,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                                     || ' std_fee_LCY=' || TO_CHAR(l_si_fee_std)
+                    );
+                    l_n_100 := l_n_100 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S11',
+                        'F-100 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-101] SI chargeable mais aucun evenement charge ---
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY, '
+             || '       ( SELECT COUNT(*) FROM SITB_EXEC_LOG l '
+             || '          WHERE l.CONTRACT_REF_NO = c.CONTRACT_REF_NO '
+             || '            AND l.EXEC_DATE BETWEEN :d1 AND :d2 ) AS N_EXEC '
+             || '  FROM SITB_CONTRACTS c '
+             || ' WHERE NVL(c.APPLY_CHG_FLAG, ''N'') = ''Y'' '
+             || '   AND NVL(c.AUTH_STAT,''?'') = ''A'' '
+             || '   AND NOT EXISTS ( '
+             || '       SELECT 1 FROM ICTB_LIQ_DETAILS d '
+             || '        WHERE d.CONTRACT_REF_NO = c.CONTRACT_REF_NO '
+             || '          AND UPPER(NVL(d.COMPONENT,'' '')) LIKE ''CHG%'' '
+             || '          AND NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) '
+             || '              BETWEEN :d1b AND :d2b ) '
+             || ' ORDER BY 4 DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_date_from, v_date_to,
+                    v_date_from, v_date_to;
+
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cpty, l_n_exec;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_101 >= NVL(p_top_n, 50);
+
+                    IF NVL(l_n_exec, 0) > 0 THEN
+                        l_impact := ROUND(l_n_exec * l_si_fee_std, 2);
+                        print_finding(
+                            p_section    => 'S11',
+                            p_code       => 'RA-S11-F101',
+                            p_severity   => 'HIGH',
+                            p_message    => 'SI chargeable but no charge event: n_exec='
+                                         || TO_CHAR(l_n_exec),
+                            p_entity     => l_ref,
+                            p_impact_lcy => l_impact,
+                            p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                         || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                        );
+                        l_n_101 := l_n_101 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S11 F-101 unavailable: ICTB_LIQ_DETAILS join '
+                        || 'failed (' || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            print_kv('F-100 findings (missing flags)',  TO_CHAR(l_n_100));
+            print_kv('F-101 findings (chargeable but 0)', TO_CHAR(l_n_101));
+            print_kv('Std SI fee (LCY)',                 TO_CHAR(l_si_fee_std));
+
+            print_section_footer('S11', l_n_100 + l_n_101);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S11', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S11', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

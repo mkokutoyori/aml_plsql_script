@@ -1007,6 +1007,82 @@ Chaque contrôle est décrit par :
 - **Paramètres** — `p_as_of_date`, `p_branch_*`.
 - **Fondement exploration** — tables SM confirmées dans le rapport d'exploration.
 
+### 7.F — Conformité PCEC et méthodes comptables
+
+Cette famille vérifie que les écritures FCUBS respectent le **référentiel comptable** COBAC R-98/01 (PCEC) et les **principes comptables** applicables (cf. §14). Elle complète §7.D (cohérence technique GL↔historique) par une lecture **normative**.
+
+#### S24 — Accounting scheme compliance (transaction vs expected DR/CR pattern)
+
+- **Findings** : `[F-230]` product transactions whose debit/credit scheme deviates from the standard pattern (cf. §13.3) ; `[F-231]` one-sided postings (débit sans crédit de contrepartie attendu) ; `[F-232]` contrepartie inscrite sur un GL hors famille attendue.
+- **Objectif** — Garantir que chaque opération suit le **schéma comptable standard** documenté en §13 (ex. octroi de prêt : DR `PCEC/201` ↔ CR `PCEC/251/252` client ; facturation de frais : DR compte client ↔ CR `PCEC/706`).
+- **Sources** — `ACTB_HISTORY` (paire d'écritures par `TRN_REF_NO`), `GLTB_GL_MASTER`, mapping interne `TRN_CODE` → schéma attendu (§13.3).
+- **Méthode** — Pour chaque `TRN_REF_NO` sur la période, reconstituer la paire DR/CR et comparer le couple (GL débit, GL crédit) au schéma autorisé pour le `TRN_CODE`.
+- **Sévérité** — HIGH ; CRITICAL sur GL de classes 6/7/5.
+- **Impact LCY** — Montant LCY des écritures non conformes.
+- **Dimensions** — `TRN_CODE`, produit, agence, utilisateur.
+- **Recommandation** — Corriger le paramétrage produit ou l'écriture manuelle ; valider le registre des schémas (§13.3).
+- **PCEC** — Transverse (focus classes 6/7/2/38).
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — à confirmer via mini-script `describe_accounting_schemes.sql` (§7.Z).
+
+#### S25 — Offsetting / compensation breaches (non-compensation principle)
+
+- **Findings** : `[F-240]` accounts where a debit position and a credit position on the same client/family are netted into one GL ; `[F-241]` GL whose balance comprises offsetting asset/liability in violation du principe de non-compensation.
+- **Objectif** — Appliquer le **principe de non-compensation** (§14.2) : un actif et un passif ne peuvent être nets sauf exceptions prévues ; les produits et charges ne se compensent pas.
+- **Sources** — `STTM_CUST_ACCOUNT`, `GLTB_GL_BAL`, `GLTB_GL_MASTER` (nature actif/passif/produit/charge dérivée du code).
+- **Méthode** — Détection des configurations où des positions opposées du même client ou de la même classe PCEC sont comptabilisées sur un GL unique au lieu de GL séparés actif/passif.
+- **Sévérité** — HIGH ; CRITICAL si impact > `p_materiality_critical_lcy`.
+- **Impact LCY** — Somme brute des positions compensées (les deux jambes).
+- **Dimensions** — classe PCEC, client, produit.
+- **Recommandation** — Scinder les écritures, ouvrir GL dédiés, documenter les exceptions autorisées.
+- **PCEC** — Classes 1, 2, 6, 7.
+- **Paramètres** — `p_as_of_date`, `p_materiality_lcy`.
+- **Fondement exploration** — mini-script `describe_accounting_schemes.sql` + règle de classification actif/passif.
+
+#### S26 — Cut-off / specialisation des exercices
+
+- **Findings** : `[F-250]` transactions dated in period N posted in period N+1 ; `[F-251]` accruals not reversed / not extended across period boundary ; `[F-252]` backdated entries (`TRN_DT < BKG_DATE − tolerance`).
+- **Objectif** — Appliquer la **spécialisation des exercices** : chaque charge/produit est rattaché à la période à laquelle il se rapporte.
+- **Sources** — `ACTB_HISTORY` (`TRN_DT`, `BKG_DATE`, `VALUE_DATE`), `ICTB_ACCRUALS_TEMP`.
+- **Méthode** — Ecart `BKG_DATE − TRN_DT` > tolérance ; vérification de la présence d'accruals en fin de mois sur GL produits/charges ; détection d'écritures antidatées.
+- **Sévérité** — HIGH sur GL de résultat, MEDIUM sinon.
+- **Impact LCY** — Somme LCY des écritures mal rattachées.
+- **Dimensions** — période, agence, utilisateur.
+- **Recommandation** — Revue batch de clôture, contrôles maker/checker renforcés en fin de période.
+- **PCEC** — Classes 6, 7 en priorité.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_tol_days_backdate` (dérivé, défaut 3).
+- **Fondement exploration** — confirmé : `BKG_DATE` et `TRN_DT` présents sur `ACTB_HISTORY`.
+
+#### S27 — Permanence des méthodes / rate & parameter changes
+
+- **Findings** : `[F-260]` product interest rate changes applied retroactively (affecting prior periods) ; `[F-261]` fee grid updates without documented effective date ; `[F-262]` unusual spikes in income/expense accruals following a parameter change.
+- **Objectif** — Appliquer la **permanence des méthodes** : les règles de calcul (taux, méthodes d'amortissement, grilles) ne changent pas arbitrairement en cours d'exercice.
+- **Sources** — `ICTM_PRODUCT_DEFINITION`, `CSTB_CONTRACT_EVENT_LOG` (si disponible), `ACTB_HISTORY`, tables de grille des frais.
+- **Méthode** — Comparaison des versions de paramétrage dans le temps ; détection de changements rétroactifs ou sans date effective ; corrélation avec des pics d'accruals.
+- **Sévérité** — HIGH.
+- **Impact LCY** — Différentiel estimé (nouvelle méthode − ancienne méthode) sur la période.
+- **Dimensions** — produit, utilisateur, période.
+- **Recommandation** — Geler les paramètres en cours d'exercice, documenter toute dérogation.
+- **PCEC** — Classes 6, 7.
+- **Paramètres** — `p_date_from`, `p_date_to`.
+- **Fondement exploration** — mini-script `describe_parameter_history.sql` (§7.Z).
+
+#### S28 — GL nature consistency (asset/liability/income/expense)
+
+- **Findings** : `[F-270]` asset GLs with persistent credit balance ; `[F-271]` liability GLs with persistent debit balance ; `[F-272]` income/expense GLs reset to zero mid-period without explicit closing entry.
+- **Objectif** — Vérifier que chaque GL conserve un **sens de solde** cohérent avec sa nature comptable PCEC.
+- **Sources** — `GLTB_GL_MASTER` (nature), `GLTB_GL_BAL` (solde par période).
+- **Méthode** — Contrôle du sens normal : les comptes d'actif (classes 1, 2 côté emplois, 3 côté emplois, 4) doivent être normalement débiteurs ; passifs normalement créditeurs ; produits créditeurs ; charges débitrices. Tolérance paramétrable.
+- **Sévérité** — HIGH ; CRITICAL pour classes 6/7 avec inversion de sens.
+- **Impact LCY** — Valeur absolue du solde anormal.
+- **Dimensions** — classe PCEC, agence.
+- **Recommandation** — Investiguer l'inversion de sens, corriger, éventuellement reclasser le GL.
+- **PCEC** — Toutes classes.
+- **Paramètres** — `p_as_of_date`, `p_materiality_lcy`.
+- **Fondement exploration** — la nature des GL est exposée par `GLTB_GL_MASTER` (à confirmer par mini-script `describe_gl_nature.sql`).
+
+---
+
 ### 7.Z — Hypothèses à valider par mini-scripts d'exploration
 
 Les contrôles suivants requièrent, **avant** rédaction du corps du script, des mini-scripts d'exploration dédiés afin de ne pas inventer de structures :

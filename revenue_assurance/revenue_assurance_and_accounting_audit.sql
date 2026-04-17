@@ -1640,6 +1640,123 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S05 - CREDIT BALANCES WITHOUT INTEREST ACCRUAL
+    -- -----------------------------------------------------------------
+    -- [F-040] Comptes clientele a forte position crediteur (LCY) pour
+    --         lesquels AUCUNE ecriture d'accrual d'interet n'existe
+    --         dans ICTB_ACCRUALS_TEMP. Cas typique : produit d'epargne
+    --         mal parametre, regle IC desactivee, ou compte CASA
+    --         remuneré mais accrual absent (benefice client non verse
+    --         OU produit non reconnu cote banque).
+    --
+    -- Sources : STTM_CUST_ACCOUNT, ICTB_ACCRUALS_TEMP.
+    -- Severite : MEDIUM.
+    -- Impact indicatif (en LCY) : bal * 0.02 * nb_jours / 365
+    --   (2 % annuel = taux savings indicatif CEMAC, cf. BRD §7.A).
+    -- =================================================================
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_ac_no     VARCHAR2(30);
+        l_cust_no   VARCHAR2(20);
+        l_branch    VARCHAR2(10);
+        l_ccy       VARCHAR2(3);
+        l_accl      VARCHAR2(10);
+        l_bal       NUMBER;
+        l_impact    NUMBER;
+        l_days      NUMBER;
+        l_n_040     PLS_INTEGER := 0;
+        l_rate_sav  CONSTANT NUMBER := 0.02;
+        l_base      CONSTANT NUMBER := 365;
+        l_sql       VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S05') THEN
+            log_info('Section S05 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S05',
+                'Credit balances without interest accrual');
+
+            l_days := GREATEST(1, (v_date_to - v_date_from) + 1);
+
+            l_sql :=
+                'SELECT a.CUST_AC_NO, a.CUST_NO, a.BRANCH_CODE, a.CCY, '
+             || '       a.ACCOUNT_CLASS, NVL(a.LCY_CURR_BALANCE,0) AS BAL_LCY '
+             || '  FROM STTM_CUST_ACCOUNT a '
+             || '  LEFT JOIN ( '
+             || '      SELECT ACCOUNT, SUM(NVL(ACCR_AMOUNT_LCY,0)) AS ACCR '
+             || '        FROM ICTB_ACCRUALS_TEMP '
+             || '       GROUP BY ACCOUNT '
+             || '  ) i ON i.ACCOUNT = a.CUST_AC_NO '
+             || ' WHERE NVL(a.LCY_CURR_BALANCE,0) >= :m '
+             || '   AND NVL(a.AC_STAT_DORMANT,''N'') = ''N'' '
+             || '   AND NVL(i.ACCR,0) = 0 '
+             || '   AND (:p_branch IS NULL OR a.BRANCH_CODE = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR a.CUST_NO     = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR a.CUST_AC_NO  = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR a.CCY         = :p_ccy) '
+             || ' ORDER BY NVL(a.LCY_CURR_BALANCE,0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_materiality_lcy,
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_cust_no, l_branch, l_ccy, l_accl, l_bal;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_040 >= NVL(p_top_n, 50);
+
+                    l_impact := ROUND(l_bal * l_rate_sav * l_days / l_base, 2);
+
+                    print_finding(
+                        p_section    => 'S05',
+                        p_code       => 'RA-S05-F040',
+                        p_severity   => 'MEDIUM',
+                        p_message    => 'Credit balance without accrual: bal='
+                                     || f_fmt_lcy(l_bal)
+                                     || ' class=' || NVL(l_accl,'?')
+                                     || ' ccy=' || NVL(l_ccy,'?')
+                                     || ' days=' || TO_CHAR(l_days),
+                        p_entity     => l_ac_no,
+                        p_impact_lcy => l_impact,
+                        p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                     || ' CUST=' || NVL(f_mask_pii(l_cust_no),'?')
+                                     || ' rate=' || TO_CHAR(l_rate_sav)
+                                     || ' base=' || TO_CHAR(l_base)
+                    );
+                    l_n_040 := l_n_040 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S05',
+                        'Query failed (likely ICTB_ACCRUALS_TEMP missing): '
+                        || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-040 findings (no accrual)', TO_CHAR(l_n_040));
+            print_kv('Savings rate (annual)',       TO_CHAR(l_rate_sav));
+            print_kv('Day-count base',              TO_CHAR(l_base));
+
+            print_section_footer('S05', l_n_040);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S05', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S05', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

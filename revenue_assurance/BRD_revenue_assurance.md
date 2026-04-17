@@ -1242,3 +1242,118 @@ Ces blocs DOIVENT être placés en **fin** de rapport pour ne pas polluer la lec
 La version du format de rapport est distincte de la version du script : `REPORT_FORMAT_VERSION = 1.0`. Toute évolution impactant l'extraction automatique (ajout/suppression de champ) DOIT incrémenter cette version et être documentée dans `KNOWN LIMITATIONS` pendant au moins un run de transition.
 
 ---
+
+## 9. Mapping PCEC COBAC par constat
+
+Cette section formalise le **rattachement** de chaque contrôle §7 à une ou plusieurs rubriques du PCEC COBAC R-98/01 et précise la logique d'affectation en rapport.
+
+### 9.1 Principes de rattachement
+
+- **P1** — Chaque contrôle DOIT être rattaché à **au moins une classe** PCEC (exigence BR-20).
+- **P2** — Lorsque l'information GL est disponible, le rattachement DOIT descendre au **compte principal** (2 chiffres) voire **divisionnaire** (3 chiffres).
+- **P3** — Un constat peut être rattaché à **plusieurs rubriques** (double entrée bilan/résultat).
+- **P4** — Si un constat porte sur un GL **non mappé**, il est classé en `PCEC/?` et remonté dans S20 (BR-21).
+- **P5** — Les rubriques utilisées DOIVENT être citées **textuellement** dans le rapport (ex. `PCEC/2 — Opérations avec la clientèle`).
+
+### 9.2 Rappel synthétique des classes PCEC (COBAC R-98/01)
+
+| Classe | Intitulé officiel | Portée RA / audit |
+|---|---|---|
+| **1** | Opérations de trésorerie et opérations avec les établissements de crédit | Interbank, NOSTRO/VOSTRO, BCEAO/BEAC. |
+| **2** | Opérations avec la clientèle | **Foyer principal RA** : crédits, dépôts, découverts. |
+| **3** | Opérations sur titres et opérations diverses | Titres, 38x comptes d'attente / régularisation. |
+| **4** | Valeurs immobilisées | Immobilisations, participations. |
+| **5** | Capitaux permanents | Fonds propres, résultat. |
+| **6** | Charges | Charges d'exploitation bancaire (intérêts versés, frais). |
+| **7** | Produits | **Foyer clé** : intérêts perçus, commissions, frais. |
+| **8** | Soldes caractéristiques de gestion | PNB, RBE (indicateurs). |
+| **9** | Engagements hors bilan | Garanties, engagements de financement. |
+
+### 9.3 Matrice Section × Classe PCEC
+
+> Une croix indique que la section produit des findings rattachables à la classe ; une double croix (`XX`) indique un rattachement **principal**.
+
+| Section | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| S01 — Unauthorized overdrafts |   | XX |   |   |   |   | X  |   |   |
+| S02 — TOD overrun / expired   |   | XX |   |   |   |   | X  |   |   |
+| S03 — Dormant with accruals   |   | XX | X  |   |   | X  | X  |   |   |
+| S04 — Charge waivers          |   | X  |   |   |   |   | XX |   |   |
+| S05 — No accrual on CASA      |   | X  |   |   |   | X  | X  |   |   |
+| S06 — Overdue CL schedules    |   | XX |   |   |   |   | X  |   |   |
+| S07 — Frozen CL               |   | XX |   |   |   | X  | X  |   |   |
+| S08 — CL pending liquidation  |   | XX |   |   |   | X  | X  |   |   |
+| S09 — LD anomalies            | X | X  |   |   |   | X  | X  |   |   |
+| S10 — CL waivers / overrides  |   | X  |   |   |   |   | XX |   |   |
+| S11 — SI without charge flags |   | X  |   |   |   |   | XX |   |   |
+| S12 — Expired/stalled SI      |   | X  |   |   |   |   | XX |   |   |
+| S13 — Unbilled / zero charges |   | X  |   |   |   |   | XX |   |   |
+| S14 — IC accruals unliquidated|   | X  | X  |   |   | X  | XX |   |   |
+| S15 — FX spread leakage       |   | X  | X  |   |   |   | XX |   |   |
+| S16 — GL vs history           | X | X  | X  | X  | X  | X  | X  |   |   |
+| S17 — Manual entries risk     |   | X  | XX |   | X  | X  | X  |   |   |
+| S18 — Suspense ageing         |   |    | XX |   |   |   |   |   |   |
+| S19 — FX revaluation          |   | X  | XX |   |   | X  | X  |   |   |
+| S20 — GL–PCEC mapping gaps    | X | X  | X  | X  | X  | X  | X  | X  | X |
+| S21 — Maker/checker           | X | X  | X  |   |   | X  | X  |   | X |
+| S22 — Inactive users active   | X | X  | X  |   |   | X  | X  |   | X |
+| S23 — Toxic role combinations | X | X  | X  | X  | X  | X  | X  |   | X |
+
+### 9.4 Tableau détaillé — rubriques divisionnaires recommandées
+
+| Section | Rubrique(s) COBAC ciblée(s) (recommandation) |
+|---|---|
+| S01 | `PCEC/201` (crédits clientèle ordinaires), `PCEC/208` (créances diverses), `PCEC/702` (intérêts sur opérations avec clientèle). |
+| S02 | Idem S01, avec focus `PCEC/28` (créances en souffrance) si TOD persistante. |
+| S03 | `PCEC/251`/`PCEC/252` (comptes à vue, comptes d'épargne), `PCEC/38` (régularisation) pour accruals. |
+| S04 | `PCEC/706` (commissions) et `PCEC/702` côté intérêts manqués. |
+| S05 | `PCEC/25`/`PCEC/251` côté dépôt, `PCEC/60`/`PCEC/602` côté intérêts versés, `PCEC/702` côté produits. |
+| S06 | `PCEC/201` → `PCEC/28`/`PCEC/29` (impayés, douteux), `PCEC/702`. |
+| S07 | `PCEC/29` (créances litigieuses), `PCEC/60` si accruals indus. |
+| S08 | `PCEC/201`, `PCEC/702`, `PCEC/706`. |
+| S09 | `PCEC/1` (interbancaire), `PCEC/201` (corporate), `PCEC/702`. |
+| S10 | `PCEC/706`, `PCEC/702`. |
+| S11 / S12 / S13 | `PCEC/706` (commissions/frais). |
+| S14 | `PCEC/38` (accruals en attente), `PCEC/702`/`PCEC/602` à la liquidation. |
+| S15 | `PCEC/706` frais de change, `PCEC/702` produits de change, `PCEC/33` position FX si classe 3 interne. |
+| S16 | Toutes classes, focus `PCEC/6`/`PCEC/7`/`PCEC/38`. |
+| S17 | `PCEC/6`/`PCEC/7`/`PCEC/38`/`PCEC/5`. |
+| S18 | `PCEC/38` (comptes de régularisation / d'attente). |
+| S19 | `PCEC/33` (position de change), `PCEC/7`, `PCEC/6`. |
+| S20 | Transverse — objet même de la section. |
+| S21 / S22 / S23 | Transverse contrôle interne — citation PCEC à titre informatif. |
+
+### 9.5 Dérivation automatique GL → PCEC
+
+Deux stratégies sont admises, **dans l'ordre de préférence** :
+
+1. **Convention de préfixe** — si la banque applique une convention documentée (ex. GL commençant par `1xxxx` ⇒ PCEC/1), l'audit en tire la classe directement. Documentée en §7.Z et à valider via mini-script d'exploration.
+2. **Table de correspondance interne** — si une table interne `PCEC_MAPPING` existe (nom à déterminer), elle est utilisée en priorité absolue.
+
+À défaut, la section S20 remonte le problème sans empêcher la production du rapport (BR-34).
+
+### 9.6 Taux de couverture PCEC
+
+L'indicateur `PCEC Coverage` DOIT être calculé et publié dans `GLOBAL INDICATORS` (§8.6) :
+
+```
+PCEC Coverage = (Volume LCY mouvementé sur GL mappés)
+              / (Volume LCY mouvementé total)  × 100
+```
+
+Cible : ≥ 95 % (NFR-13 indirect, BR-21).
+
+### 9.7 Ouverture hors-bilan (classe 9)
+
+Les contrôles sur les engagements hors bilan (garanties données, engagements de financement, etc.) sont **hors scope v1** mais pré-cadrés via S23 (contrôles internes). Une v2 pourra ajouter :
+- `S24 — Guarantees expired but active`
+- `S25 — Commitment fees not billed`
+
+Ces sections suivront strictement la même grille §7.0.
+
+### 9.8 Limites du mapping
+
+- Le PCEC est **normatif** mais certains comptes spécifiques (ex. auxiliaires techniques FCUBS) n'ont pas d'équivalent strict. Dans ce cas, le script consigne `PCEC/?` et le mappe via `S20`.
+- Les fusions / éclatements de classes entre versions du PCEC ne sont pas gérés automatiquement : la version COBAC R-98/01 (1998) fait foi jusqu'à décision contraire documentée.
+
+---

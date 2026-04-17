@@ -1454,3 +1454,121 @@ Aucune exception n'est admise pour :
 - BR-11 (zéro modification de données).
 
 ---
+
+## 11. Plan de test et recette
+
+Le plan de test couvre **quatre niveaux** : compilation, tests fonctionnels, tests non-fonctionnels et recette métier. Chaque niveau DOIT être validé avant passage au suivant.
+
+### 11.1 Niveau 1 — Tests techniques (pré-recette)
+
+| Id | Test | Objectif | Critère de succès |
+|---|---|---|---|
+| **T1-01** | Compilation du bloc anonyme | Vérifier la syntaxe PL/SQL sur Oracle 11gR2. | Pas d'erreur de compilation, pas de `PLS-*` hors `PLW-05005` admis. |
+| **T1-02** | Exécution à vide (périmètre impossible) | `p_date_from := SYSDATE + 1` (aucune donnée). | Rapport généré, toutes sections à 0 finding, status `COMPLETED`. |
+| **T1-03** | Exécution sur 1 jour | Borne très courte. | Durée < 30 s, rapport complet, aucune exception non catch. |
+| **T1-04** | Exécution sur 1 agence isolée | `p_branch_code := '<BR1>'`. | Seule l'agence ciblée apparaît dans le rapport. |
+| **T1-05** | Exécution mode `SUMMARY` | Vérifier la cible NFR-01. | Durée < 2 min ; sortie ≤ 2 Mo. |
+| **T1-06** | Exécution mode `FULL` | Photo mensuelle standard. | Durée < 15 min, rapport ≤ 20 Mo. |
+| **T1-07** | Exécution mode `DEEP` | Avec top-N élargi. | Durée < 60 min, rapport ≤ 80 Mo. |
+| **T1-08** | Lecture seule | Scan statique : aucun `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `COMMIT`, `ROLLBACK`, `CREATE`, `ALTER`, `DROP`. | Zéro occurrence (hors commentaires). |
+| **T1-09** | Robustesse : table inexistante forcée | Renommer temporairement une table non critique en UAT. | Warning émis, rapport complet sur les autres sections. |
+| **T1-10** | Paramètres invalides | `p_mode := 'BOGUS'`, `p_date_from > p_date_to`. | Erreur `ORA-20001/20002` **en début** de script, message clair. |
+
+### 11.2 Niveau 2 — Tests fonctionnels par contrôle
+
+Pour chaque section `S01..S23`, le test fonctionnel DOIT :
+1. **Créer / identifier** un jeu de données (fixture) contenant au moins un cas de chaque type de finding attendu.
+2. **Exécuter** le script sur ce jeu.
+3. **Vérifier** la présence, la sévérité, le compte et l'impact attendus.
+
+| Id | Contrôle | Cas à tester (au minimum) |
+|---|---|---|
+| **T2-01** | S01 | 1 compte OD sans TOD (attendu HIGH) ; 1 compte créditeur (attendu absent). |
+| **T2-02** | S02 | 1 compte dépassant TOD de 200 % (attendu CRITICAL). |
+| **T2-03** | S03 | 1 compte dormant avec accrual ; 1 sans accrual (absent). |
+| **T2-04** | S04 | 1 compte avec waiver massif sur composante charge. |
+| **T2-05** | S06 | 1 échéance CL en retard de 45 jours (HIGH) ; 1 en retard de 100 jours (CRITICAL). |
+| **T2-06** | S07 | 1 prêt CL gelé avec encours. |
+| **T2-07** | S11 | 1 SI avec `APPLY_CHG_FLAG = 'N'`. |
+| **T2-08** | S12 | 1 SI expirée active. |
+| **T2-09** | S16 | 1 GL artificiellement déséquilibré sur un compte temporaire UAT. |
+| **T2-10** | S17 | 1 écriture manuelle sur GL de classe 7 hors heures. |
+| **T2-11** | S18 | 1 solde suspense > 180 jours. |
+| **T2-12** | S21 | 1 transaction `MAKER_ID = CHECKER_ID`. |
+| **T2-13** | S22 | 1 utilisateur `EXITFLAG=1` ayant bougé une écriture. |
+| **T2-14** | S23 | 1 utilisateur avec combinaison maker+checker+authoriser. |
+
+> Les fixtures sont idéalement préparées sur un environnement **UAT** distinct, avec données masquées. À défaut, identification manuelle de cas réels dans la photo PROD.
+
+### 11.3 Niveau 3 — Tests non-fonctionnels
+
+| Id | Test | Cible |
+|---|---|---|
+| **T3-01** | Durée mode `SUMMARY` | < 2 min (NFR-01). |
+| **T3-02** | Durée mode `FULL` | < 15 min (NFR-02). |
+| **T3-03** | Durée mode `DEEP` | < 60 min (NFR-03). |
+| **T3-04** | Taille de rapport | < 20 Mo en `FULL`, < 80 Mo en `DEEP` (NFR-08). |
+| **T3-05** | Utilisation PGA/SGA | < 100 Mo côté session (NFR-04). |
+| **T3-06** | Reproductibilité | Deux runs identiques : rapports identiques hors horodatage / hash. |
+| **T3-07** | Portabilité | Exécution OK sur 11gR2, 12c, 19c (si disponibles). |
+| **T3-08** | Lisibilité | Validation manuelle : Executive Summary ≤ 60 lignes, findings conformes au §8.4. |
+| **T3-09** | Compatibilité clients | Exécution en SQL\*Plus, SQLcl et SQL Developer. |
+| **T3-10** | Impact I/O | Pic I/O lu via `v$sesstat` < seuil convenu DBA. |
+
+### 11.4 Niveau 4 — Recette métier
+
+| Id | Test | Responsable | Critère |
+|---|---|---|---|
+| **T4-01** | Revue Executive Summary | Direction Financière | Compréhensible sans relecture du reste du rapport. |
+| **T4-02** | Revue des findings `CRITICAL`/`HIGH` | Audit Interne | 100 % explicables, actionnables, avec recommandation utile. |
+| **T4-03** | Validation mapping PCEC | Contrôle de Gestion | Toutes les sections rattachées ; `PCEC Coverage` ≥ 95 %. |
+| **T4-04** | Estimation des impacts LCY | Direction Financière | Vraisemblance des montants, pas d'ordres de grandeur aberrants. |
+| **T4-05** | Revue des recommandations | Compliance + Risque | Alignées avec la politique interne. |
+| **T4-06** | Revue des sections SoD | Sécurité SI + Compliance | Aucun faux positif connu non expliqué. |
+| **T4-07** | Comparaison vs exploration | Auteurs du rapport d'exploration | Les indicateurs clés (950, 1620, 662, 179, 281, 51, 782) sont retrouvés. |
+| **T4-08** | Ergonomie | Utilisateur final | Lecture fluide, pas d'ambiguïté sur les abréviations. |
+
+### 11.5 Procédure de recette
+
+1. **Dry run** en UAT sur 1 journée.
+2. **Full run** en UAT sur 1 mois.
+3. **Revue des écarts** avec les parties prenantes.
+4. **Calibration des seuils** en fonction des retours.
+5. **Run de référence** en PROD (lecture seule, hors heures batch).
+6. **Approbation formelle** (§12).
+7. **Passage en production récurrente** (planification mensuelle recommandée).
+
+### 11.6 Critères d'acceptation globaux (Go / No-Go)
+
+Go conditionné à la réunion **cumulative** des critères suivants :
+
+- T1-01, T1-02, T1-08, T1-10 : **100 %** OK (non négociable).
+- T2-01..T2-14 : **≥ 90 %** OK, avec justification des tests manqués.
+- T3-02, T3-04 : dans les cibles ou sous dérogation documentée.
+- T4-01, T4-02, T4-03, T4-07 : validés par leurs responsables.
+- `KNOWN LIMITATIONS` publié et **revu** avec le management.
+
+Tout No-Go DOIT être accompagné d'une **remediation list** avec échéance et porteur.
+
+### 11.7 Livrables de recette
+
+- **Rapport de recette** — synthèse des tests T1/T2/T3/T4, verdict, signataires.
+- **Rapport de run de référence** — le premier rapport validé, archivé comme baseline.
+- **Registre des exceptions** — §10.7.
+- **Version figée** — `C_SCRIPT_VERSION = 1.0.0` (ou `RC` en attendant l'approbation finale).
+
+### 11.8 Non-régression
+
+Après toute évolution (ajout de section, correction de bug, changement de seuil), un **run comparatif** contre le dernier run de référence DOIT être effectué :
+- Les findings `CRITICAL`/`HIGH` doivent rester **stables** sauf changement explicite.
+- Les nouveaux findings doivent être **documentés** dans les release notes.
+- Les findings disparus doivent être **justifiés** (correction acceptée, bug, changement de seuil).
+
+### 11.9 Outillage recommandé
+
+- **SPOOL** SQL\*Plus avec horodatage nommant le fichier.
+- **`diff`** système pour comparer deux rapports (exclure l'en-tête horodaté).
+- **Extraction** automatique possible des findings via regex sur `[F-NNN]` et `SEVERITY:`.
+- **Archivage** : répertoire `reports/` hors Git, rétention ≥ 24 mois recommandée.
+
+---

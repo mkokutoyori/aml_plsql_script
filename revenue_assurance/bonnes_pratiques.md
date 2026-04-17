@@ -51,3 +51,89 @@ Les sections suivantes couvrent :
 - **§12** Checklist de validation avant livraison
 
 Chaque section pose des **règles** (impératives) et des **recommandations** (conseillées). Toute dérogation doit être justifiée en commentaire du script concerné.
+
+---
+
+## 2. Paramétrage du script
+
+### 2.1 Principe général
+
+Tout script d'audit **doit** être paramétrable. Un script figé sur des valeurs en dur (date, agence, compte) n'est utilisable qu'une fois et perd sa valeur d'outil récurrent d'audit. Cependant, **tous les paramètres doivent être optionnels** : le script doit tourner sans aucun argument et produire un rapport intelligible sur l'intégralité des données, avec des valeurs par défaut documentées.
+
+### 2.2 Paramètres standards attendus
+
+Chaque script d'audit doit exposer, au minimum, les paramètres optionnels suivants, déclarés dans le bloc `DECLARE` en tête du script :
+
+| Paramètre | Type | Défaut | Sémantique |
+|---|---|---|---|
+| `p_date_from` | `DATE` | `NULL` (= pas de borne basse) | Borne basse de la période auditée (inclusive) |
+| `p_date_to` | `DATE` | `SYSDATE` | Borne haute de la période (inclusive) |
+| `p_branch_code` | `VARCHAR2(10)` | `NULL` (= toutes agences) | Agence unique à auditer |
+| `p_branch_list` | `VARCHAR2(4000)` | `NULL` | Liste d'agences séparées par virgule (ex. `'001,002,055'`) |
+| `p_account_no` | `VARCHAR2(20)` | `NULL` | Compte client unique |
+| `p_account_list` | `VARCHAR2(4000)` | `NULL` | Liste de comptes séparés par virgule |
+| `p_customer_no` | `VARCHAR2(9)` | `NULL` | CIF client unique |
+| `p_currency` | `VARCHAR2(3)` | `NULL` | Devise à auditer (ex. `'XAF'`) |
+| `p_product_code` | `VARCHAR2(4)` | `NULL` | Produit FCUBS unique (LD, CL, IC, ...) |
+| `p_module` | `VARCHAR2(2)` | `NULL` | Module FCUBS (`LD`, `CL`, `IC`, `CH`, `GL`, ...) |
+| `p_materiality_lcy` | `NUMBER` | `1000` | Seuil de matérialité en devise locale pour filtrer le bruit |
+| `p_top_n` | `NUMBER` | `25` | Cardinalité des palmarès (top-N) |
+| `p_include_closed` | `CHAR(1)` | `'N'` | `Y` pour inclure les comptes/contrats clôturés |
+
+### 2.3 Règles de déclaration
+
+- **Un seul bloc de paramètres** en tête du script, encadré par un en-tête visible (`-- =====  PARAMETRES D'AUDIT  =====`).
+- Chaque paramètre est commenté : sémantique, type attendu, exemple d'utilisation, valeur par défaut.
+- Les paramètres **NULL** signifient « pas de filtre » ; le WHERE doit utiliser le pattern standard :
+  ```sql
+  AND (p_branch_code IS NULL OR t.BRANCH_CODE = p_branch_code)
+  AND (p_date_from   IS NULL OR t.TRN_DT >= p_date_from)
+  AND (p_date_to     IS NULL OR t.TRN_DT <= p_date_to)
+  ```
+- **Jamais** de concaténation dynamique pour construire le WHERE (risque d'injection SQL et illisibilité). Préférer le pattern `IS NULL OR …` ci-dessus.
+- Pour les listes (`p_branch_list`), utiliser la fonction native :
+  ```sql
+  AND (p_branch_list IS NULL
+       OR INSTR(',' || p_branch_list || ',', ',' || t.BRANCH_CODE || ',') > 0)
+  ```
+
+### 2.4 Rappel des paramètres dans le rapport
+
+Avant toute section de résultats, le script **doit** imprimer un bloc récapitulatif des paramètres actifs. Cela garantit la reproductibilité et la traçabilité :
+
+```
+===============================================================
+AUDIT PARAMETERS (as applied for this run)
+---------------------------------------------------------------
+  Execution timestamp ... 2026-04-17 11:45:03
+  Database instance ..... FCUBS_PROD
+  Period from ........... 2025-01-01
+  Period to ............. 2026-04-17
+  Branches .............. ALL
+  Materiality (LCY) ..... 1,000
+  Top-N ................. 25
+  Include closed ........ N
+===============================================================
+```
+
+Si un paramètre est à `NULL`, imprimer explicitement `ALL` ou `NO FILTER`, jamais une ligne vide.
+
+### 2.5 Validation des paramètres
+
+Avant toute requête :
+
+- Si `p_date_from > p_date_to`, lever une erreur explicite et arrêter (`RAISE_APPLICATION_ERROR(-20001, 'p_date_from > p_date_to')`).
+- Si un code agence est fourni, vérifier son existence dans `FBTM_BRANCH` et imprimer un warning si inconnu (sans arrêter).
+- Si `p_materiality_lcy < 0`, utiliser la valeur absolue avec un warning.
+
+### 2.6 Extension multi-modes
+
+Pour les scripts complexes, prévoir un paramètre de mode d'exécution :
+
+| Mode | Effet |
+|---|---|
+| `SUMMARY` | Indicateurs consolidés uniquement (rapide, < 1 min) |
+| `FULL` | Rapport complet (défaut) |
+| `DEEP` | Inclut les investigations détaillées (listes nominatives top-100, drill-down) |
+
+Ce paramètre (`p_mode VARCHAR2(10) := 'FULL'`) permet au management d'obtenir rapidement un tableau de bord sans relancer l'intégralité de l'audit.

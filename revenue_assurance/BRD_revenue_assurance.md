@@ -487,3 +487,154 @@ Les exigences non-fonctionnelles décrivent **comment** le script doit se compor
 | Taux d'erreurs interceptées | 100 % | toute exception non catch = bug |
 
 ---
+
+## 6. Paramétrage et interfaces
+
+Le script DOIT être **paramétrable** mais **utilisable sans paramètre** (tous optionnels). L'utilisateur édite les valeurs en tête du bloc, sans toucher au corps.
+
+### 6.1 Principe général
+
+- Chaque paramètre est déclaré comme **variable PL/SQL** en tête du bloc avec une **valeur par défaut** (le plus souvent `NULL`).
+- `NULL` ⇒ **pas de filtrage** sur la dimension correspondante (inclusion totale).
+- Le pattern SQL générique est : `AND (p_xxx IS NULL OR colonne = p_xxx)` pour conserver la planification d'index quand la valeur est `NULL`.
+- Pour une liste, on utilise un type `SYS.ODCIVARCHAR2LIST` (ou équivalent) rempli en tête : `AND (p_list IS NULL OR colonne IN (SELECT column_value FROM TABLE(p_list)))`.
+
+### 6.2 Catalogue des paramètres standard
+
+#### 6.2.1 Périmètre temporel
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_date_from` | `DATE` | `NULL` | Borne inférieure de la période auditée (inclusive). Par défaut, début du mois précédent si `NULL` et utilisé dans un thème temporel. |
+| `p_date_to` | `DATE` | `NULL` | Borne supérieure (inclusive). Par défaut, date métier courante. |
+| `p_as_of_date` | `DATE` | `NULL` | Date de photo pour les soldes (défaut : `SYSDATE`). |
+
+#### 6.2.2 Périmètre géographique / organisationnel
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_branch_code` | `VARCHAR2` | `NULL` | Agence unique. |
+| `p_branch_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste d'agences. Si renseignée, prime sur `p_branch_code`. |
+| `p_department` | `VARCHAR2` | `NULL` | Département / région bancaire (si taxonomie interne). |
+
+#### 6.2.3 Périmètre client / compte
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_customer_no` | `VARCHAR2` | `NULL` | Client unique. |
+| `p_customer_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste de clients. |
+| `p_account_no` | `VARCHAR2` | `NULL` | Compte unique. |
+| `p_account_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste de comptes. |
+| `p_customer_segment` | `VARCHAR2` | `NULL` | Segment (CORPORATE, SME, RETAIL, etc.). |
+
+#### 6.2.4 Produits et contrats
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_module` | `VARCHAR2` | `NULL` | Module à restreindre (CL, LD, SI, IC, MO, FT, FX, GL). |
+| `p_product_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Codes produits concernés. |
+| `p_account_class_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Classes de compte (CASA, OD, LOAN, etc.). |
+
+#### 6.2.5 Devises
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_ccy` | `VARCHAR2` | `NULL` | Devise unique (ISO 4217). |
+| `p_ccy_list` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste de devises. |
+| `p_include_fcy_only` | `CHAR(1)` | `'N'` | Si `'Y'`, n'inclure que les comptes FCY. |
+
+#### 6.2.6 Seuils de matérialité
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_materiality_lcy` | `NUMBER` | `100000` | Seuil global de matérialité en LCY ; tout montant absolu en deçà est relégué en `INFO`. |
+| `p_materiality_impact_lcy` | `NUMBER` | `1000000` | Seuil au-dessus duquel un constat est automatiquement `HIGH` au minimum. |
+| `p_materiality_critical_lcy` | `NUMBER` | `10000000` | Seuil au-dessus duquel un constat est `CRITICAL`. |
+| `p_min_days_overdue` | `NUMBER` | `30` | Ancienneté minimale pour qualifier un impayé / overdue. |
+| `p_min_days_dormant` | `NUMBER` | `180` | Ancienneté minimale pour qualifier un compte dormant. |
+
+#### 6.2.7 Mode d'exécution et verbosité
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_mode` | `VARCHAR2` | `'FULL'` | `SUMMARY`, `FULL` ou `DEEP`. |
+| `p_top_n` | `NUMBER` | `50` | Nombre de lignes max par extraction TOP-N. |
+| `p_verbose` | `CHAR(1)` | `'N'` | Si `'Y'`, ajoute les requêtes d'appui en pied de section. |
+| `p_include_perf_log` | `CHAR(1)` | `'Y'` | Inclut le bloc `[PERF]` en fin de rapport. |
+| `p_mask_pii` | `CHAR(1)` | `'Y'` | Masquage partiel des numéros de comptes / clients. |
+| `p_language` | `VARCHAR2` | `'EN'` | Langue du rapport (verrouillé à `EN` dans v1, cf. NFR-60). |
+
+#### 6.2.8 Contrôle des thèmes
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `p_sections_include` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste blanche d'identifiants de sections à exécuter (ex. `{'S01','S05'}`). |
+| `p_sections_exclude` | `SYS.ODCIVARCHAR2LIST` | `NULL` | Liste noire de sections à ignorer. Priorité sur `p_sections_include`. |
+
+### 6.3 Bloc d'écho des paramètres (exigence FR-03)
+
+Le rapport DOIT rappeler, dans les 30 premières lignes, **toutes** les valeurs appliquées (y compris les défauts calculés). Exemple de rendu attendu :
+
+```
+===============================================================================
+ REVENUE ASSURANCE & ACCOUNTING AUDIT — PARAMETERS IN EFFECT
+===============================================================================
+ Date from .............. 2026-03-01
+ Date to ................ 2026-03-31
+ As-of date ............. 2026-04-17
+ Branch(es) ............. (ALL)
+ Customer(s) ............ (ALL)
+ Account(s) ............. (ALL)
+ Module ................. (ALL)
+ Currency(ies) .......... (ALL)
+ Materiality (LCY) ...... 100,000
+ Mode ................... FULL
+ Top-N .................. 50
+ Mask PII ............... Y
+ Language ............... EN
+-------------------------------------------------------------------------------
+ Sections include ....... (ALL)
+ Sections exclude ....... (NONE)
+===============================================================================
+```
+
+### 6.4 Règles de validation des paramètres
+
+| Règle | Effet si violée |
+|---|---|
+| `p_date_from <= p_date_to` (si les deux renseignés) | Erreur FATAL, arrêt du script avec `ORA-20001`. |
+| `p_mode IN ('SUMMARY','FULL','DEEP')` | Erreur FATAL, `ORA-20002`. |
+| `p_top_n BETWEEN 1 AND 1000` | Valeur écrêtée + warning. |
+| `p_materiality_* >= 0` | Valeur écrêtée à 0 + warning. |
+| `p_language = 'EN'` | Autres valeurs refusées (v1), warning. |
+| `p_sections_include` et `p_sections_exclude` cohérents | Si une section est dans les deux, elle est **exclue** (priorité sûreté). |
+
+### 6.5 Interfaces d'entrée
+
+| Interface | Description |
+|---|---|
+| **Variables PL/SQL de tête** | Interface unique et obligatoire (édition directe du script). |
+| **SQL\*Plus `DEFINE`** | Optionnel : substitution `&p_xxx` possible mais **non requise**. À documenter uniquement si utilisée. |
+| **Fichier externe de configuration** | NON supporté en v1 (reporté). |
+
+### 6.6 Interfaces de sortie
+
+| Interface | Description |
+|---|---|
+| **`DBMS_OUTPUT.PUT_LINE`** | Canal principal du rapport. |
+| **SPOOL SQL\*Plus** | Redirection recommandée vers `reports/revenue_assurance_<RUN_ID>.txt`. |
+| **Table de persistance** | NON supportée en v1 ; pourra être ajoutée en v2 (table de findings). |
+
+### 6.7 Compatibilité avec l'exploration existante
+
+Les paramètres déclarés DOIVENT être **cohérents** avec les hypothèses prises par `explore_revenue_assurance.sql` afin de permettre une **comparaison** exploration/audit sur le même périmètre. Toute divergence de convention DOIT être explicitée en §10.
+
+### 6.8 Extensibilité du paramétrage
+
+Tout nouveau paramètre ajouté en v1.x DOIT :
+1. Conserver une **valeur par défaut rétro-compatible** (ne pas modifier le comportement d'un run déjà validé) ;
+2. Être déclaré dans le bloc d'écho (§6.3) ;
+3. Être documenté dans `bonnes_pratiques.md` §2 ;
+4. Incrémenter `C_SCRIPT_VERSION` en `MINOR`.
+
+---

@@ -1483,6 +1483,17 @@ Cette section formalise le **rattachement** de chaque contrôle §7 à une ou pl
 | S21 — Maker/checker           | X | X  | X  |   |   | X  | X  |   | X |
 | S22 — Inactive users active   | X | X  | X  |   |   | X  | X  |   | X |
 | S23 — Toxic role combinations | X | X  | X  | X  | X  | X  | X  |   | X |
+| S24 — Accounting scheme       | X | XX | X  |   | X  | XX | XX |   |   |
+| S25 — Non-compensation        | X | XX |    |   |   | X  | X  |   |   |
+| S26 — Cut-off                 |   | X  | X  |   |   | XX | XX |   |   |
+| S27 — Permanence des méthodes |   | X  |    |   |   | XX | XX |   |   |
+| S28 — GL nature consistency   | X | X  | X  | X  | X  | XX | XX |   |   |
+| S29 — Circular/structured     |   | XX |    |   |   |   |    |   |   |
+| S30 — Suspicious reversals    |   | X  | XX |   | X  | X  | X  |   |   |
+| S31 — Off-hours postings      | X | X  | X  |   |   | X  | X  |   | X |
+| S32 — Kiting                  |   | XX |    |   |   |   |    |   |   |
+| S33 — Employee red flags      | X | XX | X  |   |   | X  | X  |   | X |
+| S34 — Reference data tamper   | X | X  | X  |   |   | X  | X  |   |   |
 
 ### 9.4 Tableau détaillé — rubriques divisionnaires recommandées
 
@@ -1507,6 +1518,16 @@ Cette section formalise le **rattachement** de chaque contrôle §7 à une ou pl
 | S19 | `PCEC/33` (position de change), `PCEC/7`, `PCEC/6`. |
 | S20 | Transverse — objet même de la section. |
 | S21 / S22 / S23 | Transverse contrôle interne — citation PCEC à titre informatif. |
+| S24 | Transverse — foyer `PCEC/6`, `PCEC/7`, `PCEC/2`, `PCEC/38`. |
+| S25 | `PCEC/1`, `PCEC/2`, `PCEC/6`, `PCEC/7` — scission actif/passif et produit/charge. |
+| S26 | `PCEC/6`, `PCEC/7` (cut-off), `PCEC/38` (accruals frontaliers). |
+| S27 | `PCEC/6`, `PCEC/7` — effets de changement de méthode sur charges/produits. |
+| S28 | Toutes classes — contrôle du sens normal de solde. |
+| S29 / S32 | `PCEC/2` (clientèle) — foyer des cycles et kiting. |
+| S30 | `PCEC/5`, `PCEC/6`, `PCEC/7`, `PCEC/38` — contre-passations sensibles. |
+| S31 | Transverse — concentration horaire, classes sensibles. |
+| S33 | Transverse — usage `PCEC/2` employé. |
+| S34 | Transverse — liaison modification → débit, toutes classes concernées. |
 
 ### 9.5 Dérivation automatique GL → PCEC
 
@@ -1868,6 +1889,7 @@ Le présent BRD entre en vigueur après signature ou validation documentée des 
 | Version | Date | Auteur(s) | Changements |
 |---|---|---|---|
 | 0.1 | 2026-04-17 | Claude (assistant) | Rédaction initiale section par section, alignée sur le rapport d'exploration et le PCEC COBAC R-98/01. |
+| 0.2 | 2026-04-17 | Claude (assistant) | Ajout §7.F (Conformité PCEC & méthodes comptables — S24–S28), §7.G (Détection de fraudes — S29–S34), §13 (Comptes sensibles & schémas comptables), §14 (Principes & méthodes comptables), §15 (Dispositif anti-fraude). MAJ §7.Z, §7.99 et §9. |
 | 1.0 | _à venir_ | _après approbation_ | Version validée, figée avant démarrage de la rédaction du script. |
 
 ---

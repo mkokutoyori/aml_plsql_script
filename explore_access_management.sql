@@ -77,7 +77,7 @@ BEGIN
     p_section('A-01. VOLUMETRIE GENERALE — TABLES DE SECURITE (SM*, FB*, UDF)');
 
     FOR t IN (
-        SELECT table_name, categorie FROM (
+        SELECT table_name, categorie, sort_ord FROM (
             SELECT 'SMTB_USER'                   AS table_name, 'Utilisateurs'         AS categorie, 1  AS sort_ord FROM DUAL UNION ALL
             SELECT 'SMTB_USER_ROLE',               'Affectation role',                  2  FROM DUAL UNION ALL
             SELECT 'SMTB_USER_CENTRAL_ROLES',      'Roles centralises',                 3  FROM DUAL UNION ALL
@@ -669,7 +669,7 @@ BEGIN
 
     p_sub('Fonctions SENSIBLES — focus gestion des acces / parametres');
     FOR f IN (
-        SELECT func FROM (
+        SELECT func, sort_ord FROM (
             SELECT 'SMDUSRDF' AS func, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'SMDROLDF',        2 FROM DUAL UNION ALL
             SELECT 'SMDCHPWD',        3 FROM DUAL UNION ALL
@@ -1412,7 +1412,7 @@ BEGIN
 
     p_sub('Actions sensibles — focus securite / parametres');
     FOR a IN (
-        SELECT action FROM (
+        SELECT action, sort_ord FROM (
             SELECT 'NEW' AS action, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'MODIFY',         2 FROM DUAL UNION ALL
             SELECT 'DELETE',         3 FROM DUAL UNION ALL
@@ -1734,7 +1734,7 @@ BEGIN
 
         p_sub('Decompte des droits accordes (Y) par action');
         FOR a IN (
-            SELECT col FROM (
+            SELECT col, sort_ord FROM (
                 SELECT 'GENERATE' col, 1 sort_ord FROM DUAL UNION ALL
                 SELECT 'HOLD',             2 FROM DUAL UNION ALL
                 SELECT 'CANCEL',           3 FROM DUAL UNION ALL
@@ -2477,7 +2477,7 @@ BEGIN
 
     p_sub('A-17.1 Volume de privileges admin par fonction cible');
     FOR f IN (
-        SELECT func, label FROM (
+        SELECT func, label, sort_ord FROM (
             SELECT 'SMDUSRDF' func, 'Creation/modif utilisateurs' label, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'SMDROLDF',       'Creation/modif roles',               2 FROM DUAL UNION ALL
             SELECT 'SMDCHPWD',       'Reset mot de passe',                 3 FROM DUAL UNION ALL

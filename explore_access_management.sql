@@ -3491,11 +3491,34 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN NULL; END;
 
     -- =========================================================
-    -- A-16. SYNTHESE FINALE & REFERENCES
+    -- A-23. SYNTHESE FINALE & REFERENCES
     -- =========================================================
-    p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');
+    p_section('A-23. SYNTHESE FINALE — perimetre couvert par ce script');
 
-    DBMS_OUTPUT.PUT_LINE('  Perimetre explore (24 tables + UDF) :');
+    DBMS_OUTPUT.PUT_LINE('  Sections produites :');
+    DBMS_OUTPUT.PUT_LINE('    A-01  Inventaire SM*/FB* & volumetrie');
+    DBMS_OUTPUT.PUT_LINE('    A-02  SMTB_USER — cartographie identites');
+    DBMS_OUTPUT.PUT_LINE('    A-03  Politique mdp SMTB_PARAMETERS / PASSWORD_HISTORY');
+    DBMS_OUTPUT.PUT_LINE('    A-04  SMTB_USER_DISABLE / USERLOG_DETAILS — cycle de vie');
+    DBMS_OUTPUT.PUT_LINE('    A-05  Journalisation SMTB_SMS_LOG');
+    DBMS_OUTPUT.PUT_LINE('    A-06  Roles SMTB_ROLE_MASTER / ROLE_DETAIL / ROLE_BRANCHES');
+    DBMS_OUTPUT.PUT_LINE('    A-07  Affectations SMTB_USER_ROLE / USER_CENTRAL_ROLES');
+    DBMS_OUTPUT.PUT_LINE('    A-08  Limites SMTB_ROLE_FUNC_LIMIT_CUSTOM / DETAIL');
+    DBMS_OUTPUT.PUT_LINE('    A-09  SMTB_USER (suite) — RM, staff, overrides');
+    DBMS_OUTPUT.PUT_LINE('    A-10  SMTB_SMS_ACTION_LOG — actions metier');
+    DBMS_OUTPUT.PUT_LINE('    A-11  Catalogue fonctionnel (MENU/FUNCTION_DESCRIPTION/MODULES)');
+    DBMS_OUTPUT.PUT_LINE('    A-12  Droits SWIFT / files / stages');
+    DBMS_OUTPUT.PUT_LINE('    A-13  FlexBranch FBTB_USER / FBTM_BRANCH / TILLS');
+    DBMS_OUTPUT.PUT_LINE('    A-14  UDF securite (SMDROLDF, SMDUSRDF, STDBRANC, STDACCLS)');
+    DBMS_OUTPUT.PUT_LINE('    A-15  Coherence, orphelins, SoD, privileges excessifs');
+    DBMS_OUTPUT.PUT_LINE('    A-17  Cartographie administrateurs (SM* / makers historiques)');
+    DBMS_OUTPUT.PUT_LINE('    A-18  Decodage CONTROL_STRING (matrice fine N/C/D/A/Q)');
+    DBMS_OUTPUT.PUT_LINE('    A-19  Acces aux donnees sensibles (CIF/KYC/comptes/AML)');
+    DBMS_OUTPUT.PUT_LINE('    A-20  Tracabilite maker/checker sur tables metier');
+    DBMS_OUTPUT.PUT_LINE('    A-21  Empreinte comportementale (heures, jours, sessions)');
+    DBMS_OUTPUT.PUT_LINE('    A-22  Profil de risque par agence + 15 KRI consolides');
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  Perimetre explore (29 tables systeme + 4 UDF + 4 tables metier) :');
     DBMS_OUTPUT.PUT_LINE('    - Comptes & identite       : SMTB_USER, FBTB_USER, SMDUSRDF (UDF)');
     DBMS_OUTPUT.PUT_LINE('    - Cycle de vie & inactivite: SMTB_USER_DISABLE, SMTB_USERLOG_DETAILS');
     DBMS_OUTPUT.PUT_LINE('    - Roles & privileges       : SMTB_ROLE_MASTER, SMTB_ROLE_DETAIL,');
@@ -3511,23 +3534,29 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('                                  SMTB_QUEUE_RIGHTS, SMTB_ACTION_CONTROLS,');
     DBMS_OUTPUT.PUT_LINE('                                  SMTB_STAGE_FIELD_VALUE');
     DBMS_OUTPUT.PUT_LINE('    - Topologie agences        : FBTM_BRANCH, FBTM_BRANCH_INFO, STDBRANC (UDF)');
+    DBMS_OUTPUT.PUT_LINE('    - Empreinte & donnees metier: STTM_CUSTOMER, STTB_ACCOUNT,');
+    DBMS_OUTPUT.PUT_LINE('                                  STTM_KYC_MASTER, ACTB_HISTORY');
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  Prochaines etapes suggerees :');
     DBMS_OUTPUT.PUT_LINE('    1. Rediger un rapport d''exploration (exploration_access_report.txt)');
     DBMS_OUTPUT.PUT_LINE('    2. Etablir le dictionnaire de donnees securite / referentiels');
     DBMS_OUTPUT.PUT_LINE('    3. Concevoir un script d''audit IAM (controles automatises COBAC / CIS)');
-    DBMS_OUTPUT.PUT_LINE('    4. Definir KRI : taux dormance, SoD, roles universels, MDP non tournes');
+    DBMS_OUTPUT.PUT_LINE('    4. Industrialiser les 15 KRI (section A-22.7) dans un tableau de bord');
+    DBMS_OUTPUT.PUT_LINE('    5. Construire les alertes UBA (section A-21) pour SIEM');
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  Referentiels applicables :');
     DBMS_OUTPUT.PUT_LINE('    - COBAC R-2016/01 (controle interne etablissements de credit CEMAC)');
     DBMS_OUTPUT.PUT_LINE('    - ISO/IEC 27001 A.9 (Access Control) & A.12.4 (Logging)');
+    DBMS_OUTPUT.PUT_LINE('    - ISO/IEC 27001 A.6.1.2 (segregation des taches)');
     DBMS_OUTPUT.PUT_LINE('    - PCI-DSS v4 8.x (gestion des identites et authentification)');
     DBMS_OUTPUT.PUT_LINE('    - CIS Controls v8 # 5 (Account Management) & # 6 (Access Control)');
+    DBMS_OUTPUT.PUT_LINE('    - NIST SP 800-53 AC-2/AC-5/AC-6 (account/SoD/least privilege)');
+    DBMS_OUTPUT.PUT_LINE('    - GAFI Reco 10/18 (CDD & controle interne)');
 
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('>>> EXPLORATION TERMINEE — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));
-    DBMS_OUTPUT.PUT_LINE('>>> 16 sections - perimetre IAM/SECURITE FLEXCUBE');
+    DBMS_OUTPUT.PUT_LINE('>>> 22 sections — perimetre IAM/SECURITE FLEXCUBE + UBA + KRI');
     DBMS_OUTPUT.PUT_LINE(v_sep);
 
 EXCEPTION

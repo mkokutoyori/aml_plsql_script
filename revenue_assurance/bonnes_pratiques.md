@@ -1168,3 +1168,165 @@ ou
 ```
 
 Le client doit savoir en un coup d'œil si l'audit s'est terminé normalement, même si des erreurs non-bloquantes sont survenues.
+
+---
+
+## 11. Gestion des erreurs & logging
+
+### 11.1 Taxonomie des erreurs
+
+Trois niveaux à distinguer :
+
+| Niveau | Exemple | Réaction |
+|---|---|---|
+| **Fatal** | Paramètre incohérent, base indisponible, pas de droit SELECT | Stopper l'audit, sortie `-20001..-20099` |
+| **Bloquant local** | Colonne obsolète dans une requête SECTION critique | Logger, marquer le finding comme `[ERROR]`, continuer |
+| **Non-bloquant** | Table optionnelle absente, sample vide | Logger en `[LOG ]`, imprimer `N/A`, continuer |
+
+### 11.2 Erreurs fatales — validation préalable
+
+Dans le tout premier bloc `BEGIN` du script, valider :
+
+```sql
+-- Sanity checks
+IF p_date_from IS NOT NULL AND p_date_to IS NOT NULL
+   AND p_date_from > p_date_to THEN
+    RAISE_APPLICATION_ERROR(-20001,
+        'p_date_from (' || TO_CHAR(p_date_from, 'YYYY-MM-DD') ||
+        ') > p_date_to (' || TO_CHAR(p_date_to, 'YYYY-MM-DD') || ')');
+END IF;
+
+IF p_materiality_lcy < 0 THEN
+    print_warning('p_materiality_lcy < 0 — absolute value applied');
+    p_materiality_lcy := ABS(p_materiality_lcy);
+END IF;
+
+-- Check database connectivity and expected schema
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM ACTB_HISTORY WHERE ROWNUM = 1;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE_APPLICATION_ERROR(-20002,
+            'ACTB_HISTORY not readable: ' || SQLERRM);
+END;
+```
+
+### 11.3 Plage -20001 à -20099 réservée
+
+Réserver :
+
+- `-20001` à `-20019` : erreurs de paramètres
+- `-20020` à `-20039` : erreurs de schéma / connectivité
+- `-20040` à `-20059` : erreurs de logique d'audit (assertion violée)
+- `-20060` à `-20099` : erreurs diverses
+
+Maintenir un tableau des codes utilisés dans `doc/error_codes.md`.
+
+### 11.4 Handler WHEN OTHERS — obligations
+
+Tout `WHEN OTHERS` doit :
+
+1. Capturer `SQLCODE` et `SQLERRM`.
+2. Logger dans le rapport avec préfixe `[LOG ]` ou `[ERROR]`.
+3. **Jamais** `NULL;` silencieux (cf. §3.2).
+4. Préserver l'information d'origine : `SUBSTR(SQLERRM, 1, 200)` pour éviter les lignes trop longues, mais conserver le message.
+
+```sql
+EXCEPTION
+    WHEN OTHERS THEN
+        log_error(
+            p_section => 'SECTION 12',
+            p_subtest => '12.13 ACTB_ACCBAL_HISTORY',
+            p_sqlcode => SQLCODE,
+            p_sqlerrm => SUBSTR(SQLERRM, 1, 400)
+        );
+        print_kv('  ACTB_ACCBAL_HISTORY stats', 'N/A (see [ERROR] log)');
+```
+
+### 11.5 Helper `log_error`
+
+Procédure standard :
+
+```sql
+PROCEDURE log_error(
+    p_section VARCHAR2,
+    p_subtest VARCHAR2,
+    p_sqlcode NUMBER,
+    p_sqlerrm VARCHAR2
+) IS
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('[ERROR] ' ||
+        TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.FF3') || ' | ' ||
+        p_section || ' / ' || p_subtest || ' | ' ||
+        'SQLCODE=' || TO_CHAR(p_sqlcode) || ' | ' ||
+        p_sqlerrm);
+    g_error_count := g_error_count + 1;
+END;
+```
+
+Le compteur global `g_error_count` est incrémenté pour alimenter la ligne finale du rapport (§10.11).
+
+### 11.6 Nesting des blocs
+
+Préférer un grand nombre de petits blocs `BEGIN/EXCEPTION/END;` bien délimités à un seul gros `WHEN OTHERS` qui catch toute une section.
+
+Raison : un seul `WHEN OTHERS` masque la localisation de l'erreur. Dix petits blocs isolent précisément la sous-requête défaillante et permettent au reste de la section de tourner normalement.
+
+### 11.7 Messages de log — format
+
+Chaque log ligne imprime :
+
+```
+[LEVEL] YYYY-MM-DD HH24:MI:SS.FF3 | SECTION N.m | SQLCODE=... | message
+```
+
+Avec `LEVEL` ∈ {`INFO `, `WARN `, `ERROR`, `PERF `, `AUDIT`}. Le padding à 5 caractères maintient l'alignement visuel dans le rapport.
+
+### 11.8 Erreurs silencieuses — interdiction
+
+**Les comportements suivants sont interdits** :
+
+- `EXCEPTION WHEN OTHERS THEN NULL;`
+- Ignorer le retour d'une procédure sans vérifier qu'elle a fonctionné.
+- Dire « la requête a retourné 0 » sans distinguer « 0 parce qu'il n'y a rien » de « 0 parce que la requête a échoué ».
+
+Cette distinction est cruciale pour un audit : un finding à 0 enregistrements doit être une **absence confirmée**, pas une défaillance masquée.
+
+### 11.9 Cas spécifique : table partiellement absente
+
+Certaines installations FCUBS n'ont pas toutes les tables (modules non licenciés). Pour ces cas, utiliser le pattern :
+
+```sql
+BEGIN
+    EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM GETM_FACILITY WHERE ROWNUM=1';
+    -- table exists, run the actual audit
+    BEGIN
+        SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE ...;
+        print_kv('  Facility audit', TO_CHAR(v_count));
+    EXCEPTION
+        WHEN OTHERS THEN log_error(...);
+    END;
+EXCEPTION
+    WHEN OTHERS THEN
+        print_kv('  Facility audit', 'SKIPPED (table GETM_FACILITY unavailable)');
+END;
+```
+
+Le premier `EXECUTE IMMEDIATE` teste l'existence sans faire planter le parse.
+
+### 11.10 Résumé d'erreurs en tête de rapport
+
+Si des erreurs non-bloquantes sont survenues, un bloc `KNOWN LIMITATIONS` résume en tête (après le summary) :
+
+```
+---------------------------------------------------------------
+KNOWN LIMITATIONS — 2 sections ran with reduced scope
+---------------------------------------------------------------
+  [SECTION 18.5] SMTB_PASSWORD_HISTORY not accessible
+    -> audit of password rotation policy SKIPPED
+  [SECTION 20.7] LDTB_COMPUTATION_HANDOFF empty
+    -> EOD handoff monitoring returned no data
+---------------------------------------------------------------
+```
+
+Le lecteur sait immédiatement que l'audit n'a pas eu 100 % de couverture, et où se situent les zones aveugles.

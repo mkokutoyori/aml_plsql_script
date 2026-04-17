@@ -4461,6 +4461,230 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S20 -- GL mapping gaps vs PCEC COBAC
+    -- =================================================================
+    -- [F-190] GLs whose first-digit class is outside the PCEC 1..9
+    --         range (unclassifiable).
+    -- [F-191] GLs whose nature (per description) seems inconsistent
+    --         with the derived class (heuristic: product GLs mapped
+    --         to class 1 etc.).
+    -- [F-192] Significant movement volume on OTHER / MISC buckets.
+    -- PCEC coverage objective >= 95%.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_190     PLS_INTEGER := 0;
+        l_n_191     PLS_INTEGER := 0;
+        l_n_192     PLS_INTEGER := 0;
+        l_gl        VARCHAR2(30);
+        l_desc      VARCHAR2(200);
+        l_class     VARCHAR2(1);
+        l_cnt       NUMBER;
+        l_amt       NUMBER;
+    BEGIN
+        IF NOT f_section_enabled('S20') THEN
+            log_info('Section S20 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S20',
+                'GL mapping gaps vs PCEC COBAC');
+
+            -- [F-190] Unclassifiable GLs (first digit not 1..9) --------
+            l_sql :=
+                'SELECT m.GL_CODE, NVL(m.DESCRIPTION,''?'') AS DESCR, '
+             || '       SUBSTR(NVL(m.GL_CODE,''0''),1,1) AS CLS, '
+             || '       ( SELECT COUNT(*) FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '       ) AS CNT, '
+             || '       ( SELECT NVL(SUM(NVL(h.LCY_AMOUNT,0)),0) '
+             || '           FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d3 AND :d4 '
+             || '       ) AS AMT '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE SUBSTR(NVL(m.GL_CODE,''0''),1,1) '
+             || '       NOT IN (''1'',''2'',''3'',''4'',''5'', '
+             || '               ''6'',''7'',''8'',''9'') '
+             || ' ORDER BY 5 DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_desc, l_class, l_cnt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_190 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S20',
+                        p_code       => 'RA-S20-F190',
+                        p_severity   =>
+                            CASE WHEN ABS(NVL(l_amt,0))
+                                      >= NVL(p_materiality_lcy,0)
+                                 THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'GL outside PCEC classes 1..9: '
+                                     || 'descr='
+                                     || SUBSTR(NVL(l_desc,'?'),1,60)
+                                     || ' cls=' || l_class
+                                     || ' cnt=' || TO_CHAR(l_cnt)
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'PCEC_CLASS=' || l_class
+                    );
+                    l_n_190 := l_n_190 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S20 F-190 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-191] Nature/class heuristic inconsistency -------------
+            -- Heuristic: descriptions containing PRODUIT/PRODUCT/REVENUE
+            -- should map to class 7; CHARGE/EXPENSE to class 6;
+            -- SUSPENSE to 38.
+            l_sql :=
+                'SELECT m.GL_CODE, NVL(m.DESCRIPTION,''?'') AS DESCR, '
+             || '       SUBSTR(NVL(m.GL_CODE,''0''),1,1) AS CLS '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE ( UPPER(m.DESCRIPTION) LIKE ''%PRODUIT%'' '
+             || '      OR UPPER(m.DESCRIPTION) LIKE ''%REVENUE%'' '
+             || '      OR UPPER(m.DESCRIPTION) LIKE ''%INCOME%'' ) '
+             || '   AND SUBSTR(NVL(m.GL_CODE,''0''),1,1) <> ''7'' '
+             || ' UNION ALL '
+             || 'SELECT m.GL_CODE, NVL(m.DESCRIPTION,''?''), '
+             || '       SUBSTR(NVL(m.GL_CODE,''0''),1,1) '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE ( UPPER(m.DESCRIPTION) LIKE ''%CHARGE%'' '
+             || '      OR UPPER(m.DESCRIPTION) LIKE ''%EXPENSE%'' ) '
+             || '   AND SUBSTR(NVL(m.GL_CODE,''0''),1,1) <> ''6'' '
+             || ' UNION ALL '
+             || 'SELECT m.GL_CODE, NVL(m.DESCRIPTION,''?''), '
+             || '       SUBSTR(NVL(m.GL_CODE,''0''),1,1) '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE UPPER(m.DESCRIPTION) LIKE ''%SUSPENSE%'' '
+             || '   AND SUBSTR(NVL(m.GL_CODE,''0''),1,2) <> ''38''';
+
+            BEGIN
+                OPEN l_cur FOR l_sql;
+                LOOP
+                    FETCH l_cur INTO l_gl, l_desc, l_class;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_191 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S20',
+                        p_code       => 'RA-S20-F191',
+                        p_severity   => 'MEDIUM',
+                        p_message    => 'GL nature/class heuristic '
+                                     || 'mismatch: descr='
+                                     || SUBSTR(NVL(l_desc,'?'),1,60)
+                                     || ' cls=' || l_class,
+                        p_entity     => l_gl,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'HEURISTIC=description_vs_first_digit'
+                    );
+                    l_n_191 := l_n_191 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S20 F-191 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-192] Volume on OTHER / MISC / DIVERS buckets ----------
+            l_sql :=
+                'SELECT m.GL_CODE, NVL(m.DESCRIPTION,''?'') AS DESCR, '
+             || '       ( SELECT COUNT(*) FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '       ) AS CNT, '
+             || '       ( SELECT NVL(SUM(ABS(NVL(h.LCY_AMOUNT,0))),0) '
+             || '           FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d3 AND :d4 '
+             || '       ) AS AMT '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE ( UPPER(NVL(m.DESCRIPTION,''?'')) LIKE ''%OTHER%'' '
+             || '      OR UPPER(NVL(m.DESCRIPTION,''?'')) LIKE ''%DIVERS%'' '
+             || '      OR UPPER(NVL(m.DESCRIPTION,''?'')) LIKE ''%MISC%'' ) '
+             || ' ORDER BY 4 DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_gl, l_desc, l_cnt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_192 >= NVL(p_top_n, 50);
+
+                    IF ABS(NVL(l_amt, 0))
+                       < NVL(p_materiality_lcy, 0) THEN
+                        EXIT;
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S20',
+                        p_code       => 'RA-S20-F192',
+                        p_severity   =>
+                            CASE WHEN ABS(NVL(l_amt,0))
+                                      >= NVL(p_materiality_impact_lcy,0)
+                                 THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'High volume on OTHER/MISC GL: '
+                                     || 'descr='
+                                     || SUBSTR(NVL(l_desc,'?'),1,60)
+                                     || ' cnt=' || TO_CHAR(l_cnt)
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'BUCKET=OTHER'
+                    );
+                    l_n_192 := l_n_192 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S20 F-192 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-190 findings (outside 1..9)',
+                TO_CHAR(l_n_190));
+            print_kv('F-191 findings (nature mismatch)',
+                TO_CHAR(l_n_191));
+            print_kv('F-192 findings (OTHER/MISC volume)',
+                TO_CHAR(l_n_192));
+
+            print_section_footer('S20',
+                l_n_190 + l_n_191 + l_n_192);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S20', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S20', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

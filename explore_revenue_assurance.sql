@@ -4276,5 +4276,268 @@ BEGIN
     WHERE PREVIOUS_ACCRUAL_TO_DATE < SYSDATE - 90;
     print_kv('  Produits sans accrual depuis >90j', TO_CHAR(v_count));
 
+    ----------------------------------------------------------------
+    -- SECTION 16 : Clientèle & KYC — STTM_CUSTOMER / KYC / Personal
+    --   Revenue Assurance : un statut client peut bloquer / fausser
+    --   la facturation. On explore :
+    --    - CIF_STATUS / DECEASED / FROZEN / WHEREABOUTS_UNKNOWN
+    --    - WHT_PCT (withholding tax) & TAX_GROUP / CHARGE_GROUP
+    --    - KYC expirés (KYC_NXT_REVIEW_DATE passée) encore actifs
+    --    - AML_REQUIRED non aligné avec AML_CUSTOMER_GRP
+    --    - Catégorie client vs profil risque
+    ----------------------------------------------------------------
+    print_section('SECTION 16 — Clientèle & KYC');
+
+    -- 16.1 Volumétrie STTM_CUSTOMER
+    DBMS_OUTPUT.PUT_LINE('  [16.1 Volumétrie STTM_CUSTOMER]');
+    safe_count('STTM_CUSTOMER', '  Total clients');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE AUTH_STAT='A';
+    print_kv('  Autorisés (A)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE AUTH_STAT='U';
+    print_kv('  Non autorisés (U)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE RECORD_STAT='C';
+    print_kv('  Fermés (RECORD_STAT=C)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE RECORD_STAT='O';
+    print_kv('  Ouverts (RECORD_STAT=O)', TO_CHAR(v_count));
+
+    -- 16.2 CUSTOMER_TYPE / CUSTOMER_CATEGORY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.2 CUSTOMER_TYPE]');
+    FOR r IN (SELECT NVL(CUSTOMER_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUSTOMER GROUP BY CUSTOMER_TYPE ORDER BY nb DESC) LOOP
+        print_kv('  TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.2.b Top 15 CUSTOMER_CATEGORY]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CUSTOMER_CATEGORY,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUSTOMER GROUP BY CUSTOMER_CATEGORY
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CAT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.3 CIF_STATUS (statut client globale : actif / gelé / contentieux…)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.3 CIF_STATUS]');
+    FOR r IN (SELECT NVL(CIF_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUSTOMER GROUP BY CIF_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  CIF_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.3.b Clients sensibles
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE DECEASED='Y';
+    print_kv('  DECEASED=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE FROZEN='Y';
+    print_kv('  FROZEN=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE WHEREABOUTS_UNKNOWN='Y';
+    print_kv('  WHEREABOUTS_UNKNOWN=Y', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE AML_REQUIRED='Y';
+    print_kv('  AML_REQUIRED=Y', TO_CHAR(v_count));
+
+    -- 16.3.c Clients décédés avec comptes encore actifs (leakage)
+    SELECT COUNT(DISTINCT c.CUSTOMER_NO) INTO v_count FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO
+    WHERE c.DECEASED='Y'
+      AND NVL(a.AC_STAT_DORMANT,'N')<>'Y'
+      AND NVL(a.AC_STAT_FROZEN,'N')<>'Y';
+    print_kv('  DECEASED avec comptes non gelés (anomalie RA)', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT c.CUSTOMER_NO) INTO v_count FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO
+    WHERE c.FROZEN='Y'
+      AND NVL(a.ACY_CURR_BALANCE,0) <> 0;
+    print_kv('  FROZEN avec balance <> 0', TO_CHAR(v_count));
+
+    -- 16.4 Ancienneté relation client (CIF_CREATION_DATE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.4 CIF_CREATION_DATE — cohortes d''ouverture]');
+    FOR r IN (
+        SELECT TO_CHAR(CIF_CREATION_DATE,'YYYY') yr, COUNT(*) nb
+        FROM STTM_CUSTOMER
+        WHERE CIF_CREATION_DATE IS NOT NULL
+        GROUP BY TO_CHAR(CIF_CREATION_DATE,'YYYY')
+        ORDER BY yr DESC
+    ) LOOP
+        print_kv('  ' || r.yr, TO_CHAR(r.nb));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER WHERE CIF_CREATION_DATE IS NULL;
+    print_kv('  CIF_CREATION_DATE NULL', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER
+    WHERE CIF_CREATION_DATE IS NOT NULL AND CIF_CREATION_DATE > SYSDATE;
+    print_kv('  CIF_CREATION_DATE > SYSDATE (anomalie)', TO_CHAR(v_count));
+
+    -- 16.5 Ségrégation fiscale & commerciale (CHARGE_GROUP, TAX_GROUP, WHT_PCT)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.5 CHARGE_GROUP / TAX_GROUP / WHT_PCT]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CHARGE_GROUP,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUSTOMER GROUP BY CHARGE_GROUP
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CHARGE_GROUP = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(TAX_GROUP,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUSTOMER GROUP BY TAX_GROUP
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  TAX_GROUP = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.5.b WHT_PCT distribution
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.5.b WHT_PCT (retenue à la source)]');
+    FOR r IN (SELECT NVL(TO_CHAR(WHT_PCT),'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUSTOMER GROUP BY WHT_PCT ORDER BY nb DESC) LOOP
+        print_kv('  WHT_PCT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER
+    WHERE WHT_PCT IS NOT NULL AND WHT_PCT > 0;
+    print_kv('  Clients avec WHT_PCT > 0', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER
+    WHERE WHT_PCT IS NOT NULL AND (WHT_PCT < 0 OR WHT_PCT > 100);
+    print_kv('  WHT_PCT hors [0..100] (anomalie)', TO_CHAR(v_count));
+
+    -- 16.6 Risque — CREDIT_RATING / RISK_CATEGORY / RISK_PROFILE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.6 Profil de risque]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CREDIT_RATING,'(NULL)') s, COUNT(*) nb
+            FROM STTM_CUSTOMER GROUP BY CREDIT_RATING
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CREDIT_RATING = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(RISK_CATEGORY,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUSTOMER GROUP BY RISK_CATEGORY ORDER BY nb DESC) LOOP
+        print_kv('  RISK_CATEGORY = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(RISK_PROFILE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_CUSTOMER GROUP BY RISK_PROFILE ORDER BY nb DESC) LOOP
+        print_kv('  RISK_PROFILE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.7 STTM_CUSTOMER_CAT — référentiel catégories
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.7 Référentiel STTM_CUSTOMER_CAT]');
+    safe_count('STTM_CUSTOMER_CAT', '  Total catégories');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER_CAT WHERE AUTH_STAT='A';
+    print_kv('  Catégories autorisées', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT * FROM (
+            SELECT CUST_CAT, CUST_CAT_DESC
+            FROM STTM_CUSTOMER_CAT
+            WHERE RECORD_STAT='O' AND AUTH_STAT='A'
+            ORDER BY CUST_CAT
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || r.CUST_CAT, SUBSTR(NVL(r.CUST_CAT_DESC,''),1,60));
+    END LOOP;
+
+    -- 16.7.b Catégories client non référencées
+    SELECT COUNT(DISTINCT c.CUSTOMER_CATEGORY) INTO v_count FROM STTM_CUSTOMER c
+    WHERE c.CUSTOMER_CATEGORY IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM STTM_CUSTOMER_CAT cc
+        WHERE cc.CUST_CAT = c.CUSTOMER_CATEGORY
+      );
+    print_kv('  Catégories clients non référencées (FK cassée)', TO_CHAR(v_count));
+
+    -- 16.8 STTM_CUST_PERSONAL — clients particuliers / mineurs
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.8 STTM_CUST_PERSONAL]');
+    safe_count('STTM_CUST_PERSONAL', '  Total personnes');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL WHERE MINOR='Y';
+    print_kv('  Mineurs', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL
+    WHERE DATE_OF_BIRTH IS NOT NULL
+      AND MONTHS_BETWEEN(SYSDATE, DATE_OF_BIRTH)/12 > 110;
+    print_kv('  Âge > 110 ans (anomalie données)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL
+    WHERE DATE_OF_BIRTH IS NOT NULL
+      AND DATE_OF_BIRTH > SYSDATE;
+    print_kv('  DATE_OF_BIRTH future (anomalie)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL
+    WHERE DATE_OF_BIRTH IS NULL;
+    print_kv('  DATE_OF_BIRTH NULL', TO_CHAR(v_count));
+
+    -- 16.8.b Mineurs sans guardian
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL
+    WHERE MINOR='Y' AND LEGAL_GUARDIAN IS NULL;
+    print_kv('  Mineurs SANS LEGAL_GUARDIAN', TO_CHAR(v_count));
+
+    -- 16.8.c Passports expirés
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_PERSONAL
+    WHERE PPT_EXP_DATE IS NOT NULL AND PPT_EXP_DATE < TRUNC(SYSDATE);
+    print_kv('  Passeport expiré', TO_CHAR(v_count));
+
+    -- 16.9 STTM_KYC_MASTER — pilotage KYC
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.9 STTM_KYC_MASTER — RISK_LEVEL]');
+    safe_count('STTM_KYC_MASTER', '  Total KYC master');
+    FOR r IN (SELECT NVL(RISK_LEVEL,'(NULL)') s, COUNT(*) nb
+              FROM STTM_KYC_MASTER GROUP BY RISK_LEVEL ORDER BY nb DESC) LOOP
+        print_kv('  RISK_LEVEL = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(KYC_CUST_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_KYC_MASTER GROUP BY KYC_CUST_TYPE ORDER BY nb DESC) LOOP
+        print_kv('  KYC_CUST_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.10 KYC Retail — PEP, nationality, revenus
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.10 KYC RETAIL]');
+    safe_count('STTM_KYC_RETAIL', '  Total KYC retail');
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL WHERE PEP='Y';
+    print_kv('  PEP=Y (politically exposed person)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL
+    WHERE KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND KYC_NXT_REVIEW_DATE < TRUNC(SYSDATE);
+    print_kv('  KYC retail revue DUE (en retard)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_RETAIL
+    WHERE KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND KYC_NXT_REVIEW_DATE < ADD_MONTHS(TRUNC(SYSDATE),-12);
+    print_kv('  KYC retail revue DUE > 1 an', TO_CHAR(v_count));
+
+    -- 16.11 KYC Corporate
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.11 KYC CORPORATE]');
+    safe_count('STTM_KYC_CORPORATE', '  Total KYC corporate');
+    SELECT COUNT(*) INTO v_count FROM STTM_KYC_CORPORATE
+    WHERE KYC_NXT_REVIEW_DATE IS NOT NULL
+      AND KYC_NXT_REVIEW_DATE < TRUNC(SYSDATE);
+    print_kv('  KYC corporate revue DUE', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(COMPANY_TYPE,'(NULL)') s, COUNT(*) nb
+            FROM STTM_KYC_CORPORATE GROUP BY COMPANY_TYPE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  COMPANY_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 16.12 Cohérence : clients avec comptes mais sans KYC
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [16.12 Cohérence clients/KYC]');
+    SELECT COUNT(DISTINCT c.CUSTOMER_NO) INTO v_count FROM STTM_CUSTOMER c
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_NO = c.CUSTOMER_NO
+    WHERE c.AML_REQUIRED='Y'
+      AND NOT EXISTS (SELECT 1 FROM STTM_KYC_RETAIL k    WHERE k.KYC_REF_NO = c.CUSTOMER_NO)
+      AND NOT EXISTS (SELECT 1 FROM STTM_KYC_CORPORATE kc WHERE kc.KYC_REF_NO = c.CUSTOMER_NO);
+    print_kv('  AML_REQUIRED=Y et sans fiche KYC', TO_CHAR(v_count));
+
 END;
 /

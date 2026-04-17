@@ -1188,6 +1188,12 @@ Les contrôles suivants requièrent, **avant** rédaction du corps du script, de
 | S18 | Liste des GL suspense (plage de codes) | `list_suspense_gls.sql` |
 | S20 | Convention de préfixe GL → PCEC | `gl_prefix_to_pcec.sql` |
 | S23 | Mapping `SMTB_ROLE_FUNCTION` complet | `describe_role_function.sql` |
+| S24 / S25 / S28 | Cartographie `TRN_CODE` → schéma comptable attendu ; nature des GL | `describe_accounting_schemes.sql`, `describe_gl_nature.sql` |
+| S27 | Historique de paramétrage produit (taux, grilles) | `describe_parameter_history.sql` |
+| S29 | Présence de `OFFSET_AC_NO` sur `ACTB_HISTORY` | `describe_offset_account.sql` |
+| S32 | Dates d'arrêté internes / calendrier batch | `describe_cutoff_dates.sql` |
+| S33 | Lien `SMTB_USER.USER_ID` ↔ `STTM_CUSTOMER.CUSTOMER_NO` | `describe_user_customer_link.sql` |
+| S34 | Journal d'événements applicatifs (référentiel) | `describe_event_log.sql` |
 
 > Un mini-script est rédigé à la demande, exécuté par le côté banque, et son résultat déclenche la rédaction de la section concernée. Voir `bonnes_pratiques.md` §6 pour le protocole.
 
@@ -1218,6 +1224,17 @@ Les contrôles suivants requièrent, **avant** rédaction du corps du script, de
 | S21 | Maker/checker violations | CRITICAL | Transverse | Colonnes confirmées |
 | S22 | Inactive users active | CRITICAL | Transverse | `EXITFLAG` confirmé |
 | S23 | Toxic role combinations | CRITICAL | Transverse | SM confirmés |
+| S24 | Accounting scheme compliance | CRITICAL | Transverse (6/7/2/38) | À confirmer |
+| S25 | Offsetting breaches | CRITICAL | 1/2/6/7 | À confirmer |
+| S26 | Cut-off / spécialisation | HIGH | 6/7 | Confirmé |
+| S27 | Permanence des méthodes | HIGH | 6/7 | À confirmer |
+| S28 | GL nature consistency | CRITICAL | Toutes | À confirmer |
+| S29 | Circular / structured txns | CRITICAL | PCEC/2 | À confirmer |
+| S30 | Suspicious reversals | CRITICAL | 5/6/7/38 | Confirmé |
+| S31 | Off-hours postings | HIGH | Transverse | Confirmé |
+| S32 | Kiting / timing fraud | CRITICAL | PCEC/2 | À confirmer |
+| S33 | Employee red flags | CRITICAL | Transverse | À confirmer |
+| S34 | Reference data tampering | CRITICAL | Transverse | À confirmer |
 
 Ce catalogue peut être enrichi au fil des runs sans rupture de compatibilité (numérotation stable, sections ajoutées à la suite).
 

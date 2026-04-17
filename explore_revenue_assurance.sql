@@ -4770,5 +4770,271 @@ BEGIN
         print_kv('  PROCESS_TILL = ' || r.s, TO_CHAR(r.nb));
     END LOOP;
 
+    ----------------------------------------------------------------
+    -- SECTION 18 : Sécurité & traçabilité (SMTB_*)
+    --   Revenue Assurance : la traçabilité utilisateur est cruciale
+    --   pour documenter les dérogations (waivers, overrides, manual
+    --   postings). On inspecte :
+    --    - SMTB_USER / SMTB_USERLOG_DETAILS : inactivité, comptes
+    --      dormants mais non désactivés, comptes auto-auth
+    --    - SMTB_ROLE_MASTER / SMTB_ROLE_FUNC_LIMIT_DETAIL : limites
+    --      d'approbation par rôle (leak possible si trop larges)
+    --    - SMTB_SMS_LOG / SMTB_SMS_ACTION_LOG : trafic logs
+    --    - SMTB_PARAMETERS : politique globale mots de passe
+    ----------------------------------------------------------------
+    print_section('SECTION 18 — Sécurité & audit trail');
+
+    -- 18.1 SMTB_USER — volumétrie & statuts
+    DBMS_OUTPUT.PUT_LINE('  [18.1 SMTB_USER — volumétrie]');
+    safe_count('SMTB_USER', '  Total utilisateurs');
+    FOR r IN (SELECT NVL(USER_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_USER GROUP BY USER_STATUS ORDER BY nb DESC) LOOP
+        print_kv('  USER_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(AUTH_STAT,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_USER GROUP BY AUTH_STAT ORDER BY nb DESC) LOOP
+        print_kv('  AUTH_STAT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.1.b Utilisateurs avec AUTO_AUTH (auto-authorizer — risque RA)
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE AUTO_AUTH='Y';
+    print_kv('  AUTO_AUTH=Y (auto-authorizer, risque SoD)', TO_CHAR(v_count));
+
+    -- 18.1.c Utilisateurs expirés encore actifs
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+    WHERE END_DATE IS NOT NULL AND END_DATE < TRUNC(SYSDATE)
+      AND NVL(USER_STATUS,'E') = 'E';
+    print_kv('  END_DATE passée mais USER_STATUS=E (actif)', TO_CHAR(v_count));
+
+    -- 18.1.d Utilisateurs jamais connectés
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM SMTB_USER u
+      WHERE NOT EXISTS (SELECT 1 FROM SMTB_USERLOG_DETAILS d
+                        WHERE d.USER_ID = u.USER_ID
+                          AND d.LAST_SIGNED_ON IS NOT NULL);
+      print_kv('  Utilisateurs jamais connectés', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Utilisateurs jamais connectés', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 18.1.e Mot de passe pas changé depuis longtemps
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+    WHERE PWD_CHANGED_ON IS NOT NULL
+      AND PWD_CHANGED_ON < ADD_MONTHS(TRUNC(SYSDATE),-12);
+    print_kv('  PWD non changé depuis > 12 mois', TO_CHAR(v_count));
+
+    -- 18.2 SMTB_USERLOG_DETAILS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.2 SMTB_USERLOG_DETAILS]');
+    safe_count('SMTB_USERLOG_DETAILS', '  Total utilisateurs avec log');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS
+    WHERE LAST_SIGNED_ON IS NOT NULL AND LAST_SIGNED_ON < ADD_MONTHS(TRUNC(SYSDATE),-6);
+    print_kv('  Inactifs > 6 mois', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS
+    WHERE LAST_SIGNED_ON IS NOT NULL AND LAST_SIGNED_ON < ADD_MONTHS(TRUNC(SYSDATE),-12);
+    print_kv('  Inactifs > 12 mois', TO_CHAR(v_count));
+    SELECT NVL(MAX(NO_SUCCESSIVE_LOGINS),0), NVL(AVG(NO_SUCCESSIVE_LOGINS),0)
+    INTO v_num, v_num FROM SMTB_USERLOG_DETAILS;
+    print_kv('  MAX NO_SUCCESSIVE_LOGINS', TO_CHAR(v_num));
+
+    -- 18.3 SMTB_ROLE_MASTER — rôles
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.3 SMTB_ROLE_MASTER]');
+    safe_count('SMTB_ROLE_MASTER', '  Total rôles');
+    FOR r IN (SELECT NVL(BRANCH_ROLE,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_ROLE_MASTER GROUP BY BRANCH_ROLE ORDER BY nb DESC) LOOP
+        print_kv('  BRANCH_ROLE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(BRANCH_ROLE_CAT,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_ROLE_MASTER GROUP BY BRANCH_ROLE_CAT ORDER BY nb DESC) LOOP
+        print_kv('  ROLE_CAT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(BRANCH_ROLE_LEVEL,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_ROLE_MASTER GROUP BY BRANCH_ROLE_LEVEL ORDER BY nb DESC) LOOP
+        print_kv('  ROLE_LEVEL = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.4 SMTB_USER_ROLE — attribution rôles/utilisateurs
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.4 SMTB_USER_ROLE]');
+    safe_count('SMTB_USER_ROLE', '  Total attributions');
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_ROLE;
+    print_kv('  Utilisateurs avec ≥1 rôle', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_USER_ROLE;
+    print_kv('  Rôles réellement attribués', TO_CHAR(v_count));
+
+    -- 18.4.b Rôles jamais attribués (dead)
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER m
+    WHERE NOT EXISTS (SELECT 1 FROM SMTB_USER_ROLE u WHERE u.ROLE_ID = m.ROLE_ID);
+    print_kv('  Rôles définis mais jamais attribués', TO_CHAR(v_count));
+
+    -- 18.4.c Utilisateurs cumulant trop de rôles (top 10)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.4.c Top 10 utilisateurs par nb de rôles]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, COUNT(DISTINCT ROLE_ID) nb
+            FROM SMTB_USER_ROLE GROUP BY USER_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.USER_ID, TO_CHAR(r.nb) || ' rôles');
+    END LOOP;
+
+    -- 18.5 SMTB_ROLE_FUNC_LIMIT_DETAIL — limites par fonction
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.5 SMTB_ROLE_FUNC_LIMIT_DETAIL]');
+    safe_count('SMTB_ROLE_FUNC_LIMIT_DETAIL', '  Total limites');
+
+    -- 18.5.b Limites très élevées (par devise : top 15)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.5.b Top 15 limites d''input]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_ID, FUNCTION_ID, LIMIT_CCY, INPUT_LIMIT_AMOUNT
+            FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+            WHERE INPUT_LIMIT_AMOUNT IS NOT NULL
+            ORDER BY INPUT_LIMIT_AMOUNT DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.ROLE_ID || '/' || r.FUNCTION_ID,
+                 r.LIMIT_CCY || ' ' || TO_CHAR(r.INPUT_LIMIT_AMOUNT));
+    END LOOP;
+
+    -- 18.5.c Limites à 0 ou NULL (utilisateurs sans limite réelle)
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_FUNC_LIMIT_DETAIL
+    WHERE NVL(INPUT_LIMIT_AMOUNT,0) = 0;
+    print_kv('  Limites à 0 ou NULL', TO_CHAR(v_count));
+
+    -- 18.6 SMTB_SMS_LOG — trafic de logs (connexions / fonctions)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.6 SMTB_SMS_LOG]');
+    safe_count('SMTB_SMS_LOG', '  Total lignes logs');
+
+    FOR r IN (SELECT MIN(START_TIME) mn, MAX(START_TIME) mx FROM SMTB_SMS_LOG) LOOP
+        print_kv('  Plage START_TIME',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    FOR r IN (SELECT NVL(LOG_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_SMS_LOG GROUP BY LOG_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  LOG_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.6.b Top 10 utilisateurs par volume d'activité (dernier mois)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.6.b Top 10 users — activité 30 derniers jours]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USER_ID, COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE START_TIME >= SYSDATE - 30
+            GROUP BY USER_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.USER_ID, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.6.c Top 10 fonctions utilisées
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.6.c Top 10 FUNCTION_ID — activité 30j]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(FUNCTION_ID,'(NULL)') fn, COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE START_TIME >= SYSDATE - 30
+            GROUP BY FUNCTION_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.fn, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.6.d Sessions hors horaires (22h-06h) — risque
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+    WHERE START_TIME >= SYSDATE - 90
+      AND (TO_NUMBER(TO_CHAR(START_TIME,'HH24')) >= 22
+           OR TO_NUMBER(TO_CHAR(START_TIME,'HH24')) < 6);
+    print_kv('  Connexions hors horaire (22h-06h) 90j', TO_CHAR(v_count));
+
+    -- 18.6.e Sessions weekend (RA : activités manuelles douteuses)
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_LOG
+    WHERE START_TIME >= SYSDATE - 90
+      AND TO_CHAR(START_TIME,'D','NLS_DATE_LANGUAGE=ENGLISH') IN ('1','7','6','7');
+    print_kv('  Connexions weekend (90j, approx.)', TO_CHAR(v_count));
+
+    -- 18.7 SMTB_SMS_ACTION_LOG — trace actions (audit granularité XML)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.7 SMTB_SMS_ACTION_LOG]');
+    safe_count('SMTB_SMS_ACTION_LOG', '  Total lignes');
+    FOR r IN (SELECT NVL(ACTION,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_SMS_ACTION_LOG GROUP BY ACTION
+              ORDER BY nb DESC) LOOP
+        print_kv('  ACTION = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.7.b Actions cross-branch (CURR_BRANCH <> HOME_BRANCH)
+    SELECT COUNT(*) INTO v_count FROM SMTB_SMS_ACTION_LOG
+    WHERE CURR_BRANCH IS NOT NULL AND HOME_BRANCH IS NOT NULL
+      AND CURR_BRANCH <> HOME_BRANCH;
+    print_kv('  Actions CURR_BRANCH <> HOME_BRANCH', TO_CHAR(v_count));
+
+    -- 18.7.c EXITFLAG erreurs
+    FOR r IN (SELECT NVL(EXITFLAG,'(NULL)') s, COUNT(*) nb
+              FROM SMTB_SMS_ACTION_LOG GROUP BY EXITFLAG
+              ORDER BY nb DESC) LOOP
+        print_kv('  EXITFLAG = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 18.8 SMTB_USER_DISABLE — désactivations / incidents
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.8 SMTB_USER_DISABLE]');
+    safe_count('SMTB_USER_DISABLE', '  Désactivations totales');
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_DISABLE;
+    print_kv('  Utilisateurs distincts désactivés', TO_CHAR(v_count));
+
+    -- 18.9 SMTB_PARAMETERS — politique sécurité
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.9 SMTB_PARAMETERS — politique globale]');
+    FOR r IN (
+        SELECT MIN_PWD_LENGTH        mn, MAX_PWD_LENGTH        mx,
+               FREQ_PWD_CHG          fc, INVALID_LOGINS_CUM    ilc,
+               INVALID_LOGINS_SUC    ils, DORMANCY_DAYS         dd,
+               ARCHIVAL_PERIOD       ap
+        FROM SMTB_PARAMETERS
+        WHERE ROWNUM = 1
+    ) LOOP
+        print_kv('  MIN_PWD_LENGTH',       TO_CHAR(r.mn));
+        print_kv('  MAX_PWD_LENGTH',       TO_CHAR(r.mx));
+        print_kv('  FREQ_PWD_CHG (jours)', TO_CHAR(r.fc));
+        print_kv('  INVALID_LOGINS_CUM',   TO_CHAR(r.ilc));
+        print_kv('  INVALID_LOGINS_SUC',   TO_CHAR(r.ils));
+        print_kv('  DORMANCY_DAYS (users)',TO_CHAR(r.dd));
+        print_kv('  ARCHIVAL_PERIOD',      TO_CHAR(r.ap));
+    END LOOP;
+
+    -- 18.10 SMTB_PASSWORD_HISTORY — rotation
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.10 SMTB_PASSWORD_HISTORY]');
+    safe_count('SMTB_PASSWORD_HISTORY', '  Total entrées');
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_PASSWORD_HISTORY;
+    print_kv('  Utilisateurs avec historique PWD', TO_CHAR(v_count));
+
+    -- 18.11 SMTB_ACTION_CONTROLS — contrôles d'actions (approvals)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [18.11 SMTB_ACTION_CONTROLS]');
+    safe_count('SMTB_ACTION_CONTROLS', '  Total contrôles');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(ACTION_NAME,'(NULL)') s, COUNT(*) nb
+            FROM SMTB_ACTION_CONTROLS GROUP BY ACTION_NAME
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
 END;
 /

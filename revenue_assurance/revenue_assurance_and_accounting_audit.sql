@@ -3030,6 +3030,199 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S14 -- Interest accruals not liquidated within expected cycle
+    -- =================================================================
+    -- [F-130] accruals older than p_min_days_overdue still in
+    --         ICTB_ACCRUALS_TEMP (impact = sum of accrued amount LCY).
+    -- [F-131] discrepancies between accrued amount and sum of
+    --         liquidations since period start (reconciliation).
+    -- PCEC/38 (regularisation en attente), PCEC/702 / PCEC/602.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_130     PLS_INTEGER := 0;
+        l_n_131     PLS_INTEGER := 0;
+        l_ac        VARCHAR2(30);
+        l_comp      VARCHAR2(30);
+        l_prod      VARCHAR2(30);
+        l_oldest    DATE;
+        l_age_d     NUMBER;
+        l_amt_lcy   NUMBER;
+        l_accr_sum  NUMBER;
+        l_liq_sum   NUMBER;
+        l_diff      NUMBER;
+        l_sev       VARCHAR2(10);
+        l_cutoff    DATE;
+    BEGIN
+        IF NOT f_section_enabled('S14') THEN
+            log_info('Section S14 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S14',
+                'Interest accruals not liquidated within expected cycle');
+
+            l_cutoff := v_date_to - NVL(p_min_days_overdue, 30);
+
+            -- [F-130] Accruals stale in ICTB_ACCRUALS_TEMP ------------
+            l_sql :=
+                'SELECT a.ACCOUNT, '
+             || '       NVL(a.COMPONENT,''?'') AS COMP, '
+             || '       MIN(NVL(a.VALUE_DATE, a.ACCRUAL_DATE)) AS OLDEST, '
+             || '       SUM(NVL(a.AMOUNT,0)) AS AMT_LCY '
+             || '  FROM ICTB_ACCRUALS_TEMP a '
+             || ' WHERE NVL(a.VALUE_DATE, a.ACCRUAL_DATE) < :cutoff '
+             || '   AND NVL(a.AMOUNT,0) <> 0 '
+             || ' GROUP BY a.ACCOUNT, a.COMPONENT '
+             || ' ORDER BY SUM(NVL(a.AMOUNT,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING l_cutoff;
+                LOOP
+                    FETCH l_cur
+                     INTO l_ac, l_comp, l_oldest, l_amt_lcy;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_130 >= NVL(p_top_n, 50);
+
+                    l_age_d := TRUNC(v_date_to) - TRUNC(l_oldest);
+
+                    IF ABS(NVL(l_amt_lcy, 0))
+                       < NVL(p_materiality_lcy, 0) THEN
+                        NULL;
+                    ELSE
+                        l_sev := f_promote_severity('MEDIUM',
+                                     ABS(NVL(l_amt_lcy, 0)));
+                        IF ABS(NVL(l_amt_lcy, 0))
+                           >= NVL(p_materiality_impact_lcy, 0) THEN
+                            l_sev := f_promote_severity(l_sev,
+                                         p_materiality_impact_lcy);
+                            IF l_sev = 'MEDIUM' THEN l_sev := 'HIGH'; END IF;
+                        END IF;
+
+                        print_finding(
+                            p_section    => 'S14',
+                            p_code       => 'RA-S14-F130',
+                            p_severity   => l_sev,
+                            p_message    => 'Stale accrual: comp='
+                                         || NVL(l_comp,'?')
+                                         || ' age_days='
+                                         || TO_CHAR(l_age_d)
+                                         || ' oldest='
+                                         || TO_CHAR(l_oldest,
+                                                'YYYY-MM-DD'),
+                            p_entity     => l_ac,
+                            p_impact_lcy => ABS(NVL(l_amt_lcy, 0)),
+                            p_evidence   => 'CUTOFF='
+                                         || TO_CHAR(l_cutoff,
+                                                'YYYY-MM-DD')
+                                         || ' MIN_DAYS='
+                                         || TO_CHAR(NVL(
+                                                p_min_days_overdue, 30))
+                        );
+                        l_n_130 := l_n_130 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S14 F-130 unavailable: ICTB_ACCRUALS_TEMP '
+                        || 'not queryable (' || SUBSTR(SQLERRM,1,120)
+                        || ').');
+            END;
+
+            -- [F-131] Accrued vs liquidated reconciliation -----------
+            l_sql :=
+                'SELECT x.ACCOUNT, x.COMPONENT, '
+             || '       x.ACCR_SUM, x.LIQ_SUM, '
+             || '       (x.ACCR_SUM - x.LIQ_SUM) AS DIFF '
+             || '  FROM ( '
+             || '    SELECT a.ACCOUNT, NVL(a.COMPONENT,''?'') AS COMPONENT, '
+             || '           SUM(NVL(a.AMOUNT,0)) AS ACCR_SUM, '
+             || '           NVL(( '
+             || '             SELECT SUM(NVL(l.AMOUNT,0)) '
+             || '               FROM ICTB_LIQ_DETAILS l '
+             || '              WHERE l.ACCOUNT = a.ACCOUNT '
+             || '                AND NVL(l.COMPONENT,''?'') '
+             || '                    = NVL(a.COMPONENT,''?'') '
+             || '                AND NVL(l.LIQUIDATION_DATE, l.VALUE_DATE) '
+             || '                    BETWEEN :d1 AND :d2 '
+             || '           ),0) AS LIQ_SUM '
+             || '      FROM ICTB_ACCRUALS_TEMP a '
+             || '     WHERE NVL(a.VALUE_DATE, a.ACCRUAL_DATE) '
+             || '           BETWEEN :d3 AND :d4 '
+             || '     GROUP BY a.ACCOUNT, a.COMPONENT '
+             || '  ) x '
+             || ' WHERE ABS(x.ACCR_SUM - x.LIQ_SUM) >= :mat '
+             || ' ORDER BY ABS(x.ACCR_SUM - x.LIQ_SUM) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      v_date_from, v_date_to,
+                      NVL(p_materiality_lcy, 0);
+                LOOP
+                    FETCH l_cur
+                     INTO l_ac, l_comp, l_accr_sum, l_liq_sum, l_diff;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_131 >= NVL(p_top_n, 50);
+
+                    l_sev := f_promote_severity('MEDIUM', ABS(l_diff));
+                    IF ABS(l_diff)
+                       >= NVL(p_materiality_impact_lcy, 0) THEN
+                        IF l_sev = 'MEDIUM' THEN l_sev := 'HIGH'; END IF;
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S14',
+                        p_code       => 'RA-S14-F131',
+                        p_severity   => l_sev,
+                        p_message    => 'Accrual vs liquidation mismatch: '
+                                     || 'comp=' || NVL(l_comp,'?')
+                                     || ' accr=' || f_fmt_lcy(l_accr_sum)
+                                     || ' liq=' || f_fmt_lcy(l_liq_sum)
+                                     || ' diff=' || f_fmt_lcy(l_diff),
+                        p_entity     => l_ac,
+                        p_impact_lcy => ABS(NVL(l_diff, 0)),
+                        p_evidence   => 'PERIOD='
+                                     || TO_CHAR(v_date_from,
+                                            'YYYY-MM-DD')
+                                     || '..'
+                                     || TO_CHAR(v_date_to,
+                                            'YYYY-MM-DD')
+                    );
+                    l_n_131 := l_n_131 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S14 F-131 unavailable (accrual/liq '
+                        || 'reconciliation): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-130 findings (stale accruals)',
+                TO_CHAR(l_n_130));
+            print_kv('F-131 findings (accr vs liq diff)',
+                TO_CHAR(l_n_131));
+
+            print_section_footer('S14', l_n_130 + l_n_131);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S14', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S14', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

@@ -2394,6 +2394,153 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S10 - LOAN COMPONENT WAIVERS AND RATE OVERRIDES
+    -- -----------------------------------------------------------------
+    -- [F-090] Composantes CL avec WAIVE='Y' sur interet / frais
+    --         (renonciation explicite du revenu banque).
+    -- [F-091] Taux utilisateur sous le minimum produit
+    --         (USER_DEFINED rate < CLTM_PRODUCT_MASTER.MIN_INT_RATE).
+    --
+    -- Impact [F-090] (indicatif) :
+    --   notional * waived_rate * nb_jours / 365
+    --   Le montant passe dans l'impact est AMOUNT_DUE (la perte
+    --   deja materialisee pour la composante).
+    -- =================================================================
+    DECLARE
+        l_cur     SYS_REFCURSOR;
+        l_ref     VARCHAR2(30);
+        l_prod    VARCHAR2(10);
+        l_comp    VARCHAR2(30);
+        l_cust    VARCHAR2(20);
+        l_amt     NUMBER;
+        l_rate    NUMBER;
+        l_min     NUMBER;
+        l_n_090   PLS_INTEGER := 0;
+        l_n_091   PLS_INTEGER := 0;
+        l_sql     VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S10') THEN
+            log_info('Section S10 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S10',
+                'Loan component waivers and manual rate overrides');
+
+            -- [F-090] WAIVE='Y' sur composantes ------------------
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.COMPONENT, '
+             || '       NVL(c.AMOUNT_DUE,0) AS AMT, '
+             || '       m.CUSTOMER_NO, m.PRODUCT '
+             || '  FROM CLTB_ACCOUNT_COMPONENTS c '
+             || '  JOIN CLTB_ACCOUNT_MASTER m '
+             || '    ON m.ACCOUNT_NUMBER = c.CONTRACT_REF_NO '
+             || ' WHERE UPPER(NVL(c.WAIVE,''N'')) = ''Y'' '
+             || '   AND NVL(c.AMOUNT_DUE,0) > 0 '
+             || '   AND (:p_cust IS NULL OR m.CUSTOMER_NO = :p_cust) '
+             || ' ORDER BY NVL(c.AMOUNT_DUE,0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING p_customer_no, p_customer_no;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_comp, l_amt, l_cust, l_prod;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_090 >= NVL(p_top_n, 50);
+
+                    IF l_amt >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S10',
+                            p_code       => 'RA-S10-F090',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'Loan component waived: comp='
+                                         || NVL(l_comp,'?')
+                                         || ' amt_due=' || f_fmt_lcy(l_amt),
+                            p_entity     => l_ref,
+                            p_impact_lcy => l_amt,
+                            p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                         || ' CUST=' || NVL(f_mask_pii(l_cust),'?')
+                        );
+                        l_n_090 := l_n_090 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S10',
+                        'F-090 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-091] Taux < MIN produit -------------------------
+            l_sql :=
+                'SELECT m.ACCOUNT_NUMBER, m.PRODUCT, m.CUSTOMER_NO, '
+             || '       NVL(c.INTEREST_RATE, c.USER_INT_RATE) AS R, '
+             || '       p.MIN_INT_RATE, NVL(m.AMOUNT_FINANCED,0) AS AMT '
+             || '  FROM CLTB_ACCOUNT_MASTER m '
+             || '  JOIN CLTB_ACCOUNT_COMPONENTS c '
+             || '    ON c.CONTRACT_REF_NO = m.ACCOUNT_NUMBER '
+             || '  LEFT JOIN CLTM_PRODUCT_MASTER p '
+             || '    ON p.PRODUCT = m.PRODUCT '
+             || ' WHERE UPPER(NVL(c.COMPONENT,'' '')) IN '
+             || '       (''MAIN_INT'', ''INTEREST'') '
+             || '   AND NVL(c.INTEREST_RATE, c.USER_INT_RATE) IS NOT NULL '
+             || '   AND NVL(c.INTEREST_RATE, c.USER_INT_RATE) '
+             || '       < NVL(p.MIN_INT_RATE, 0) '
+             || '   AND (:p_cust IS NULL OR m.CUSTOMER_NO = :p_cust) '
+             || ' ORDER BY (NVL(p.MIN_INT_RATE,0) '
+             || '           - NVL(c.INTEREST_RATE, c.USER_INT_RATE)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING p_customer_no, p_customer_no;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cust, l_rate, l_min, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_091 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S10',
+                        p_code       => 'RA-S10-F091',
+                        p_severity   => 'HIGH',
+                        p_message    => 'User-defined rate below product minimum: rate='
+                                     || NVL(TO_CHAR(l_rate,'FM990.0000',
+                                          'NLS_NUMERIC_CHARACTERS=''.,'''),'?')
+                                     || ' min=' || NVL(TO_CHAR(l_min,'FM990.0000',
+                                          'NLS_NUMERIC_CHARACTERS=''.,'''),'?')
+                                     || ' notional=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_ref,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CUST=' || NVL(f_mask_pii(l_cust),'?')
+                    );
+                    l_n_091 := l_n_091 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S10 F-091 unavailable: CLTM_PRODUCT_MASTER or '
+                        || 'INTEREST_RATE column missing ('
+                        || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            print_kv('F-090 findings (waivers)',  TO_CHAR(l_n_090));
+            print_kv('F-091 findings (rate < min)', TO_CHAR(l_n_091));
+
+            print_section_footer('S10', l_n_090 + l_n_091);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S10', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S10', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

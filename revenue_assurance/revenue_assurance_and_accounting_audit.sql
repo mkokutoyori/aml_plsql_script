@@ -1757,6 +1757,130 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S06 - OVERDUE CL SCHEDULES NOT YET RECOVERED
+    -- -----------------------------------------------------------------
+    -- [F-050] Echeances PRINCIPAL en retard (AMOUNT_DUE > AMOUNT_SETTLED).
+    -- [F-051] Echeances INTERET en retard.
+    -- [F-052] Echeances FRAIS / COMMISSIONS en retard.
+    --
+    -- Source : CLTB_SCHEDULES_DETAILS (SCHEDULE_DUE_DATE, AMOUNT_DUE,
+    -- AMOUNT_SETTLED, COMPONENT, ACCOUNT_NUMBER/AC_NO).
+    --
+    -- Methode : SCHEDULE_DUE_DATE < v_as_of_date - p_min_days_overdue
+    -- ET AMOUNT_DUE > NVL(AMOUNT_SETTLED,0).
+    --
+    -- Severite : HIGH par defaut, CRITICAL si age > 90 jours OU impact
+    -- >= p_materiality_critical_lcy. Promotion automatique par
+    -- f_promote_severity en fonction de l'impact.
+    -- =================================================================
+    DECLARE
+        l_cur      SYS_REFCURSOR;
+        l_ac_no    VARCHAR2(30);
+        l_comp     VARCHAR2(30);
+        l_due_dt   DATE;
+        l_due_amt  NUMBER;
+        l_set_amt  NUMBER;
+        l_open     NUMBER;
+        l_age      NUMBER;
+        l_sev      VARCHAR2(10);
+        l_code     VARCHAR2(20);
+        l_n_050    PLS_INTEGER := 0;
+        l_n_051    PLS_INTEGER := 0;
+        l_n_052    PLS_INTEGER := 0;
+        l_sql      VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S06') THEN
+            log_info('Section S06 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S06',
+                'Overdue CL schedules not yet recovered');
+
+            l_sql :=
+                'SELECT s.ACCOUNT_NUMBER, s.COMPONENT, s.SCHEDULE_DUE_DATE, '
+             || '       NVL(s.AMOUNT_DUE,0)      AS DUE_A, '
+             || '       NVL(s.AMOUNT_SETTLED,0)  AS SET_A '
+             || '  FROM CLTB_SCHEDULES_DETAILS s '
+             || ' WHERE s.SCHEDULE_DUE_DATE < (:asof - :mindays) '
+             || '   AND NVL(s.AMOUNT_DUE,0) > NVL(s.AMOUNT_SETTLED,0) '
+             || '   AND (:p_acc IS NULL OR s.ACCOUNT_NUMBER = :p_acc) '
+             || ' ORDER BY (NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_as_of_date, NVL(p_min_days_overdue, 30),
+                    p_account_no, p_account_no;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_comp, l_due_dt, l_due_amt, l_set_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR (l_n_050 + l_n_051 + l_n_052)
+                              >= NVL(p_top_n, 50);
+
+                    l_open := l_due_amt - l_set_amt;
+                    l_age  := GREATEST(0, v_as_of_date - l_due_dt);
+
+                    -- Severite initiale : HIGH, CRITICAL si >90j.
+                    l_sev := CASE WHEN l_age > 90 THEN 'CRITICAL' ELSE 'HIGH' END;
+
+                    IF l_open < NVL(p_materiality_lcy, 0) THEN
+                        CONTINUE;
+                    END IF;
+
+                    IF UPPER(NVL(l_comp,'?')) IN ('PRINCIPAL','PRN','PRN_INCR') THEN
+                        l_code := 'RA-S06-F050';
+                        l_n_050 := l_n_050 + 1;
+                    ELSIF UPPER(NVL(l_comp,'?')) IN
+                            ('MAIN_INT','INTEREST','PENAL_INT','PENALTY_INT') THEN
+                        l_code := 'RA-S06-F051';
+                        l_n_051 := l_n_051 + 1;
+                    ELSE
+                        l_code := 'RA-S06-F052';
+                        l_n_052 := l_n_052 + 1;
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S06',
+                        p_code       => l_code,
+                        p_severity   => l_sev,
+                        p_message    => 'Overdue CL schedule comp=' || NVL(l_comp,'?')
+                                     || ' due=' || f_fmt_ts(l_due_dt)
+                                     || ' age=' || TO_CHAR(l_age) || 'd'
+                                     || ' open=' || f_fmt_lcy(l_open),
+                        p_entity     => l_ac_no,
+                        p_impact_lcy => l_open,
+                        p_evidence   => 'DUE_A=' || f_fmt_lcy(l_due_amt)
+                                     || ' SET_A=' || f_fmt_lcy(l_set_amt)
+                    );
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S06',
+                        'Query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-050 findings (principal)', TO_CHAR(l_n_050));
+            print_kv('F-051 findings (interest)',  TO_CHAR(l_n_051));
+            print_kv('F-052 findings (fee/chg)',   TO_CHAR(l_n_052));
+            print_kv('Min days overdue',           TO_CHAR(NVL(p_min_days_overdue, 30)));
+
+            print_section_footer('S06', l_n_050 + l_n_051 + l_n_052);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S06', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S06', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

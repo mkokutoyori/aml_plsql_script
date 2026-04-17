@@ -4539,5 +4539,236 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM STTM_KYC_CORPORATE kc WHERE kc.KYC_REF_NO = c.CUSTOMER_NO);
     print_kv('  AML_REQUIRED=Y et sans fiche KYC', TO_CHAR(v_count));
 
+    ----------------------------------------------------------------
+    -- SECTION 17 : Produits & paramétrage
+    --   Revenue Assurance : le paramétrage produit détermine
+    --   comment le revenu est calculé. On inspecte :
+    --    - CSTM_PRODUCT (core service product — charges / taxes)
+    --    - LDTM_PRODUCT_MASTER (LD/MM)
+    --    - LDTM_PRODUCT_DFLT_SCHEDULES (schedules par défaut)
+    --    - LDTM_PRODUCT_LIQ_ORDER (ordre de liquidation)
+    --    - LDTM_PRODUCT_ROLLOVER (rollover : taxes/brokerage)
+    --    - CSTB_AMOUNT_TAG (tags de montants : charge/tax allowed)
+    --    - CLTM_PRODUCT_COMP_FRM_EXPR (formules ICCF CL)
+    --    - LDTM_BRANCH_PARAMETERS (paramètres branches)
+    ----------------------------------------------------------------
+    print_section('SECTION 17 — Produits & paramétrage RA');
+
+    -- 17.1 CSTM_PRODUCT — référentiel produits (transverse)
+    DBMS_OUTPUT.PUT_LINE('  [17.1 CSTM_PRODUCT — volumétrie]');
+    safe_count('CSTM_PRODUCT', '  Total produits');
+    SELECT COUNT(*) INTO v_count FROM CSTM_PRODUCT WHERE AUTH_STAT='A';
+    print_kv('  Autorisés', TO_CHAR(v_count));
+
+    -- 17.1.b Produits par MODULE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.1.b Produits par MODULE]');
+    FOR r IN (SELECT NVL(MODULE,'(NULL)') s, COUNT(*) nb
+              FROM CSTM_PRODUCT GROUP BY MODULE ORDER BY nb DESC) LOOP
+        print_kv('  MODULE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.1.c Produits expirés encore actifs
+    SELECT COUNT(*) INTO v_count FROM CSTM_PRODUCT
+    WHERE PRODUCT_END_DATE IS NOT NULL AND PRODUCT_END_DATE < TRUNC(SYSDATE);
+    print_kv('  PRODUCT_END_DATE passée', TO_CHAR(v_count));
+
+    -- 17.1.d Variance de taux
+    SELECT COUNT(*) INTO v_count FROM CSTM_PRODUCT
+    WHERE MAXIMUM_RATE_VARIANCE IS NOT NULL
+      AND NORMAL_RATE_VARIANCE IS NOT NULL
+      AND NORMAL_RATE_VARIANCE > MAXIMUM_RATE_VARIANCE;
+    print_kv('  NORMAL_RATE_VARIANCE > MAXIMUM (incohérent)', TO_CHAR(v_count));
+
+    -- 17.2 LDTM_PRODUCT_MASTER — produits LD/MM
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.2 LDTM_PRODUCT_MASTER]');
+    safe_count('LDTM_PRODUCT_MASTER', '  Total produits LD/MM');
+
+    -- 17.2.b Fréquences d'accrual
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.2.b ACCRUAL_FREQUENCY]');
+    FOR r IN (SELECT NVL(ACCRUAL_FREQUENCY,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_PRODUCT_MASTER GROUP BY ACCRUAL_FREQUENCY
+              ORDER BY nb DESC) LOOP
+        print_kv('  FREQ = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.2.c Produits bloqués mais encore actifs dans contrats
+    SELECT COUNT(*) INTO v_count FROM LDTM_PRODUCT_MASTER WHERE BLOCK_PRODUCT='Y';
+    print_kv('  Produits BLOCK_PRODUCT=Y', TO_CHAR(v_count));
+
+    BEGIN
+      SELECT COUNT(DISTINCT c.PRODUCT) INTO v_count FROM LDTB_CONTRACT_MASTER c
+      JOIN LDTM_PRODUCT_MASTER p ON p.PRODUCT_CODE = c.PRODUCT
+      WHERE p.BLOCK_PRODUCT='Y'
+        AND NVL(c.CONTRACT_STATUS,'A') NOT IN ('L','C');
+      print_kv('  Contrats actifs sur produits bloqués', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Contrats actifs sur produits bloqués', 'N/A (' || SQLERRM || ')');
+    END;
+
+    -- 17.2.d Autorisations RA-sensibles
+    FOR r IN (
+        SELECT 'ALLOW_PREPAY_INT=Y'         lbl, COUNT(*) nb FROM LDTM_PRODUCT_MASTER WHERE ALLOW_PREPAY_INT='Y' UNION ALL
+        SELECT 'ALLOW_PREPAY_INT=N',              COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE ALLOW_PREPAY_INT='N' UNION ALL
+        SELECT 'AMEND_PAST_PAID_SCH=Y',           COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE AMEND_PAST_PAID_SCH='Y' UNION ALL
+        SELECT 'ALLOW_SCHED_AMEND_AFTER_SGEN=Y',  COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE ALLOW_SCHED_AMEND_AFTER_SGEN='Y' UNION ALL
+        SELECT 'BOOK_UNEARNED_INTEREST=Y',        COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE BOOK_UNEARNED_INTEREST='Y' UNION ALL
+        SELECT 'AUTO_PROV_REQUIRED=Y',            COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE AUTO_PROV_REQUIRED='Y' UNION ALL
+        SELECT 'BROKERAGE_APPLICABLE=Y',          COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE BROKERAGE_APPLICABLE='Y' UNION ALL
+        SELECT 'ASSIGNMENT_ALLOWED=Y',            COUNT(*)    FROM LDTM_PRODUCT_MASTER WHERE ASSIGNMENT_ALLOWED='Y'
+    ) LOOP
+        print_kv('  ' || r.lbl, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.3 LDTM_PRODUCT_DFLT_SCHEDULES — schedules par défaut
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.3 LDTM_PRODUCT_DFLT_SCHEDULES]');
+    safe_count('LDTM_PRODUCT_DFLT_SCHEDULES', '  Total lignes');
+    FOR r IN (SELECT NVL(FREQUENCY_UNIT,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_PRODUCT_DFLT_SCHEDULES GROUP BY FREQUENCY_UNIT
+              ORDER BY nb DESC) LOOP
+        print_kv('  FREQUENCY_UNIT = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(DISTINCT PRODUCT) INTO v_count FROM LDTM_PRODUCT_DFLT_SCHEDULES;
+    print_kv('  Produits avec schedule par défaut', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTM_PRODUCT_MASTER m
+    WHERE NOT EXISTS (SELECT 1 FROM LDTM_PRODUCT_DFLT_SCHEDULES d
+                      WHERE d.PRODUCT = m.PRODUCT_CODE);
+    print_kv('  Produits LD SANS schedule par défaut', TO_CHAR(v_count));
+
+    -- 17.4 LDTM_PRODUCT_LIQ_ORDER — ordre de liquidation (priorité)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.4 LDTM_PRODUCT_LIQ_ORDER]');
+    safe_count('LDTM_PRODUCT_LIQ_ORDER', '  Total lignes');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT PRODUCT, COUNT(*) nb_comp, MIN(LIQ_ORDER) mn, MAX(LIQ_ORDER) mx
+            FROM LDTM_PRODUCT_LIQ_ORDER
+            GROUP BY PRODUCT
+            ORDER BY nb_comp DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.PRODUCT,
+                 'nb_comp=' || TO_CHAR(r.nb_comp) || ' | order=[' || TO_CHAR(r.mn) || '..' || TO_CHAR(r.mx) || ']');
+    END LOOP;
+
+    -- 17.4.b Doublons de LIQ_ORDER par produit
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT PRODUCT, LIQ_ORDER, COUNT(*) nb
+        FROM LDTM_PRODUCT_LIQ_ORDER
+        GROUP BY PRODUCT, LIQ_ORDER
+        HAVING COUNT(*) > 1
+    );
+    print_kv('  Doublons (PRODUCT, LIQ_ORDER)', TO_CHAR(v_count));
+
+    -- 17.5 LDTM_PRODUCT_ROLLOVER — rollover paramétrage
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.5 LDTM_PRODUCT_ROLLOVER]');
+    safe_count('LDTM_PRODUCT_ROLLOVER', '  Total lignes');
+    FOR r IN (SELECT NVL(APPLY_TAX,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_PRODUCT_ROLLOVER GROUP BY APPLY_TAX
+              ORDER BY nb DESC) LOOP
+        print_kv('  APPLY_TAX = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(APPLY_BROKERAGE,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_PRODUCT_ROLLOVER GROUP BY APPLY_BROKERAGE
+              ORDER BY nb DESC) LOOP
+        print_kv('  APPLY_BROKERAGE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(AUTO_MAN_ROLLOVER,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_PRODUCT_ROLLOVER GROUP BY AUTO_MAN_ROLLOVER
+              ORDER BY nb DESC) LOOP
+        print_kv('  AUTO_MAN_ROLLOVER = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM LDTM_PRODUCT_ROLLOVER
+    WHERE NVL(APPLY_TAX,'N')='N' AND NVL(APPLY_BROKERAGE,'N')='N';
+    print_kv('  Rollover sans tax ni brokerage (leakage paramétrage)', TO_CHAR(v_count));
+
+    -- 17.6 CSTB_AMOUNT_TAG — tags RA
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.6 CSTB_AMOUNT_TAG — typologie]');
+    safe_count('CSTB_AMOUNT_TAG', '  Total tags');
+
+    FOR r IN (
+        SELECT 'CHARGE_ALLOWED=Y'     lbl, COUNT(*) nb FROM CSTB_AMOUNT_TAG WHERE CHARGE_ALLOWED='Y' UNION ALL
+        SELECT 'COMMISSION_ALLOWED=Y',      COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE COMMISSION_ALLOWED='Y' UNION ALL
+        SELECT 'INTEREST_ALLOWED=Y',        COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE INTEREST_ALLOWED='Y' UNION ALL
+        SELECT 'TAX_ALLOWED=Y',             COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE TAX_ALLOWED='Y' UNION ALL
+        SELECT 'ISSR_TAX_ALLOWED=Y',        COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE ISSR_TAX_ALLOWED='Y' UNION ALL
+        SELECT 'TRAN_TAX_ALLOWED=Y',        COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE TRAN_TAX_ALLOWED='Y' UNION ALL
+        SELECT 'TRACK_RECEIVABLE=Y',        COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE TRACK_RECEIVABLE='Y' UNION ALL
+        SELECT 'TRACK_PAYABLE=Y',           COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE TRACK_PAYABLE='Y' UNION ALL
+        SELECT 'UNREALISED=Y',              COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE UNREALISED='Y' UNION ALL
+        SELECT 'USER_DEFINED=Y',            COUNT(*)    FROM CSTB_AMOUNT_TAG WHERE USER_DEFINED='Y'
+    ) LOOP
+        print_kv('  ' || r.lbl, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.6.b Tags custom non autorisés pour aucune nature (probable dead)
+    SELECT COUNT(*) INTO v_count FROM CSTB_AMOUNT_TAG
+    WHERE NVL(CHARGE_ALLOWED,'N')='N'
+      AND NVL(COMMISSION_ALLOWED,'N')='N'
+      AND NVL(INTEREST_ALLOWED,'N')='N'
+      AND NVL(TAX_ALLOWED,'N')='N';
+    print_kv('  Tags sans aucune autorisation (potentiellement morts)', TO_CHAR(v_count));
+
+    -- 17.7 CLTM_PRODUCT_COMP_FRM_EXPR — formules ICCF CL
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.7 CLTM_PRODUCT_COMP_FRM_EXPR]');
+    safe_count('CLTM_PRODUCT_COMP_FRM_EXPR', '  Total formules/lignes');
+    SELECT COUNT(DISTINCT PRODUCT_CODE) INTO v_count FROM CLTM_PRODUCT_COMP_FRM_EXPR;
+    print_kv('  Produits CL avec formule', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COMPONENT_NAME) INTO v_count FROM CLTM_PRODUCT_COMP_FRM_EXPR;
+    print_kv('  Composants CL distincts', TO_CHAR(v_count));
+
+    FOR r IN (SELECT NVL(FORMULA_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM CLTM_PRODUCT_COMP_FRM_EXPR GROUP BY FORMULA_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  FORMULA_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(EXPR_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM CLTM_PRODUCT_COMP_FRM_EXPR GROUP BY EXPR_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  EXPR_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.7.b Formules RESULT vide (leakage potentiel)
+    SELECT COUNT(*) INTO v_count FROM CLTM_PRODUCT_COMP_FRM_EXPR
+    WHERE RESULT IS NULL OR TRIM(RESULT) IS NULL;
+    print_kv('  Formules avec RESULT vide', TO_CHAR(v_count));
+
+    -- 17.8 LDTM_BRANCH_PARAMETERS — paramètres de branche LD
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.8 LDTM_BRANCH_PARAMETERS]');
+    safe_count('LDTM_BRANCH_PARAMETERS', '  Total branches paramétrées');
+    FOR r IN (SELECT NVL(ACCRUAL_LEVEL,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_BRANCH_PARAMETERS GROUP BY ACCRUAL_LEVEL
+              ORDER BY nb DESC) LOOP
+        print_kv('  ACCRUAL_LEVEL = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(CONS_BILLING,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_BRANCH_PARAMETERS GROUP BY CONS_BILLING
+              ORDER BY nb DESC) LOOP
+        print_kv('  CONS_BILLING = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(TAX_COMPUTATION_BASIS,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_BRANCH_PARAMETERS GROUP BY TAX_COMPUTATION_BASIS
+              ORDER BY nb DESC) LOOP
+        print_kv('  TAX_COMPUTATION_BASIS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 17.8.b PROCESS_TILL
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [17.8.b PROCESS_TILL — avancement branche]');
+    FOR r IN (SELECT NVL(PROCESS_TILL,'(NULL)') s, COUNT(*) nb
+              FROM LDTM_BRANCH_PARAMETERS GROUP BY PROCESS_TILL
+              ORDER BY nb DESC) LOOP
+        print_kv('  PROCESS_TILL = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
 END;
 /

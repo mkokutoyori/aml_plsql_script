@@ -3272,6 +3272,225 @@ BEGIN
     END;
 
     -- =========================================================
+    -- A-22. PROFIL DE RISQUE PAR AGENCE & KRI CONSOLIDES
+    -- =========================================================
+    p_section('A-22. PROFIL DE RISQUE PAR AGENCE & KRI CONSOLIDES (tableau de bord IAM)');
+
+    p_sub('A-22.1 Effectif utilisateurs par HOME_BRANCH (Top 20)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT HOME_BRANCH, COUNT(*) nb FROM SMTB_USER
+            WHERE HOME_BRANCH IS NOT NULL
+            GROUP BY HOME_BRANCH
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 20) LOOP
+            p_kv('  HOME_BRANCH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' users');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  SMTB_USER HOME_BRANCH', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.2 Taux utilisateurs actifs par agence (USER_STATUS=E)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT HOME_BRANCH,
+                   ROUND(100*SUM(CASE WHEN USER_STATUS=''E'' THEN 1 ELSE 0 END)/COUNT(*),1) pct
+            FROM SMTB_USER WHERE HOME_BRANCH IS NOT NULL
+            GROUP BY HOME_BRANCH HAVING COUNT(*) >= 3
+            ORDER BY pct DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  BRANCH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || '% actifs');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Taux actifs', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.3 Agences avec forte proportion d''acces multibranch');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT HOME_BRANCH,
+                   ROUND(100*SUM(CASE WHEN MULTIBRANCH_ACCESS=''Y'' THEN 1 ELSE 0 END)/COUNT(*),1) pct
+            FROM SMTB_USER WHERE HOME_BRANCH IS NOT NULL
+            GROUP BY HOME_BRANCH HAVING COUNT(*) >= 3
+            ORDER BY pct DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  BRANCH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || '% multibranch');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Multibranch par agence', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.4 Agences avec au moins un AUTO_AUTH=Y (anomalie SoD)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT HOME_BRANCH, COUNT(*) nb FROM SMTB_USER
+            WHERE AUTO_AUTH = ''Y'' AND HOME_BRANCH IS NOT NULL
+            GROUP BY HOME_BRANCH
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 20) LOOP
+            p_kv('  BRANCH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' auto_auth');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  AUTO_AUTH par agence', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.5 Volumetrie ecritures ACTB_HISTORY par BRANCH (90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT AC_BRANCH, COUNT(*) nb FROM ACTB_HISTORY
+            WHERE TRN_DT >= TRUNC(SYSDATE) - 90
+            GROUP BY AC_BRANCH
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 20) LOOP
+            p_kv('  AC_BRANCH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' ecritures');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  ACTB_HISTORY par branch', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.6 Ratio user/agence (indicateur de charge/controle)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE USER_STATUS IN (''E'',''A'')' INTO v_count;
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT HOME_BRANCH) FROM SMTB_USER
+            WHERE HOME_BRANCH IS NOT NULL' INTO v_total;
+        IF v_total > 0 THEN
+            p_kv('  Moyenne user / agence', TO_CHAR(ROUND(v_count / v_total, 2)));
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Ratio user/agence', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-22.7 KRI CONSOLIDES (tableau de bord securite)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER WHERE AUTO_AUTH = ''Y''' INTO v_count;
+        p_kv('  KRI-01 Comptes AUTO_AUTH=Y (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER WHERE ONCE_AUTH = ''Y''' INTO v_count;
+        p_kv('  KRI-02 Comptes ONCE_AUTH=Y (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE USER_PASSWORD IS NULL OR USER_PASSWORD = '' ''' INTO v_count;
+        p_kv('  KRI-03 Comptes sans mdp (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE PWD_CHANGED_ON < ADD_MONTHS(SYSDATE, -6)
+               OR PWD_CHANGED_ON IS NULL' INTO v_count;
+        p_kv('  KRI-04 Mdp non renouveles >6m', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE END_DATE IS NOT NULL
+              AND END_DATE < SYSDATE
+              AND USER_STATUS = ''E''' INTO v_count;
+        p_kv('  KRI-05 Comptes expires mais actifs (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER u
+            WHERE USER_STATUS IN (''E'',''A'')
+              AND NOT EXISTS (
+                SELECT 1 FROM SMTB_SMS_LOG l
+                WHERE l.USER_ID = u.USER_ID
+                  AND l.OPERATION_DATE >= TRUNC(SYSDATE) - 90)' INTO v_count;
+        p_kv('  KRI-06 Dormants >90j actifs (cible<=5%)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTM_CUSTOMER
+            WHERE MAKER_ID IS NOT NULL
+              AND CHECKER_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(CHECKER_ID)' INTO v_count;
+        p_kv('  KRI-07 CIF auto-authorises (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTB_ACCOUNT
+            WHERE MAKER_ID IS NOT NULL
+              AND CHECKER_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(CHECKER_ID)' INTO v_count;
+        p_kv('  KRI-08 Comptes auto-authorises (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM ACTB_HISTORY
+            WHERE MAKER_ID IS NOT NULL
+              AND AUTH_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(AUTH_ID)' INTO v_count;
+        p_kv('  KRI-09 Ecritures auto-authorisees (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_ROLE_DETAIL
+            WHERE CONTROL_STRING IS NOT NULL
+              AND LENGTH(CONTROL_STRING) >= 8
+              AND SUBSTR(CONTROL_STRING,1,1) = ''Y''
+              AND SUBSTR(CONTROL_STRING,8,1) = ''Y''' INTO v_count;
+        p_kv('  KRI-10 ROLE_DETAIL NEW+AUTH (SoD fonctionnel)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER WHERE STAFF_AC_RESTR = ''N''
+               OR STAFF_AC_RESTR IS NULL' INTO v_count;
+        p_kv('  KRI-11 STAFF_AC_RESTR non active (cible=0)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER WHERE MULTIBRANCH_ACCESS = ''Y''' INTO v_count;
+        p_kv('  KRI-12 Multi-branch (limiter aux DG/Audit)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT h.MAKER_ID)
+            FROM ACTB_HISTORY h
+            WHERE h.MAKER_ID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SMTB_USER u WHERE u.USER_ID = h.MAKER_ID)'
+        INTO v_count;
+        p_kv('  KRI-13 Makers ecritures orphelins', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE TIME_LEVEL = 0 OR TIME_LEVEL IS NULL' INTO v_count;
+        p_kv('  KRI-14 TIME_LEVEL non defini (controle horaire)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER
+            WHERE NO_OF_INVALID_LOGINS >= 3' INTO v_count;
+        p_kv('  KRI-15 Users >=3 echecs login courants', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN NULL; END;
+
+    -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
     p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');

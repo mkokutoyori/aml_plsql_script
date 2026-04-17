@@ -1330,3 +1330,191 @@ KNOWN LIMITATIONS — 2 sections ran with reduced scope
 ```
 
 Le lecteur sait immédiatement que l'audit n'a pas eu 100 % de couverture, et où se situent les zones aveugles.
+
+---
+
+## 12. Checklist de validation avant livraison
+
+Toute livraison d'un script d'audit au client passe par la checklist suivante. Chaque point doit être coché **avant** le push du commit final de livraison.
+
+### 12.1 Paramétrage
+
+- [ ] Tous les paramètres attendus (§2.2) sont présents et optionnels.
+- [ ] Valeurs par défaut documentées en commentaire.
+- [ ] Bloc `AUDIT PARAMETERS` imprimé en tête de rapport.
+- [ ] Validation préalable des paramètres (§11.2).
+- [ ] Aucune valeur en dur qui devrait être un paramètre (dates, codes agence, seuils).
+
+### 12.2 Défensivité & robustesse
+
+- [ ] Chaque requête non-triviale encadrée par `BEGIN/EXCEPTION`.
+- [ ] Aucun `EXCEPTION WHEN OTHERS THEN NULL;` silencieux.
+- [ ] Helpers standards définis (`print_section`, `print_kv`, `safe_count`, `print_finding`, `log_error`).
+- [ ] `NVL` sur colonne NUMBER/DATE toujours précédé de `TO_CHAR`.
+- [ ] Divisions protégées par `NULLIF` ou `GREATEST`.
+- [ ] Agrégats sur ensembles vides enveloppés par `NVL(..., 0)`.
+
+### 12.3 Compatibilité Oracle
+
+- [ ] Aucun `FETCH FIRST` / `OFFSET` (syntaxe 12c+).
+- [ ] Aucun scalar subquery dans un appel procédural.
+- [ ] `SET SERVEROUTPUT ON SIZE UNLIMITED` en tête.
+- [ ] `SET LINESIZE 200` et autres directives standard.
+- [ ] Jointures ANSI `JOIN ... ON` (pas de jointure par WHERE).
+
+### 12.4 Dictionnaire de données
+
+- [ ] Toutes les tables référencées existent dans `fcubs.csv`.
+- [ ] Toutes les colonnes référencées existent dans leur table.
+- [ ] Types cohérents avec les opérations (SUM sur NUMBER, etc.).
+- [ ] `data_dictionary_ra.md` à jour avec les tables/colonnes utilisées.
+
+### 12.5 Structure du rapport
+
+- [ ] Header avec titre, timestamp, instance, version, hash.
+- [ ] `AUDIT PARAMETERS` récapitulé.
+- [ ] `EXECUTIVE SUMMARY` en tête (top 10 findings + overall rating).
+- [ ] Sections principales numérotées, sous-sections indentées.
+- [ ] Findings au format standard avec `[F-NNN]`, sévérité, impact LCY.
+- [ ] Tableau top-N formaté proprement (colonnes fixes).
+- [ ] `END OF AUDIT` avec compteurs final.
+- [ ] Langue du rapport : **anglais**.
+- [ ] Largeur de ligne ≤ 100 caractères.
+
+### 12.6 Performance
+
+- [ ] Filtres paramètres appliqués au plus tôt (avant GROUP BY).
+- [ ] Pas de N+1 (pas de SELECT dans une boucle).
+- [ ] Top-N bornés par `p_top_n`.
+- [ ] Chronométrage par section activé.
+- [ ] Temps d'exécution mesurés et dans les cibles (§9.2).
+- [ ] `DBMS_OUTPUT` jamais utilisé pour des listes non bornées.
+
+### 12.7 Traçabilité
+
+- [ ] `C_SCRIPT_VERSION` incrémenté.
+- [ ] Timestamp d'exécution imprimé.
+- [ ] ORDER BY déterministes (clé de départage stable).
+- [ ] Aucune fonction non déterministe (`DBMS_RANDOM`, `SYS_GUID`).
+- [ ] Archivage du rapport dans `reports/`.
+
+### 12.8 Sécurité
+
+- [ ] Script en lecture seule (aucun DML/DDL sauf temp tables).
+- [ ] Aucun credential dans le code.
+- [ ] Aucune donnée client sensible en dur.
+- [ ] `.gitignore` à jour.
+
+### 12.9 Qualité du code source
+
+- [ ] Commentaires en-tête expliquant l'objectif du script.
+- [ ] Chaque section commentée (pourquoi, pas quoi).
+- [ ] Variables typées et nommées selon l'usage (§3.9).
+- [ ] Alias de tables cohérents.
+- [ ] Pas de code mort ni de sections commentées en masse.
+
+### 12.10 Workflow Git
+
+- [ ] Travail sur la branche dédiée.
+- [ ] Commits granulaires (1 commit = 1 section).
+- [ ] Messages de commit au format standard.
+- [ ] Push après chaque commit.
+- [ ] Pas de force push.
+
+### 12.11 Tests de non-régression
+
+Avant livraison finale :
+
+- [ ] Script lancé à blanc (aucun paramètre) : tourne sans erreur fatale.
+- [ ] Script lancé avec `p_branch_code` : résultats filtrés et cohérents.
+- [ ] Script lancé avec `p_date_from > p_date_to` : erreur propre `-20001`.
+- [ ] Script lancé avec `p_mode = 'SUMMARY'` : temps < 2 min.
+- [ ] Script lancé avec `p_mode = 'DEEP'` : pas de timeout.
+- [ ] Rapport diff entre deux runs consécutifs identiques : aucune divergence (hors timestamp et durée).
+
+### 12.12 Revue métier
+
+- [ ] Chaque finding a été discuté avec un correspondant métier.
+- [ ] Les seuils de sévérité ont été calibrés avec le client.
+- [ ] Les recommandations sont actionnables (responsable + échéance).
+- [ ] Le mapping PCEC est validé par la direction comptable.
+
+### 12.13 Livrables documentaires
+
+- [ ] `BRD_revenue_assurance.md` à jour (décrit les contrôles effectivement implémentés).
+- [ ] `bonnes_pratiques.md` respecté sans dérogation non justifiée.
+- [ ] `data_dictionary_ra.md` à jour.
+- [ ] `changelog.md` incrémenté (version, date, résumé des changements).
+- [ ] `README.md` du répertoire `revenue_assurance/` à jour.
+
+### 12.14 Approbation
+
+La livraison est considérée comme terminée **après** :
+
+1. Revue de code par un pair technique.
+2. Validation métier par le correspondant RA du client.
+3. Exécution test sur environnement UAT avec rapport archivé.
+4. Tag Git de version (`ra-vX.Y`).
+5. PR mergée sur `main` (sur demande explicite du client).
+
+---
+
+## Annexe A — Gabarit d'en-tête de script d'audit
+
+```sql
+/***********************************************************************
+ * REVENUE ASSURANCE & ACCOUNTING AUDIT
+ * ---------------------------------------------------------------------
+ * Script  : revenue_assurance_and_accounting_audit.sql
+ * Version : 1.0.0
+ * Date    : 2026-04-17
+ * Author  : <équipe audit>
+ * ---------------------------------------------------------------------
+ * Purpose : Exhaustive audit of revenue leakage, accounting accuracy,
+ *           and compliance with COBAC PCEC (R-98/01) on FCUBS schema.
+ * ---------------------------------------------------------------------
+ * Usage   : sqlplus <user>/<pwd>@<tns> @revenue_assurance_and_accounting_audit.sql
+ *           Optional: edit the PARAMETERS block before running.
+ * ---------------------------------------------------------------------
+ * Output  : DBMS_OUTPUT — structured English report, can be spooled
+ *           to a file via SPOOL <path>.
+ * ---------------------------------------------------------------------
+ * Compat  : Oracle 11gR2+ (no 12c+ syntax used).
+ * Read-only: no DML / DDL on FCUBS tables.
+ * ---------------------------------------------------------------------
+ * See also: bonnes_pratiques.md, BRD_revenue_assurance.md
+ **********************************************************************/
+
+SET SERVEROUTPUT ON SIZE UNLIMITED FORMAT WRAPPED
+SET LINESIZE 200
+SET PAGESIZE 0
+SET TRIMSPOOL ON
+SET FEEDBACK OFF
+SET VERIFY OFF
+SET TIMING ON
+
+DECLARE
+    -- =====  AUDIT PARAMETERS  =====
+    p_date_from       DATE          := NULL;
+    p_date_to         DATE          := SYSDATE;
+    p_branch_code     VARCHAR2(10)  := NULL;
+    -- ... cf. §2.2
+    ...
+BEGIN
+    ...
+END;
+/
+```
+
+---
+
+## Annexe B — Références externes
+
+- **COBAC R-98/01** : Règlement sur le Plan Comptable des Établissements de Crédit, 15 février 1998 (fichier `plan_comptable_cobac.txt`).
+- **Oracle SQL Language Reference 11g** : syntaxe cible de compatibilité.
+- **Oracle PL/SQL Language Reference 11g** : blocs anonymes, curseurs, exceptions.
+- **ISO 20022** : pour les codes SWIFT/pays si le module international est audité.
+
+---
+
+*Fin du document.*

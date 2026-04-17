@@ -1054,3 +1054,191 @@ Les contrôles suivants requièrent, **avant** rédaction du corps du script, de
 Ce catalogue peut être enrichi au fil des runs sans rupture de compatibilité (numérotation stable, sections ajoutées à la suite).
 
 ---
+
+## 8. Structure du rapport de sortie
+
+Le rapport doit être **en anglais**, en **texte brut monospacé**, largeur ≤ 200 colonnes, lisible à la fois par un humain et par un outil d'extraction textuelle. Il est généré intégralement via `DBMS_OUTPUT.PUT_LINE` et redirigé par SPOOL vers un fichier horodaté.
+
+### 8.1 Hiérarchie du rapport
+
+```
+REPORT
+├── HEADER                   — bannière, version, horodatage
+├── PARAMETERS               — écho des paramètres effectifs
+├── ENVIRONMENT              — version Oracle, photo comptable, volumes de référence
+├── EXECUTIVE SUMMARY        — synthèse condensée (≤ 60 lignes)
+├── GLOBAL INDICATORS        — KPIs (total exposure, findings by severity, PCEC coverage)
+├── SECTIONS
+│   ├── S01 ... S23          — une sous-arborescence par contrôle
+│   │   ├── Header           — id, titre, objectif, PCEC
+│   │   ├── Findings [F-NNN] — chacun structuré (cf. 8.4)
+│   │   └── Summary          — mini-résumé de section
+├── CROSS-CUTTING VIEWS      — top-N, matrice sévérité×PCEC, root causes
+├── APPENDICES               — queries used, reference tables, glossary abbreviations
+├── KNOWN LIMITATIONS        — sections dégradées/inexécutées et raisons
+├── LOGS [LOG]               — horodatage info/warn/error
+├── PERFORMANCE [PERF]       — durée par section (opt.)
+└── FOOTER                   — run-id, hash, version, signature
+```
+
+### 8.2 HEADER (exemple)
+
+```
+===============================================================================
+  REVENUE ASSURANCE & ACCOUNTING AUDIT
+  Bank          : <BANK_NAME>
+  Environment   : <INSTANCE_NAME>
+  Script version: 1.0.0
+  Run ID        : 20260417231502
+  Executed by   : <DB_USER>
+  Executed at   : 2026-04-17 23:15:02 UTC
+===============================================================================
+```
+
+### 8.3 EXECUTIVE SUMMARY (exemple)
+
+```
+===============================================================================
+  EXECUTIVE SUMMARY
+===============================================================================
+ Audit period ................ 2026-03-01 → 2026-03-31
+ As-of date .................. 2026-04-17
+ Total findings .............. 137 (C:14  H:42  M:61  L:15  I:5)
+ Total RA exposure (LCY) ..... 1,842,500,000 XAF  [capped @ p_materiality_cap]
+ PCEC coverage ............... 98.2%
+-------------------------------------------------------------------------------
+ TOP 10 FINDINGS BY IMPACT
+ #   SEV        ID        TITLE                                  IMPACT (LCY)
+ 01  CRITICAL   F-006     Overdue CL schedules > 90 days       312,400,000
+ 02  CRITICAL   F-050     Unauthorised overdrafts              287,900,000
+ ...
+===============================================================================
+```
+
+### 8.4 Format d'un Finding
+
+Chaque constat est émis au format normalisé :
+
+```
+-------------------------------------------------------------------------------
+ [F-050]  SEVERITY: CRITICAL    PCEC: 2 / 702
+ Title   : Unauthorized overdrafts without TOD limit
+ Period  : 2026-03-01 → 2026-03-31   As-of: 2026-04-17
+ Scope   : Branch=ALL  Customer=ALL  Product=CASA
+ Count   : 950 accounts
+ Impact  : 287,900,000 LCY (XAF)  (estimated unbilled OD interest)
+ Rule    : ACY_CURR_BALANCE < 0 AND (TOD_LIMIT IS NULL OR TOD_LIMIT = 0)
+ Top dim : by Branch — Douala 42%, Yaoundé 31%, Bafoussam 12%
+ Reco    : Enforce TOD paramétering, bill unauthorized OD at penal rate
+ Ref-qry : APPENDIX A1.S01.Q01
+-------------------------------------------------------------------------------
+```
+
+Champs **obligatoires** : `[F-NNN]`, Severity, Title, Count, Impact (ou N/A), Rule, Recommendation, PCEC.
+Champs **recommandés** : Period, Scope, Top dim, Ref-qry.
+
+### 8.5 Sévérités — définition et règles de promotion
+
+| Severity | Définition courte | Règle de promotion automatique |
+|---|---|---|
+| `CRITICAL` | Risque immédiat sur le résultat, la conformité ou la SoD ; à traiter sous 7 jours. | Impact > `p_materiality_critical_lcy` OU section marquée critical. |
+| `HIGH` | Perte / risque significatif ; plan d'action sous 30 jours. | Impact > `p_materiality_impact_lcy`. |
+| `MEDIUM` | À investiguer ; corriger dans le cycle trimestriel. | Par défaut pour la plupart des findings. |
+| `LOW` | À tracer ; revue annuelle. | Impact < `p_materiality_lcy`. |
+| `INFO` | Observation / volumétrie ; pas d'action requise. | Agrégats de contexte. |
+
+La promotion s'applique **automatiquement** au moment de `print_finding` en fonction des seuils.
+
+### 8.6 GLOBAL INDICATORS (exemple)
+
+```
+===============================================================================
+  GLOBAL INDICATORS
+===============================================================================
+ FINDINGS BY SEVERITY
+   CRITICAL .............. 14
+   HIGH .................. 42
+   MEDIUM ................ 61
+   LOW ................... 15
+   INFO .................. 5
+
+ EXPOSURE BY PCEC CLASS (LCY)
+   Class 1 (Treasury/EC)         ......     84,000,000
+   Class 2 (Customers)           ......  1,423,100,000
+   Class 3 (Securities/Diverse)  ......     12,700,000
+   Class 6 (Expenses)            ......     28,300,000
+   Class 7 (Income)              ......    294,400,000
+
+ VOLUMETRY
+   Accounts audited ........ 312,478
+   Transactions scanned .... 18,492,105
+   GL accounts ............. 12,417
+```
+
+### 8.7 CROSS-CUTTING VIEWS
+
+- **Severity × PCEC matrix** : nombre de findings et somme d'impact LCY par cellule.
+- **Top-N by branch / product / customer** (mode `DEEP` uniquement).
+- **Root causes Top 5** — identifiants textuels (ex. "Product param missing", "User SoD breach", "Batch skipped", "TOD not renewed"), agrégés sur tous les findings.
+
+### 8.8 APPENDICES
+
+- **A1 — Queries** : pour chaque `[F-NNN]`, la requête SQL utilisée (ou sa version anonymisée) est listée, préfixée de son identifiant `Ref-qry` (`A1.SNN.Qnn`). Imprimée **uniquement** si `p_verbose = 'Y'`.
+- **A2 — Reference tables** : tables de seuils, liste des GL critiques, mapping PCEC utilisé.
+- **A3 — Glossary & abbreviations** : rappel des acronymes utilisés.
+
+### 8.9 KNOWN LIMITATIONS
+
+```
+===============================================================================
+  KNOWN LIMITATIONS
+===============================================================================
+ - Section S15 (FX leakage): skipped — table CYTB_RATES not accessible.
+ - Section S18 (Suspense ageing): partial — suspense GL list based on
+   convention <30* ; banque to confirm complete list.
+ - Mapping GL→PCEC: automatic derivation from GL code prefix; manual
+   validation pending.
+```
+
+### 8.10 LOGS `[LOG]` et `[PERF]`
+
+- **[LOG]** : chaque ligne au format `YYYY-MM-DD HH24:MI:SS | LEVEL | SECTION | MESSAGE` avec LEVEL ∈ {`INFO`, `WARN`, `ERROR`, `FATAL`}.
+- **[PERF]** : `SECTION | DURATION_MS | ROWS_RETURNED | STATUS` — une ligne par section exécutée.
+
+Ces blocs DOIVENT être placés en **fin** de rapport pour ne pas polluer la lecture métier.
+
+### 8.11 FOOTER
+
+```
+===============================================================================
+  END OF REPORT
+  Run ID        : 20260417231502
+  Script version: 1.0.0
+  Integrity hash: 7f3c-91a8-bb2d (DBMS_UTILITY.GET_HASH_VALUE on banner)
+  Duration      : 00:11:42
+  Status        : COMPLETED (3 sections degraded, see KNOWN LIMITATIONS)
+===============================================================================
+```
+
+### 8.12 Règles de mise en forme
+
+- Largeur cible : **120 colonnes** (stricte) pour blocs centraux, max 200.
+- Séparateurs : `===` pour grandes sections, `---` pour sous-sections.
+- Numérotation monétaire : virgule comme séparateur de milliers, point décimal.
+- Alignement des montants : **à droite** avec largeur fixe.
+- Dates : ISO `YYYY-MM-DD` (jamais locale).
+- Caractères : ASCII pur ; pas de caractère non-ASCII (emoji, accents) pour garantir la portabilité du spool.
+- Pas de couleur ni d'escape ANSI.
+
+### 8.13 Principes d'ergonomie
+
+- L'Executive Summary DOIT tenir en **une page terminale** (≤ 60 lignes).
+- Chaque section DOIT être **auto-suffisante** : un lecteur peut lire une section sans relire le début du rapport.
+- Les montants majeurs DOIVENT être répétés en pied de section.
+- Chaque finding DOIT citer sa règle (`Rule`) en une ligne lisible.
+
+### 8.14 Versionnement du format de rapport
+
+La version du format de rapport est distincte de la version du script : `REPORT_FORMAT_VERSION = 1.0`. Toute évolution impactant l'extraction automatique (ajout/suppression de champ) DOIT incrémenter cette version et être documentée dans `KNOWN LIMITATIONS` pendant au moins un run de transition.
+
+---

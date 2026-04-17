@@ -1083,6 +1083,98 @@ Cette famille vérifie que les écritures FCUBS respectent le **référentiel co
 
 ---
 
+### 7.G — Détection de fraudes et typologies à risque
+
+Cette famille couvre les **schémas de fraude** internes et externes détectables par analyse des données comptables FCUBS. Elle agit en **complément** (et non en remplacement) du module AML/CFT dédié : l'angle retenu ici est la **fraude comptable / opérationnelle**, pas le blanchiment.
+
+> Les constats de cette famille sont par nature sensibles : ils doivent faire l'objet d'une **investigation contradictoire** avant toute conclusion (cf. §10.5 et §15.4).
+
+#### S29 — Circular / structured transactions between related accounts
+
+- **Findings** : `[F-280]` funds cycling between a small set of related accounts over a short window (A→B→C→A) ; `[F-281]` transactions just below reporting / authorisation thresholds (structuring) ; `[F-282]` round-trip transactions reversed within N hours with no business justification.
+- **Objectif** — Détecter les **transactions circulaires** et les **structuring** (fragmentation pour rester sous un seuil) qui sont des indicateurs classiques de fraude et de manipulation de soldes.
+- **Sources** — `ACTB_HISTORY` (`AC_NO`, `TRN_REF_NO`, `OFFSET_AC_NO` si présent, `LCY_AMOUNT`, `TRN_DT`), `FTTB_CONTRACT_MASTER`.
+- **Méthode** — Graphe orienté comptes × comptes sur la période ; détection de cycles de longueur 2–5 ; détection de montants clusterisés juste sous les seuils paramétrables (ex. 9 999 999 répétés).
+- **Sévérité** — HIGH, CRITICAL si impliquant un compte sensible (§13).
+- **Impact LCY** — Volume total des flux cycliques / structurés.
+- **Dimensions** — compte, utilisateur, agence, tranche de montant.
+- **Recommandation** — Saisir Audit Interne et Compliance ; investigation dédiée ; blocage des comptes le cas échéant.
+- **PCEC** — Transverse, foyer `PCEC/2`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_structuring_threshold_lcy` (dérivé).
+- **Fondement exploration** — structure `ACTB_HISTORY` confirmée ; présence d'un `OFFSET_AC_NO` à vérifier via mini-script.
+
+#### S30 — Suspicious reversals (contre-passations)
+
+- **Findings** : `[F-290]` entries reversed within < 24h on sensitive GLs (classes 6/7/38) ; `[F-291]` reversals passed by a different user than the maker of the original, but repeatedly by the same pair ; `[F-292]` round-trip (posting + reversal) straddling a period boundary (fin de mois).
+- **Objectif** — Détecter les **contre-passations suspectes** : écritures passées pour gonfler/amoindrir un solde puis annulées, ou pour tester des contrôles.
+- **Sources** — `ACTB_HISTORY` (`TRN_REF_NO`, `REVERSAL_MARKER` / `TRN_CODE` d'annulation, `MAKER_ID`, `CHECKER_ID`, `TRN_DT`).
+- **Méthode** — Appariement par `TRN_REF_NO` ou par somme algébrique nulle sur fenêtre courte ; classification des cas à risque selon GL cible.
+- **Sévérité** — HIGH, CRITICAL pour contournements fin de période.
+- **Impact LCY** — Montant LCY du couple original/annulation.
+- **Dimensions** — GL cible, maker/checker, horodatage, période.
+- **Recommandation** — Revue maker/checker, revalidation SoD, alerte Compliance.
+- **PCEC** — Focus `PCEC/6`, `PCEC/7`, `PCEC/38`, `PCEC/5`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_reversal_window_hours` (défaut 24).
+- **Fondement exploration** — présence de flags de renversement confirmée sur `ACTB_HISTORY`.
+
+#### S31 — Off-hours / weekend / holiday postings
+
+- **Findings** : `[F-300]` postings with `CREATION_DATE` in weekend or outside `p_business_hours_window` ; `[F-301]` postings on official holidays (si calendrier disponible) ; `[F-302]` concentration par utilisateur/agence d'écritures hors heures.
+- **Objectif** — Détecter les écritures passées en **dehors des heures d'exploitation** normales, indicateur classique de fraude interne.
+- **Sources** — `ACTB_HISTORY` (`CREATION_DATE`, `MAKER_DT_STAMP`), calendrier interne si disponible.
+- **Méthode** — Filtre horaire + jour de la semaine ; rapprochement calendrier férié ; comptage par utilisateur/agence.
+- **Sévérité** — MEDIUM, HIGH si concentration + GL sensible.
+- **Impact LCY** — Somme LCY des écritures concernées.
+- **Dimensions** — utilisateur, agence, créneau horaire.
+- **Recommandation** — Revue SoD, revalidation des accès hors heures.
+- **PCEC** — Transverse.
+- **Paramètres** — `p_business_hours_from`, `p_business_hours_to` (ex. 07:00–19:00), `p_exclude_technical_users`.
+- **Fondement exploration** — colonnes confirmées.
+
+#### S32 — Inter-account kiting / timing fraud
+
+- **Findings** : `[F-310]` accounts with repeated offsetting credit/debit patterns aligning with cut-off batches ; `[F-311]` overdraft positions temporarily eliminated on run dates (fin de mois / fin de trimestre) then re-appearing.
+- **Objectif** — Détecter le **kiting** : utilisation des décalages de traitement pour masquer artificiellement un découvert ou gonfler un solde à une date d'arrêté.
+- **Sources** — `ACTB_HISTORY`, `STTM_CUST_ACCOUNT` (variations de solde autour des arrêtés).
+- **Méthode** — Comparaison solde veille d'arrêté vs solde jour d'arrêté vs solde lendemain ; détection des « pics » non persistants.
+- **Sévérité** — HIGH, CRITICAL si récurrent.
+- **Impact LCY** — Valeur du pic masqué.
+- **Dimensions** — compte, client, agence.
+- **Recommandation** — Investigation ciblée ; revue des limites de découvert ; alerte Compliance.
+- **PCEC** — `PCEC/2`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — nécessite un mini-script `describe_cutoff_dates.sql` pour identifier les dates d'arrêté internes.
+
+#### S33 — Employee / internal actor red flags
+
+- **Findings** : `[F-320]` postings by employees **on their own client account** or on accounts of first-degree related parties ; `[F-321]` employees with waivers granted to their own accounts ; `[F-322]` large transfers between employee accounts and external beneficiaries recently created ; `[F-323]` ghost/suspense accounts opened and closed within a short window by the same user.
+- **Objectif** — Mettre en lumière les **conflits d'intérêts** et schémas d'**enrichissement interne** à partir des rapprochements utilisateur/client.
+- **Sources** — `SMTB_USER` (association USER_ID ↔ CUSTOMER_NO interne si existe), `STTM_CUSTOMER`, `ACTB_HISTORY`, `CSTB_CONTRACT_EVENT_LOG`.
+- **Méthode** — Jointure `MAKER_ID`/`CHECKER_ID` ↔ `CUSTOMER_NO` interne ; détection de waivers auto-appliqués ; détection de comptes de courte durée de vie par utilisateur.
+- **Sévérité** — CRITICAL (risque éthique et fraude).
+- **Impact LCY** — Somme des montants concernés.
+- **Dimensions** — utilisateur, lien familial (si renseigné), agence.
+- **Recommandation** — Blocage immédiat, enquête contradictoire, saisine RH + Compliance.
+- **PCEC** — Transverse.
+- **Paramètres** — `p_date_from`, `p_date_to`.
+- **Fondement exploration** — mini-script `describe_user_customer_link.sql` requis.
+
+#### S34 — Reference data tampering preceding debits
+
+- **Findings** : `[F-330]` beneficiary / RIB changes on a customer account within N hours before a large outgoing transfer ; `[F-331]` interest rate or fee waiver granted minutes before a liquidation ; `[F-332]` account re-opened (un-dormant) then immediately debited ; `[F-333]` address / contact change just before a sensitive operation.
+- **Objectif** — Détecter les **modifications de référentiel** suspectes qui **précèdent** une opération financière, schéma typique de fraude ciblée (siphonage de compte dormant, détournement par changement de bénéficiaire).
+- **Sources** — `CSTB_CONTRACT_EVENT_LOG` (événements applicatifs), `STTM_CUST_ACCOUNT` (audit trail s'il existe), `CLTB_ACCOUNT_COMPONENTS` pour les waivers, `ACTB_HISTORY` pour le débit consécutif.
+- **Méthode** — Fenêtre temporelle courte (`p_tamper_window_hours`, défaut 24h) entre la modification et l'opération ; classement par impact.
+- **Sévérité** — CRITICAL.
+- **Impact LCY** — Montant de l'opération subséquente.
+- **Dimensions** — utilisateur, type de modification, client.
+- **Recommandation** — Geler l'opération si possible, investigation Audit + Compliance, saisine éventuelle autorités.
+- **PCEC** — Transverse.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_tamper_window_hours`.
+- **Fondement exploration** — dépend de la disponibilité d'un journal d'événements applicatif (mini-script `describe_event_log.sql`).
+
+---
+
 ### 7.Z — Hypothèses à valider par mini-scripts d'exploration
 
 Les contrôles suivants requièrent, **avant** rédaction du corps du script, des mini-scripts d'exploration dédiés afin de ne pas inventer de structures :

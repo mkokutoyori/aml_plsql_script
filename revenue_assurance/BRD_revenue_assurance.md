@@ -173,3 +173,89 @@ L'audit doit, autant que possible, **rattacher chaque constat à la rubrique PCE
 - Les libellés de rubriques PCEC sont notés `PCEC/<classe>` ou `PCEC/<compte>` (ex. `PCEC/2`, `PCEC/702`).
 
 ---
+
+## 3. Exigences métier (Business Requirements)
+
+Les exigences métier expriment, du point de vue des **parties prenantes**, les besoins que le livrable doit satisfaire. Elles sont déclinées en exigences fonctionnelles au §4 et en contrôles détaillés au §7.
+
+### 3.1 Besoins de la Direction Financière
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-01** | Chiffrer en LCY les pertes de revenus potentielles détectées sur la période auditée, par **agence**, **produit**, **client** et **rubrique PCEC**. | MUST | Prioriser le recouvrement et le cadrage budgétaire. |
+| **BR-02** | Fournir un **Executive Summary** en tête de rapport, limité à 1 page équivalente, listant les 10 à 20 constats les plus matériels. | MUST | Lecture rapide par la Direction. |
+| **BR-03** | Permettre la **simulation** de l'effet P&L d'une correction (intérêts manqués sur découvert, SI non facturées) via des agrégats par compte / contrepartie. | SHOULD | Aide à la négociation client et aux arbitrages commerciaux. |
+| **BR-04** | Exposer la **volumétrie** des cas (nombre de comptes, contrats, écritures) en regard de chaque impact monétaire. | MUST | Éviter les faux positifs à fort impact unitaire mais isolés. |
+| **BR-05** | Présenter l'évolution des indicateurs clés entre **deux runs** (comparatif mensuel). | MAY | Cible à terme ; peut être traité hors script dans un premier temps. |
+
+### 3.2 Besoins de l'Audit Interne
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-10** | Produire des constats **ré-exécutables** : chaque `[F-NNN]` doit être rattaché à une requête de référence documentée dans le script. | MUST | Piste d'audit, revue par des pairs, contre-audit externe. |
+| **BR-11** | **Ne modifier aucune donnée** : script strictement en lecture (SELECT uniquement). | MUST | Règle d'or audit ; toute déviation est bloquante. |
+| **BR-12** | Horodater le rapport (date de génération, photo comptable auditée, version du script) et identifier l'exécutant. | MUST | Traçabilité et archivage. |
+| **BR-13** | Détailler chaque constat par : **description**, **volume**, **impact**, **sévérité**, **rubrique PCEC**, **recommandation**, **requête d'appui**. | MUST | Exploitable tel quel dans un rapport de mission. |
+| **BR-14** | Documenter les **limitations connues** (KNOWN LIMITATIONS) en fin de rapport. | MUST | Transparence sur le périmètre effectivement couvert. |
+
+### 3.3 Besoins du Contrôle de Gestion / Reporting COBAC
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-20** | Rattacher chaque section d'audit à au moins **une classe** PCEC COBAC R-98/01. | MUST | Lecture prudentielle et réglementaire. |
+| **BR-21** | Identifier les comptes GL non mappés ou mal mappés au PCEC. | SHOULD | Qualité du reporting COBAC. |
+| **BR-22** | Détecter les **écritures manuelles** massives, récurrentes ou sur comptes sensibles (charges, produits, suspense). | MUST | Risque de manipulation de résultat. |
+| **BR-23** | Identifier les **comptes d'attente / suspense** (classe 38x) à ancienneté anormale. | MUST | Risque de résultat latent ou de masquage. |
+| **BR-24** | Vérifier la cohérence **ACTB_HISTORY ↔ GLTB_GL_BAL** sur un sous-ensemble de GL critiques. | SHOULD | Intégrité comptable. |
+
+### 3.4 Besoins de la DSI / Équipe FCUBS
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-30** | Compatibilité **Oracle 11gR2 minimum** sans dépendance à des objets applicatifs (packages métier) autres que le dictionnaire. | MUST | Exécution possible sur standby, DWH ou PROD. |
+| **BR-31** | Exécution en **bloc PL/SQL anonyme** unique, sans création d'objets (procédures, tables, types). | MUST | Pas d'installation ; zéro empreinte persistante. |
+| **BR-32** | **Paramétrage** par variables de tête : période, agence(s), compte(s), devise(s), seuils, mode, top-N, etc., tous optionnels (NULL = pas de filtre). | MUST | Flexibilité d'usage. |
+| **BR-33** | Borne de **temps d'exécution** : `SUMMARY` < 2 min, `FULL` < 15 min, `DEEP` < 60 min sur photo mensuelle. | SHOULD | Compatibilité fenêtre d'exploitation. |
+| **BR-34** | **Robustesse** : chaque section encadrée par `BEGIN ... EXCEPTION WHEN OTHERS` afin qu'une erreur locale n'interrompe pas le rapport global. | MUST | Production de rapport même partiellement dégradé. |
+| **BR-35** | **Log d'erreurs** en pied de rapport (codes, sections, horodatage). | MUST | Diagnostic rapide. |
+
+### 3.5 Besoins de Risk & Compliance
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-40** | Détecter les **waivers** (remises) non conformes à la politique (hors seuils / hors grille / sans approbation). | MUST | Risque de pertes non maîtrisées et de fraude interne. |
+| **BR-41** | Détecter les **comptes dormants** porteurs d'accruals non apurés ou de mouvements inhabituels. | MUST | Risque opérationnel et conformité. |
+| **BR-42** | Identifier les **standing instructions** en échec ou expirées, et les SI de frais non exécutées. | MUST | Revenue leakage direct. |
+| **BR-43** | Identifier les **crédits** avec échéances impayées, gelés, ou avec composantes en attente de liquidation. | MUST | Risque de crédit et manque à gagner sur pénalités / intérêts. |
+| **BR-44** | Lister les **utilisateurs** à fort volume d'écritures manuelles ou d'annulations. | SHOULD | Piste d'audit SoD (*Segregation of Duties*). |
+
+### 3.6 Besoins de la Direction Générale
+
+| Id | Exigence | Priorité | Justification |
+|---|---|---|---|
+| **BR-50** | Disposer d'un **indicateur unique** agrégé d'exposition en LCY (somme des impacts estimés, bornés par un plafond de prudence). | SHOULD | Décision stratégique et arbitrage des chantiers correctifs. |
+| **BR-51** | Connaître les **3 à 5 grandes causes racines** (root causes) les plus fréquentes. | SHOULD | Orientation des plans d'action. |
+
+### 3.7 Matrice de traçabilité (extrait)
+
+Chaque exigence métier doit être couverte par au moins une exigence fonctionnelle (§4) et/ou un contrôle (§7). Cette matrice sera maintenue dans la §4 une fois celle-ci rédigée.
+
+| Exigence métier | Couverture prévue |
+|---|---|
+| BR-01, BR-04 | FR-10 (agrégation multidimensionnelle), §7 Audits 1-20 |
+| BR-02 | §8 Executive Summary |
+| BR-10, BR-11, BR-12, BR-13 | FR-30 (traçabilité), `bonnes_pratiques.md` §10 |
+| BR-20, BR-21 | §9 Mapping PCEC |
+| BR-30 à BR-35 | §5 Exigences non-fonctionnelles |
+| BR-40 à BR-44 | §7 Catalogue de contrôles |
+
+### 3.8 Critères d'acceptation métier
+
+L'ouvrage est réputé **acceptable métier** si :
+1. Tous les `MUST` de la §3 sont couverts par au moins un `FR` et un contrôle.
+2. Un run `FULL` sur une photo mensuelle produit un rapport **lisible de bout en bout** (pas d'interruption, pas de sortie tronquée).
+3. L'Executive Summary tient en ≤ 60 lignes.
+4. 100 % des sections citent leur rattachement PCEC.
+5. Un reviewer indépendant peut **ré-exécuter** n'importe quel `[F-NNN]` à partir des requêtes d'appui documentées.
+
+---

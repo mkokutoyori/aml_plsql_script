@@ -3965,14 +3965,316 @@ BEGIN
     END;
 
     DBMS_OUTPUT.PUT_LINE('  ' || RPAD('-',76,'-'));
-    DBMS_OUTPUT.PUT_LINE('  Fin de l''exploration Revenue Assurance.');
-    DBMS_OUTPUT.PUT_LINE('  Les indicateurs ci-dessus doivent être priorisés :');
+    DBMS_OUTPUT.PUT_LINE('  Synthèse RA enregistrée. Prioriser les indicateurs :');
     DBMS_OUTPUT.PUT_LINE('   - [W*] waivers à justifier (revue contractuelle)');
     DBMS_OUTPUT.PUT_LINE('   - [D*] dormance : CHG_DUE à extraire avant radiation');
     DBMS_OUTPUT.PUT_LINE('   - [O*] overdraft tacite : application de taux OD/pénalités');
     DBMS_OUTPUT.PUT_LINE('   - [S*] SI : paramétrage frais succès/échec & expirations');
     DBMS_OUTPUT.PUT_LINE('   - [E*] échéances : recouvrement & pénalités de retard');
     DBMS_OUTPUT.PUT_LINE('   - [A*] accruals : rapprocher avec le GL revenus');
+
+    ----------------------------------------------------------------
+    -- SECTION 15 : LDTB ICCF détaillé — calculs, rollovers & accruals
+    --   Approfondissement de la section 8 : on descend dans les
+    --   tables de calcul ICCF (Interest/Charge/Commission/Fee) pour
+    --   détecter :
+    --    - RATE à 0 / CALC_METHOD invalide
+    --    - périodes ICCF qui chevauchent
+    --    - upfront profit booké sans liquidation aval
+    --    - rollovers avec APPLY_CHARGE=N / APPLY_TAX=N (leakage)
+    --    - accrual ref absente de l'historique (drift)
+    ----------------------------------------------------------------
+    print_section('SECTION 15 — LDTB ICCF détaillé : calculs, rollovers, accruals');
+
+    -- 15.1 LDTB_CONTRACT_ICCF_CALC — volumétrie & structure
+    DBMS_OUTPUT.PUT_LINE('  [15.1 Volumétrie ICCF_CALC]');
+    safe_count('LDTB_CONTRACT_ICCF_CALC', '  Total lignes calcul ICCF');
+    SELECT COUNT(DISTINCT CONTRACT_REF_NO) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC;
+    print_kv('  Contrats avec calcul ICCF', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT COMPONENT) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC;
+    print_kv('  Composants ICCF distincts', TO_CHAR(v_count));
+
+    -- 15.1.b Top 15 composants (volume de lignes)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.1.b Top 15 composants ICCF]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(COMPONENT,'(NULL)') s, COUNT(*) nb,
+                   NVL(SUM(CALCULATED_AMOUNT),0) sm
+            FROM LDTB_CONTRACT_ICCF_CALC GROUP BY COMPONENT
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.s, 'nb=' || TO_CHAR(r.nb) || ' | Σ calc=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 15.1.c ICCF_CALC_METHOD — anomalies paramétrage
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.1.c Méthodes de calcul ICCF_CALC_METHOD]');
+    FOR r IN (SELECT NVL(ICCF_CALC_METHOD,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ICCF_CALC GROUP BY ICCF_CALC_METHOD
+              ORDER BY nb DESC) LOOP
+        print_kv('  METHOD = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.2 RATE anormaux & CALCULATED_AMOUNT = 0
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.2 RATE & CALCULATED_AMOUNT — anomalies]');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE NVL(RATE,0) = 0 AND NVL(CALCULATED_AMOUNT,0) <> 0;
+    print_kv('  RATE=0 mais CALCULATED_AMOUNT <> 0 (incohérent)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE BASIS_AMOUNT IS NOT NULL AND BASIS_AMOUNT > 0
+      AND NVL(CALCULATED_AMOUNT,0) = 0;
+    print_kv('  BASIS_AMOUNT > 0 mais CALC = 0 (leakage ICCF)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE NO_OF_DAYS IS NOT NULL AND NO_OF_DAYS < 0;
+    print_kv('  NO_OF_DAYS < 0 (anomalie période)', TO_CHAR(v_count));
+
+    -- 15.2.b Ordre chronologique START/END
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE START_DATE IS NOT NULL AND END_DATE IS NOT NULL
+      AND START_DATE > END_DATE;
+    print_kv('  START_DATE > END_DATE', TO_CHAR(v_count));
+
+    -- 15.2.c Taux extrêmes
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE RATE IS NOT NULL AND RATE > 100;
+    print_kv('  RATE > 100 % (extrême - à vérifier)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_CALC
+    WHERE RATE IS NOT NULL AND RATE < 0;
+    print_kv('  RATE négatif', TO_CHAR(v_count));
+
+    -- 15.3 LDTB_CONTRACT_ICCF_DETAILS — détails par composant
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.3 LDTB_CONTRACT_ICCF_DETAILS]');
+    safe_count('LDTB_CONTRACT_ICCF_DETAILS', '  Total lignes details ICCF');
+    FOR r IN (SELECT NVL(ACCRUAL_REQUIRED,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ICCF_DETAILS GROUP BY ACCRUAL_REQUIRED
+              ORDER BY nb DESC) LOOP
+        print_kv('  ACCRUAL_REQUIRED = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(PAYMENT_METHOD,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ICCF_DETAILS GROUP BY PAYMENT_METHOD
+              ORDER BY nb DESC) LOOP
+        print_kv('  PAYMENT_METHOD = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.3.b Upfront profit booké sans liquidation
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_DETAILS
+    WHERE NVL(UPFRONT_PROFIT_BOOKED,0) <> 0
+      AND NVL(TOTAL_AMOUNT_LIQUIDATED,0) = 0;
+    print_kv('  UPFRONT_PROFIT_BOOKED <> 0 & TOT_LIQUIDATED=0', TO_CHAR(v_count));
+
+    -- 15.3.c Accrued courant vs liquidé (drift)
+    SELECT NVL(SUM(CURRENT_NET_ACCRUAL),0) INTO v_num FROM LDTB_CONTRACT_ICCF_DETAILS;
+    print_kv('  Σ CURRENT_NET_ACCRUAL', TO_CHAR(v_num));
+    SELECT NVL(SUM(TILL_DATE_ACCRUAL),0) INTO v_num FROM LDTB_CONTRACT_ICCF_DETAILS;
+    print_kv('  Σ TILL_DATE_ACCRUAL', TO_CHAR(v_num));
+    SELECT NVL(SUM(TOTAL_AMOUNT_LIQUIDATED),0) INTO v_num FROM LDTB_CONTRACT_ICCF_DETAILS;
+    print_kv('  Σ TOTAL_AMOUNT_LIQUIDATED', TO_CHAR(v_num));
+
+    -- 15.3.d Liquidations anciennes (dernier > 365j)
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ICCF_DETAILS
+    WHERE LAST_LIQUIDATION_DATE IS NOT NULL
+      AND LAST_LIQUIDATION_DATE < SYSDATE - 365
+      AND NVL(CURRENT_NET_ACCRUAL,0) > 0;
+    print_kv('  Accrued > 0 mais dern. liq > 365j (leakage)', TO_CHAR(v_count));
+
+    -- 15.4 LDTB_CONTRACT_LIQ — Liquidations LD par composant
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.4 LDTB_CONTRACT_LIQ — événements de liquidation]');
+    safe_count('LDTB_CONTRACT_LIQ', '  Total liquidations LD');
+    SELECT NVL(SUM(AMOUNT_DUE),0) INTO v_num FROM LDTB_CONTRACT_LIQ;
+    print_kv('  Σ AMOUNT_DUE', TO_CHAR(v_num));
+    SELECT NVL(SUM(AMOUNT_PAID),0) INTO v_num FROM LDTB_CONTRACT_LIQ;
+    print_kv('  Σ AMOUNT_PAID', TO_CHAR(v_num));
+    SELECT NVL(SUM(TAX_PAID),0) INTO v_num FROM LDTB_CONTRACT_LIQ;
+    print_kv('  Σ TAX_PAID', TO_CHAR(v_num));
+
+    -- 15.4.b Liquidations partielles (AMOUNT_PAID < AMOUNT_DUE)
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ
+    WHERE AMOUNT_DUE IS NOT NULL AND AMOUNT_PAID IS NOT NULL
+      AND AMOUNT_PAID < AMOUNT_DUE;
+    print_kv('  Liquidations partielles (PAID < DUE)', TO_CHAR(v_count));
+
+    SELECT NVL(SUM(AMOUNT_DUE - NVL(AMOUNT_PAID,0)),0) INTO v_num FROM LDTB_CONTRACT_LIQ
+    WHERE AMOUNT_DUE IS NOT NULL AND AMOUNT_DUE > NVL(AMOUNT_PAID,0);
+    print_kv('  Σ impayé (DUE - PAID)', TO_CHAR(v_num));
+
+    -- 15.4.c OVERDUE_DAYS distribution
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.4.c Tranches OVERDUE_DAYS]');
+    FOR r IN (
+        SELECT CASE
+                 WHEN OVERDUE_DAYS IS NULL THEN '(NULL)'
+                 WHEN OVERDUE_DAYS <= 0   THEN 'à jour'
+                 WHEN OVERDUE_DAYS <= 30  THEN '1-30j'
+                 WHEN OVERDUE_DAYS <= 90  THEN '31-90j'
+                 WHEN OVERDUE_DAYS <= 180 THEN '91-180j'
+                 WHEN OVERDUE_DAYS <= 365 THEN '181-365j'
+                 ELSE '365+ j'
+               END tr, COUNT(*) nb,
+               NVL(SUM(AMOUNT_DUE - NVL(AMOUNT_PAID,0)),0) sm
+        FROM LDTB_CONTRACT_LIQ
+        GROUP BY CASE
+                 WHEN OVERDUE_DAYS IS NULL THEN '(NULL)'
+                 WHEN OVERDUE_DAYS <= 0   THEN 'à jour'
+                 WHEN OVERDUE_DAYS <= 30  THEN '1-30j'
+                 WHEN OVERDUE_DAYS <= 90  THEN '31-90j'
+                 WHEN OVERDUE_DAYS <= 180 THEN '91-180j'
+                 WHEN OVERDUE_DAYS <= 365 THEN '181-365j'
+                 ELSE '365+ j'
+               END
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ' || r.tr, 'nb=' || TO_CHAR(r.nb) || ' | impayé=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 15.5 LDTB_CONTRACT_LIQ_SUMMARY — pénalités de remboursement anticipé
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.5 LIQ_SUMMARY — pénalités prépayement]');
+    safe_count('LDTB_CONTRACT_LIQ_SUMMARY', '  Total summary');
+    SELECT NVL(SUM(PREPAYMENT_PENALTY_AMOUNT),0) INTO v_num FROM LDTB_CONTRACT_LIQ_SUMMARY;
+    print_kv('  Σ PREPAYMENT_PENALTY_AMOUNT', TO_CHAR(v_num));
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_LIQ_SUMMARY
+    WHERE NVL(TOTAL_PREPAID,0) > 0 AND NVL(PREPAYMENT_PENALTY_AMOUNT,0) = 0;
+    print_kv('  Prépayés SANS pénalité (leakage potentiel)', TO_CHAR(v_count));
+    SELECT NVL(SUM(TOTAL_PAID),0) INTO v_num FROM LDTB_CONTRACT_LIQ_SUMMARY;
+    print_kv('  Σ TOTAL_PAID', TO_CHAR(v_num));
+    SELECT NVL(SUM(TOTAL_PREPAID),0) INTO v_num FROM LDTB_CONTRACT_LIQ_SUMMARY;
+    print_kv('  Σ TOTAL_PREPAID', TO_CHAR(v_num));
+
+    -- 15.5.b PAYMENT_STATUS
+    FOR r IN (SELECT NVL(PAYMENT_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_LIQ_SUMMARY GROUP BY PAYMENT_STATUS
+              ORDER BY nb DESC) LOOP
+        print_kv('  STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.5.c REJ_REASON (paiements rejetés)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.5.c Top REJ_REASON]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(REJ_REASON,'(NULL)') s, COUNT(*) nb
+            FROM LDTB_CONTRACT_LIQ_SUMMARY
+            WHERE REJ_REASON IS NOT NULL
+            GROUP BY REJ_REASON
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.6 LDTB_CONTRACT_ROLLOVER — rollovers & waivers charges/taxes
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.6 ROLLOVERS — APPLY_CHARGE / APPLY_TAX]');
+    safe_count('LDTB_CONTRACT_ROLLOVER', '  Total rollovers');
+    FOR r IN (SELECT NVL(APPLY_CHARGE,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ROLLOVER GROUP BY APPLY_CHARGE
+              ORDER BY nb DESC) LOOP
+        print_kv('  APPLY_CHARGE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(APPLY_TAX,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ROLLOVER GROUP BY APPLY_TAX
+              ORDER BY nb DESC) LOOP
+        print_kv('  APPLY_TAX = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLLOVER
+    WHERE NVL(APPLY_CHARGE,'N')='N' AND NVL(APPLY_TAX,'N')='N';
+    print_kv('  Rollovers SANS charge & SANS tax (leakage)', TO_CHAR(v_count));
+
+    -- 15.6.b ROLLOVER_TYPE / ROLL_INST_STATUS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.6.b ROLLOVER_TYPE]');
+    FOR r IN (SELECT NVL(ROLLOVER_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ROLLOVER GROUP BY ROLLOVER_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(ROLL_INST_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ROLLOVER GROUP BY ROLL_INST_STATUS
+              ORDER BY nb DESC) LOOP
+        print_kv('  ROLL_INST_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.7 LDTB_CONTRACT_ROLL_INT_RATES — taux de rollover
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.7 Taux de rollover — RATE / SPREAD / MARGIN]');
+    safe_count('LDTB_CONTRACT_ROLL_INT_RATES', '  Total lignes');
+    SELECT COUNT(*) INTO v_count FROM LDTB_CONTRACT_ROLL_INT_RATES
+    WHERE NVL(RATE,0) = 0 AND NVL(SPREAD,0) = 0 AND NVL(MARGIN,0) = 0;
+    print_kv('  RATE, SPREAD & MARGIN tous nuls', TO_CHAR(v_count));
+    SELECT NVL(AVG(RATE),0), NVL(AVG(SPREAD),0), NVL(AVG(MARGIN),0)
+    INTO v_num, v_count, v_count
+    FROM LDTB_CONTRACT_ROLL_INT_RATES WHERE RATE IS NOT NULL;
+    print_kv('  Moyenne RATE (non NULL)', TO_CHAR(v_num));
+
+    -- 15.8 LDTB_CONTRACT_ACCRUAL_HISTORY — historique accruals
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.8 Historique accruals LDTB]');
+    safe_count('LDTB_CONTRACT_ACCRUAL_HISTORY', '  Total entrées');
+    FOR r IN (SELECT MIN(TRANSACTION_DATE) mn, MAX(TRANSACTION_DATE) mx
+              FROM LDTB_CONTRACT_ACCRUAL_HISTORY) LOOP
+        print_kv('  Plage TRANSACTION_DATE',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 15.8.b Accruals passés sans écriture compta (ACC_ENTRY_PASSED=N)
+    FOR r IN (SELECT NVL(ACC_ENTRY_PASSED,'(NULL)') s, COUNT(*) nb
+              FROM LDTB_CONTRACT_ACCRUAL_HISTORY GROUP BY ACC_ENTRY_PASSED
+              ORDER BY nb DESC) LOOP
+        print_kv('  ACC_ENTRY_PASSED = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    SELECT NVL(SUM(NET_ACCRUAL),0) INTO v_num FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+    WHERE NVL(ACC_ENTRY_PASSED,'N')='N';
+    print_kv('  Σ NET_ACCRUAL non encore comptabilisé', TO_CHAR(v_num));
+
+    -- 15.8.c TYPE_OF_ACCRUAL
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.8.c TYPE_OF_ACCRUAL]');
+    FOR r IN (SELECT NVL(TYPE_OF_ACCRUAL,'(NULL)') s, COUNT(*) nb,
+                     NVL(SUM(NET_ACCRUAL),0) sm
+              FROM LDTB_CONTRACT_ACCRUAL_HISTORY GROUP BY TYPE_OF_ACCRUAL
+              ORDER BY nb DESC) LOOP
+        print_kv('  ' || r.s, 'nb=' || TO_CHAR(r.nb) || ' | Σ=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 15.8.d Overdue interest encore à encaisser
+    SELECT NVL(SUM(OVERDUE_INTEREST),0) INTO v_num FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+    WHERE NVL(OVERDUE_INTEREST,0) > 0;
+    print_kv('  Σ OVERDUE_INTEREST (> 0)', TO_CHAR(v_num));
+
+    -- 15.8.e Top 10 contrats par OUTSTANDING_ACCRUAL
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.8.e Top 10 contrats OUTSTANDING_ACCRUAL]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT CONTRACT_REF_NO, NVL(SUM(OUTSTANDING_ACCRUAL),0) sm,
+                   NVL(MAX(USER_DEFINED_STATUS),'(NULL)') stat
+            FROM LDTB_CONTRACT_ACCRUAL_HISTORY
+            GROUP BY CONTRACT_REF_NO
+            ORDER BY sm DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.CONTRACT_REF_NO,
+                 'Σ_OUT=' || TO_CHAR(r.sm) || ' | stat=' || r.stat);
+    END LOOP;
+
+    -- 15.9 LDTB_PERIODIC_ACCRUAL_DATE — dates d'accrual périodique par produit
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.9 LDTB_PERIODIC_ACCRUAL_DATE]');
+    safe_count('LDTB_PERIODIC_ACCRUAL_DATE', '  Total lignes');
+    FOR r IN (SELECT MIN(PREVIOUS_ACCRUAL_TO_DATE) mn, MAX(PREVIOUS_ACCRUAL_TO_DATE) mx
+              FROM LDTB_PERIODIC_ACCRUAL_DATE) LOOP
+        print_kv('  Plage PREVIOUS_ACCRUAL_TO_DATE',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+    SELECT COUNT(*) INTO v_count FROM LDTB_PERIODIC_ACCRUAL_DATE
+    WHERE PREVIOUS_ACCRUAL_TO_DATE < SYSDATE - 90;
+    print_kv('  Produits sans accrual depuis >90j', TO_CHAR(v_count));
 
 END;
 /

@@ -962,3 +962,95 @@ Chaque contrôle est décrit par :
 - **Fondement exploration** — nécessaire mini-script d'exploration pour établir la convention de préfixe GL→PCEC propre à cette banque.
 
 ---
+
+### 7.E — Contrôles internes et Segregation of Duties (SoD)
+
+#### S21 — Maker/Checker violations and self-authorization patterns
+
+- **Findings** : `[F-200]` transactions where `MAKER_ID = CHECKER_ID` (self-authorized) ; `[F-201]` users with recurring maker/checker pairing above threshold ; `[F-202]` maker/checker cycles completed in < N seconds (auto-approval suspect).
+- **Objectif** — Détecter les violations du principe **maker/checker** et les paires suspectes de collusion potentielle.
+- **Sources** — `ACTB_HISTORY` (`MAKER_ID`, `CHECKER_ID`, `MAKER_DT_STAMP`, `CHECKER_DT_STAMP`), `MOTB_CONTRACT_MASTER`, `SMTB_USER`, `SMTB_ROLE`.
+- **Méthode** — Filtre `MAKER_ID = CHECKER_ID` ; pour les paires récurrentes, agrégation `(MAKER, CHECKER) → count` et classement ; délais (`CHECKER_DT_STAMP − MAKER_DT_STAMP`) < `p_min_maker_checker_seconds` (param dérivé).
+- **Sévérité** — CRITICAL pour `[F-200]` s'agissant de GL sensibles, HIGH sinon.
+- **Impact LCY** — Somme des montants LCY concernés.
+- **Dimensions** — utilisateur, rôle, GL/produit, agence.
+- **Recommandation** — Revue urgente des droits, retrait de cumuls, rappel de politique.
+- **PCEC** — Transverse.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_top_n`, `p_materiality_lcy`.
+- **Fondement exploration** — colonnes `MAKER_ID`/`CHECKER_ID` confirmées sur `ACTB_HISTORY`.
+
+#### S22 — Inactive / dormant user accounts with recent activity
+
+- **Findings** : `[F-210]` users with `EXITFLAG = 'Y'` (or disabled status) still showing `ACTB_HISTORY` activity over period ; `[F-211]` users with no login since N days but present in transactions.
+- **Objectif** — Vérifier que les comptes utilisateurs **inactifs** ou **sortis** ne réalisent plus d'opérations (risque de compte orphelin, usurpation, ghost user).
+- **Sources** — `SMTB_USER` (`USER_ID`, `EXITFLAG`, `LAST_LOGIN_DATE`, `START_DATE`, `END_DATE`), `ACTB_HISTORY`.
+- **Méthode** — Jointure `SMTB_USER` ↔ `ACTB_HISTORY.MAKER_ID / CHECKER_ID` sur période ; filtre sur flag sortie ou `LAST_LOGIN_DATE < p_as_of_date - N`.
+- **Sévérité** — CRITICAL (risque de fraude / usurpation).
+- **Impact LCY** — Somme des montants des opérations concernées.
+- **Dimensions** — utilisateur, rôle, agence.
+- **Recommandation** — Blocage immédiat, enquête, revue des accès.
+- **PCEC** — Transverse (contrôle interne).
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_as_of_date`.
+- **Fondement exploration** — champ `EXITFLAG` confirmé (type NUMBER) ; requiert `TO_CHAR` pour afficher.
+
+#### S23 — Role and privilege anomalies — toxic combinations
+
+- **Findings** : `[F-220]` users with concurrent roles enabling end-to-end transaction handling (maker + checker + authoriser) ; `[F-221]` roles granting access to sensitive GLs to non-accounting users ; `[F-222]` role concentration (one role covers > N % of sensitive privileges).
+- **Objectif** — Identifier les **combinaisons toxiques** de rôles et privilèges non conformes à la SoD.
+- **Sources** — `SMTB_USER_ROLE`, `SMTB_ROLE`, `SMTB_ROLE_FUNCTION`, tables de privilèges applicatifs.
+- **Méthode** — Matrice de couverture rôle ↔ fonction ; détection des cumuls interdits via une liste noire documentée (liste à figer par le Responsable Sécurité / Compliance).
+- **Sévérité** — HIGH, CRITICAL si combinaison présente sur > N utilisateurs.
+- **Impact LCY** — Non chiffré directement ; exposé en risque.
+- **Dimensions** — rôle, utilisateur, agence.
+- **Recommandation** — Réattribution des rôles, refonte de la matrice, validation DRH / Compliance.
+- **PCEC** — Transverse.
+- **Paramètres** — `p_as_of_date`, `p_branch_*`.
+- **Fondement exploration** — tables SM confirmées dans le rapport d'exploration.
+
+### 7.Z — Hypothèses à valider par mini-scripts d'exploration
+
+Les contrôles suivants requièrent, **avant** rédaction du corps du script, des mini-scripts d'exploration dédiés afin de ne pas inventer de structures :
+
+| Section | Objet à clarifier | Mini-script attendu |
+|---|---|---|
+| S04 | Colonnes réelles `WAIVE*` sur `ICTB_LIQ_DETAILS`/`ACTB_HISTORY` | `describe_waiver_columns.sql` |
+| S13 | Présence effective du module CH (`CHTB_*`) | `describe_module_ch.sql` |
+| S14 | Convention de liquidation IC (fréquence produit) | `describe_ic_accrual_cycle.sql` |
+| S15 | Usage réel du module FX et des taux mid | `describe_fx_module.sql` |
+| S18 | Liste des GL suspense (plage de codes) | `list_suspense_gls.sql` |
+| S20 | Convention de préfixe GL → PCEC | `gl_prefix_to_pcec.sql` |
+| S23 | Mapping `SMTB_ROLE_FUNCTION` complet | `describe_role_function.sql` |
+
+> Un mini-script est rédigé à la demande, exécuté par le côté banque, et son résultat déclenche la rédaction de la section concernée. Voir `bonnes_pratiques.md` §6 pour le protocole.
+
+### 7.99 — Tableau récapitulatif des contrôles
+
+| Section | Titre | Sévérité max | Classe PCEC principale | Fondement exploration |
+|---|---|---|---|---|
+| S01 | Unauthorized overdrafts | CRITICAL | PCEC/2, PCEC/702 | 950 comptes |
+| S02 | TOD overrun / expired | HIGH | PCEC/2, PCEC/702 | Confirmé |
+| S03 | Dormant with accruals | HIGH | PCEC/2, PCEC/38 | 179 comptes |
+| S04 | Charge waivers | HIGH | PCEC/7 | À confirmer |
+| S05 | Credit balances w/o accrual | MEDIUM | PCEC/2, PCEC/6/7 | À confirmer |
+| S06 | Overdue CL schedules | CRITICAL | PCEC/2, PCEC/29, PCEC/702 | 1 620 échéances |
+| S07 | Frozen CL | CRITICAL | PCEC/29 | 662 prêts |
+| S08 | CL pending liquidation | HIGH | PCEC/2, PCEC/702 | À confirmer |
+| S09 | LD anomalies | HIGH | PCEC/1, PCEC/2 | Tables confirmées |
+| S10 | CL waivers / overrides | HIGH | PCEC/7 | Colonne `WAIVE` confirmée |
+| S11 | SI without charge flags | HIGH | PCEC/706 | 51 + 782 |
+| S12 | Expired/stalled SI | HIGH | PCEC/706 | 281 |
+| S13 | Unbilled / zero charges | HIGH | PCEC/706 | À confirmer |
+| S14 | IC accruals not liquidated | HIGH | PCEC/38, PCEC/702 | À confirmer |
+| S15 | FX spread leakage | HIGH | PCEC/7 | À confirmer |
+| S16 | GL vs history consistency | CRITICAL | Toutes | Schéma confirmé |
+| S17 | Manual entries risk | HIGH | PCEC/6, PCEC/7, PCEC/38 | MO/ACTB confirmés |
+| S18 | Suspense ageing | CRITICAL | PCEC/38 | À confirmer |
+| S19 | FX revaluation | CRITICAL | PCEC/3, PCEC/7 | À confirmer |
+| S20 | GL–PCEC mapping gaps | HIGH | Transverse | À confirmer |
+| S21 | Maker/checker violations | CRITICAL | Transverse | Colonnes confirmées |
+| S22 | Inactive users active | CRITICAL | Transverse | `EXITFLAG` confirmé |
+| S23 | Toxic role combinations | CRITICAL | Transverse | SM confirmés |
+
+Ce catalogue peut être enrichi au fil des runs sans rupture de compatibilité (numérotation stable, sections ajoutées à la suite).
+
+---

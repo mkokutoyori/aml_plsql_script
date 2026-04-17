@@ -259,3 +259,118 @@ L'ouvrage est réputé **acceptable métier** si :
 5. Un reviewer indépendant peut **ré-exécuter** n'importe quel `[F-NNN]` à partir des requêtes d'appui documentées.
 
 ---
+
+## 4. Exigences fonctionnelles (Functional Requirements)
+
+Les exigences fonctionnelles décrivent **ce que le script doit faire** pour satisfaire les besoins métier du §3. Elles seront déclinées en contrôles opérationnels au §7, et en paramètres au §6.
+
+### 4.1 Vue d'ensemble des capacités
+
+Le script DOIT offrir les capacités suivantes, dans cet ordre d'exécution logique :
+
+1. **Initialisation** — lecture des paramètres, calcul du périmètre effectif, horodatage, ouverture du rapport.
+2. **Vérification d'environnement** — version Oracle, droits, présence des tables critiques, métadonnées de la photo comptable.
+3. **Calcul des indicateurs transverses** (KPIs) — totaux balance, volumes, nombre de comptes, couverture PCEC.
+4. **Exécution des audits thématiques** — une section par thème (20+ thèmes, cf. §7), chacune encadrée, horodatée, chiffrée.
+5. **Agrégation et synthèse** — Executive Summary, top-N par dimension, indicateur agrégé (BR-50).
+6. **Rendu final** — pied de rapport, journal d'erreurs, limitations connues, versioning.
+
+### 4.2 FR — Initialisation et cadrage
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-01** | Déclarer en tête du script **tous les paramètres optionnels** (cf. §6) avec valeurs par défaut `NULL` sauf exceptions documentées. | BR-32 |
+| **FR-02** | Calculer un **périmètre effectif** : `v_date_from_eff := NVL(p_date_from, TRUNC(ADD_MONTHS(SYSDATE,-1),'MM'))` ; `v_date_to_eff := NVL(p_date_to, SYSDATE)`. | BR-32 |
+| **FR-03** | Produire un **bloc d'écho des paramètres** en début de rapport (valeurs appliquées, y compris valeurs par défaut calculées). | BR-12 |
+| **FR-04** | Initialiser une **constante de version** `C_SCRIPT_VERSION` et un identifiant de run `v_run_id` (ex. `TO_CHAR(SYSDATE,'YYYYMMDDHH24MISS')`). | BR-12 |
+| **FR-05** | Ouvrir le rapport avec une **bannière** (nom du script, version, date d'exécution, utilisateur `USER`, instance `SYS_CONTEXT('USERENV','INSTANCE_NAME')`). | BR-12 |
+
+### 4.3 FR — Vérification d'environnement
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-06** | Détecter la version Oracle (`v$version` / `product_component_version`) et consigner un **warning** si < 11gR2. | BR-30 |
+| **FR-07** | Vérifier l'existence des tables critiques (liste blanche) via `ALL_TABLES` ; continuer avec un warning si une table n'est pas présente, sans interrompre le run. | BR-34 |
+| **FR-08** | Afficher le **nombre de lignes estimé** (`NUM_ROWS` ALL_TABLES) des tables principales pour dimensionner la photo. | BR-33 |
+| **FR-09** | Déterminer la **date métier de la photo** (`STTB_CURRENT_BUSINESS_DATE` si disponible, sinon `MAX(TRN_DT)` de `ACTB_HISTORY`) et la consigner. | BR-12 |
+
+### 4.4 FR — Calculs transverses (KPIs globaux)
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-10** | Pour chaque thème auditable, pouvoir **agréger** les résultats selon les dimensions : agence, produit, devise, segment client, classe PCEC, tranche d'ancienneté. | BR-01, BR-04 |
+| **FR-11** | Calculer un **total d'exposition LCY** borné (cf. BR-50) en sommant les impacts estimés, après déduplication logique (un même compte compté une fois par type de fuite). | BR-50 |
+| **FR-12** | Calculer les **volumétries de référence** : nombre de comptes actifs, nombre de contrats CL/LD actifs, nombre de SI actives, nombre d'écritures sur période, nombre de GL. | BR-04 |
+| **FR-13** | Calculer le **taux de couverture PCEC** : % de GL rattachés à une rubrique PCEC identifiable. | BR-20, BR-21 |
+
+### 4.5 FR — Exécution des audits thématiques
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-20** | Chaque thème (§7) DOIT être implémenté dans un **bloc PL/SQL encadré** : `BEGIN ... EXCEPTION WHEN OTHERS THEN log_error(...) END;`. | BR-34, BR-35 |
+| **FR-21** | Chaque thème DOIT imprimer un **en-tête normé** (id de section, titre, objectif, classe PCEC, période effective). | BR-13 |
+| **FR-22** | Chaque constat émis DOIT être matérialisé par un appel au helper `print_finding(p_id, p_severity, p_title, p_count, p_impact_lcy, p_recommendation, p_pcec)`. | BR-13, BR-20 |
+| **FR-23** | Chaque thème DOIT exposer un **mini résumé** en fin de section : nombre de findings, total impact LCY, top 3 dimensions. | BR-01, BR-02 |
+| **FR-24** | Les requêtes de détail doivent être **bornées** par `ROWNUM <= p_top_n` (défaut 50) pour éviter les sorties géantes. | BR-33 |
+| **FR-25** | Les montants doivent être affichés avec **séparateur de milliers** et avec la devise (`FM999G999G999G990D00`). | BR-13 |
+
+### 4.6 FR — Synthèse et agrégation
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-30** | Produire un **Executive Summary** listant, par ordre décroissant d'impact, les findings de sévérité `CRITICAL` et `HIGH` (jusqu'à 20 max). | BR-02 |
+| **FR-31** | Produire un **Top-N par dimension** (agence, produit, client) en mode `DEEP` uniquement. | BR-01 |
+| **FR-32** | Produire une **matrice sévérité × classe PCEC** : nombre de findings et total impact par cellule. | BR-20 |
+| **FR-33** | Produire une ligne **Total RA Exposure (LCY, capped)** conforme à BR-50. | BR-50 |
+| **FR-34** | Produire une section **Root Causes Top 5** : agrégation libre des causes les plus fréquentes sur l'ensemble des findings. | BR-51 |
+
+### 4.7 FR — Traçabilité, sécurité, clôture
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-40** | **Refuser** toute exécution en mode écriture : le script DOIT être un bloc anonyme sans DML/DDL. Toute requête doit être un SELECT. | BR-11 |
+| **FR-41** | Tenir un **journal `[LOG]`** séparé du rapport (INFO/WARN/ERROR) horodaté. | BR-35 |
+| **FR-42** | Tenir un **journal `[PERF]`** optionnel mesurant la durée de chaque section (`DBMS_UTILITY.GET_TIME`). | BR-33 |
+| **FR-43** | Clôturer par une section **KNOWN LIMITATIONS** listant toute section dégradée ou inexécutable. | BR-14 |
+| **FR-44** | Clôturer par un **pied de page** répétant l'identifiant de run, la version et un hash simple (ex. `DBMS_UTILITY.GET_HASH_VALUE` sur la bannière) pour détecter l'altération. | BR-12 |
+
+### 4.8 FR — Extensibilité
+
+| Id | Exigence | Couvre |
+|---|---|---|
+| **FR-50** | L'ajout d'un nouveau thème DOIT se faire par insertion d'un bloc structuré (en-tête + body + résumé) sans refonte du script. | BR-30 |
+| **FR-51** | Les seuils de matérialité DOIVENT être **centralisés** en tête (un paramètre par type d'impact au maximum). | BR-32 |
+| **FR-52** | Les libellés (textes, titres, severity labels) DOIVENT être **en anglais** dans le rapport ; les commentaires internes peuvent être en français. | §7 et §8 |
+
+### 4.9 Interactions avec l'utilisateur
+
+Le script n'est **pas interactif** : il ne consomme aucune entrée utilisateur à l'exécution. Toute entrée se fait via :
+- les **variables PL/SQL** déclarées en tête (édition directe du script) ;
+- OU des variables de **session SQL\*Plus** (`DEFINE`, `&var`) si l'environnement le supporte (optionnel).
+
+### 4.10 Sorties
+
+Le script produit **une sortie unique** via `DBMS_OUTPUT.PUT_LINE`. L'appelant redirige vers un fichier (`spool`) :
+```
+SPOOL reports/revenue_assurance_<RUN_ID>.txt
+@revenue_assurance_and_accounting_audit.sql
+SPOOL OFF
+```
+Le nommage conseillé du fichier de sortie est `revenue_assurance_<YYYYMMDD>_<HH24MISS>.txt` pour faciliter l'archivage et la comparaison.
+
+### 4.11 Matrice BR ↔ FR (synthèse)
+
+| Business Req | Functional Reqs associées |
+|---|---|
+| BR-01 | FR-10, FR-23, FR-31 |
+| BR-02 | FR-30 |
+| BR-04 | FR-10, FR-12, FR-23 |
+| BR-10 à BR-14 | FR-04, FR-05, FR-20 à FR-22, FR-40 à FR-44 |
+| BR-20, BR-21 | FR-13, FR-21, FR-32 |
+| BR-30 à BR-35 | FR-06 à FR-09, FR-20, FR-34, FR-41, FR-42 |
+| BR-32 | FR-01 à FR-03, FR-51 |
+| BR-33 | FR-08, FR-24, FR-42 |
+| BR-50 | FR-11, FR-33 |
+| BR-51 | FR-34 |
+
+---

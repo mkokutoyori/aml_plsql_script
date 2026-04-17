@@ -2702,6 +2702,191 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S12 - EXPIRED OR STALLED STANDING INSTRUCTIONS
+    -- -----------------------------------------------------------------
+    -- [F-110] SI actives dont LAST_EXEC_DATE < v_as_of_date - 90j
+    --         (instruction dormante - risque commission perdue).
+    -- [F-111] SI en etat d'echec repete (EXEC_STATUS in F/E/X) sur
+    --         la periode.
+    -- [F-112] SI dont END_DATE < v_as_of_date mais toujours AUTH_STAT='A'
+    --         (contrat expire, menage non fait).
+    --
+    -- Severite : MEDIUM par defaut, HIGH si impact indicatif depasse
+    -- p_materiality_impact_lcy.
+    -- =================================================================
+    DECLARE
+        l_cur         SYS_REFCURSOR;
+        l_ref         VARCHAR2(30);
+        l_prod        VARCHAR2(10);
+        l_cpty        VARCHAR2(20);
+        l_last_dt     DATE;
+        l_end_dt      DATE;
+        l_n_fail      NUMBER;
+        l_days        NUMBER;
+        l_n_110       PLS_INTEGER := 0;
+        l_n_111       PLS_INTEGER := 0;
+        l_n_112       PLS_INTEGER := 0;
+        l_stall_th    CONSTANT NUMBER := 90;
+        l_si_fee_std  CONSTANT NUMBER := 500;
+        l_impact      NUMBER;
+        l_sql         VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S12') THEN
+            log_info('Section S12 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S12',
+                'Expired or stalled Standing Instructions');
+
+            -- [F-110] SI dormantes --------------------------------
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY, '
+             || '       c.LAST_EXEC_DATE '
+             || '  FROM SITB_CONTRACTS c '
+             || ' WHERE NVL(c.AUTH_STAT,''?'') = ''A'' '
+             || '   AND c.LAST_EXEC_DATE IS NOT NULL '
+             || '   AND c.LAST_EXEC_DATE < :asof - :th '
+             || '   AND (c.END_DATE IS NULL OR c.END_DATE >= :asof2) '
+             || ' ORDER BY c.LAST_EXEC_DATE ASC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_as_of_date, l_stall_th, v_as_of_date;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cpty, l_last_dt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_110 >= NVL(p_top_n, 50);
+
+                    l_days := GREATEST(0, v_as_of_date - l_last_dt);
+                    l_impact := ROUND(l_days / 30 * l_si_fee_std, 2);
+
+                    print_finding(
+                        p_section    => 'S12',
+                        p_code       => 'RA-S12-F110',
+                        p_severity   => 'MEDIUM',
+                        p_message    => 'Stalled SI: last_exec='
+                                     || f_fmt_ts(l_last_dt)
+                                     || ' age=' || TO_CHAR(l_days) || 'd',
+                        p_entity     => l_ref,
+                        p_impact_lcy => l_impact,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                    );
+                    l_n_110 := l_n_110 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S12',
+                        'F-110 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-111] SI en echec repete --------------------------
+            l_sql :=
+                'SELECT l.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY, '
+             || '       COUNT(*) AS N_FAIL '
+             || '  FROM SITB_EXEC_LOG l '
+             || '  JOIN SITB_CONTRACTS c '
+             || '    ON c.CONTRACT_REF_NO = l.CONTRACT_REF_NO '
+             || ' WHERE l.EXEC_DATE BETWEEN :d1 AND :d2 '
+             || '   AND UPPER(NVL(l.EXEC_STATUS,'' '')) IN '
+             || '       (''F'', ''FAILED'', ''E'', ''ERROR'', ''X'') '
+             || ' GROUP BY l.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY '
+             || ' ORDER BY COUNT(*) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cpty, l_n_fail;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_111 >= NVL(p_top_n, 50);
+
+                    l_impact := ROUND(l_n_fail * l_si_fee_std, 2);
+                    print_finding(
+                        p_section    => 'S12',
+                        p_code       => 'RA-S12-F111',
+                        p_severity   => CASE WHEN l_n_fail > 10
+                                             THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'SI in repeated failure: n_fail='
+                                     || TO_CHAR(l_n_fail),
+                        p_entity     => l_ref,
+                        p_impact_lcy => l_impact,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                    );
+                    l_n_111 := l_n_111 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S12',
+                        'F-111 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-112] SI expirees non closes -----------------------
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.PROD_CODE, c.COUNTERPARTY, c.END_DATE '
+             || '  FROM SITB_CONTRACTS c '
+             || ' WHERE NVL(c.AUTH_STAT,''?'') = ''A'' '
+             || '   AND c.END_DATE IS NOT NULL '
+             || '   AND c.END_DATE < :asof '
+             || ' ORDER BY c.END_DATE ASC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_as_of_date;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_cpty, l_end_dt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_112 >= NVL(p_top_n, 50);
+
+                    l_days := GREATEST(0, v_as_of_date - l_end_dt);
+                    print_finding(
+                        p_section    => 'S12',
+                        p_code       => 'RA-S12-F112',
+                        p_severity   => 'MEDIUM',
+                        p_message    => 'SI expired but active: end='
+                                     || f_fmt_ts(l_end_dt)
+                                     || ' age=' || TO_CHAR(l_days) || 'd',
+                        p_entity     => l_ref,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                    );
+                    l_n_112 := l_n_112 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S12',
+                        'F-112 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-110 findings (stalled)', TO_CHAR(l_n_110));
+            print_kv('F-111 findings (failed)',  TO_CHAR(l_n_111));
+            print_kv('F-112 findings (expired)', TO_CHAR(l_n_112));
+            print_kv('Stall threshold (days)',   TO_CHAR(l_stall_th));
+
+            print_section_footer('S12', l_n_110 + l_n_111 + l_n_112);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S12', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S12', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

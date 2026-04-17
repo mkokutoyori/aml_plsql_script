@@ -1881,6 +1881,172 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S07 - FROZEN / ON-HOLD LOANS WITH OUTSTANDING BALANCE
+    -- -----------------------------------------------------------------
+    -- [F-060] Prets CL geles (USER_DEFINED_STATUS) ayant un principal
+    --         > 0. Risque : solde pose sans traitement en douteux.
+    -- [F-061] Accruals encore comptabilises sur des contrats geles.
+    --         Risque majeur : produit reconnu alors que la creance
+    --         n'est pas recouvrable -> violation du principe de
+    --         prudence (BRD §14, COBAC R-2000/05).
+    --
+    -- Sources : CLTB_ACCOUNT_MASTER (USER_DEFINED_STATUS),
+    --           CLTB_ACCOUNT_COMPONENTS (COMPONENT_VALUE),
+    --           ICTB_ACCRUALS_TEMP (ACCR_AMOUNT_LCY) optionnel.
+    -- =================================================================
+    DECLARE
+        l_cur      SYS_REFCURSOR;
+        l_ac       VARCHAR2(30);
+        l_cust     VARCHAR2(20);
+        l_br       VARCHAR2(10);
+        l_ccy      VARCHAR2(3);
+        l_status   VARCHAR2(20);
+        l_out      NUMBER;
+        l_accr     NUMBER;
+        l_n_060    PLS_INTEGER := 0;
+        l_n_061    PLS_INTEGER := 0;
+        l_sql      VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S07') THEN
+            log_info('Section S07 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S07',
+                'Frozen / on-hold loans with outstanding balance');
+
+            -- [F-060] Prets geles avec principal > 0 ---------------
+            l_sql :=
+                'SELECT m.ACCOUNT_NUMBER, m.CUSTOMER_NO, m.BRANCH, m.CCY, '
+             || '       m.USER_DEFINED_STATUS, '
+             || '       NVL(SUM(NVL(c.COMPONENT_VALUE,0)),0) AS OUT_LCY '
+             || '  FROM CLTB_ACCOUNT_MASTER m '
+             || '  JOIN CLTB_ACCOUNT_COMPONENTS c '
+             || '    ON c.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER '
+             || ' WHERE UPPER(NVL(m.USER_DEFINED_STATUS,'' '')) IN '
+             || '       (''FROZEN'',''HOLD'',''ON_HOLD'',''FR'',''ONHOLD'') '
+             || '   AND UPPER(NVL(c.COMPONENT,'' '')) = ''PRINCIPAL'' '
+             || '   AND (:p_branch IS NULL OR m.BRANCH   = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR m.CUSTOMER_NO = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR m.ACCOUNT_NUMBER = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR m.CCY      = :p_ccy) '
+             || ' GROUP BY m.ACCOUNT_NUMBER, m.CUSTOMER_NO, m.BRANCH, '
+             || '          m.CCY, m.USER_DEFINED_STATUS '
+             || ' HAVING NVL(SUM(NVL(c.COMPONENT_VALUE,0)),0) > 0 '
+             || ' ORDER BY NVL(SUM(NVL(c.COMPONENT_VALUE,0)),0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO l_ac, l_cust, l_br, l_ccy, l_status, l_out;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_060 >= NVL(p_top_n, 50);
+
+                    IF l_out >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S07',
+                            p_code       => 'RA-S07-F060',
+                            p_severity   => 'HIGH',
+                            p_message    => 'Frozen loan with outstanding principal='
+                                         || f_fmt_lcy(l_out)
+                                         || ' status=' || NVL(l_status,'?'),
+                            p_entity     => l_ac,
+                            p_impact_lcy => l_out,
+                            p_evidence   => 'BR=' || NVL(l_br,'?')
+                                         || ' CUST=' || NVL(f_mask_pii(l_cust),'?')
+                                         || ' CCY=' || NVL(l_ccy,'?')
+                        );
+                        l_n_060 := l_n_060 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S07',
+                        'F-060 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-061] Accruals sur contrats geles -----------------
+            l_sql :=
+                'SELECT m.ACCOUNT_NUMBER, m.CUSTOMER_NO, m.BRANCH, m.CCY, '
+             || '       m.USER_DEFINED_STATUS, '
+             || '       NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) AS ACCR_LCY '
+             || '  FROM CLTB_ACCOUNT_MASTER m '
+             || '  JOIN ICTB_ACCRUALS_TEMP i '
+             || '    ON i.CONTRACT_REF_NO = m.ACCOUNT_NUMBER '
+             || ' WHERE UPPER(NVL(m.USER_DEFINED_STATUS,'' '')) IN '
+             || '       (''FROZEN'',''HOLD'',''ON_HOLD'',''FR'',''ONHOLD'') '
+             || '   AND (:p_branch IS NULL OR m.BRANCH   = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR m.CUSTOMER_NO = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR m.ACCOUNT_NUMBER = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR m.CCY      = :p_ccy) '
+             || ' GROUP BY m.ACCOUNT_NUMBER, m.CUSTOMER_NO, m.BRANCH, '
+             || '          m.CCY, m.USER_DEFINED_STATUS '
+             || ' HAVING NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) > 0 '
+             || ' ORDER BY NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO l_ac, l_cust, l_br, l_ccy, l_status, l_accr;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_061 >= NVL(p_top_n, 50);
+
+                    IF l_accr >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S07',
+                            p_code       => 'RA-S07-F061',
+                            p_severity   => 'CRITICAL',
+                            p_message    => 'Accruals still running on frozen loan='
+                                         || f_fmt_lcy(l_accr)
+                                         || ' status=' || NVL(l_status,'?'),
+                            p_entity     => l_ac,
+                            p_impact_lcy => l_accr,
+                            p_evidence   => 'BR=' || NVL(l_br,'?')
+                                         || ' CUST=' || NVL(f_mask_pii(l_cust),'?')
+                                         || ' CCY=' || NVL(l_ccy,'?')
+                        );
+                        l_n_061 := l_n_061 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S07 F-061 unavailable: ICTB_ACCRUALS_TEMP or '
+                        || 'CONTRACT_REF_NO join failed ('
+                        || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            print_kv('F-060 findings (outstanding)', TO_CHAR(l_n_060));
+            print_kv('F-061 findings (accruals)',    TO_CHAR(l_n_061));
+
+            print_section_footer('S07', l_n_060 + l_n_061);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S07', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S07', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

@@ -89,3 +89,87 @@ Le projet livre :
 4. Un **rapport d'exemple** anonymisé (à défaut, la capture du premier run contrôlé).
 
 ---
+
+## 2. Glossaire, définitions et cadre de référence
+
+### 2.1 Glossaire des termes métier
+
+| Terme | Définition retenue pour ce document |
+|---|---|
+| **Revenue Assurance (RA)** | Ensemble des contrôles détectifs visant à s'assurer que tout revenu contractuellement dû à la banque a bien été calculé, facturé, comptabilisé et encaissé. |
+| **Revenue leakage** | Perte de revenu non facturé ou non encaissé, imputable à une défaillance de paramétrage, de processus, de données ou de contrôle. |
+| **Accrual** | Charge ou produit à recevoir / à payer couru mais non encore liquidé (ex. intérêts courus non échus — ICNE). |
+| **Dormant account** | Compte client sans mouvement de clientèle sur une période définie par la politique interne (typiquement 6 à 12 mois). |
+| **Overdraft autorisé (TOD limit)** | Autorisation formelle de découvert matérialisée par un paramétrage `TOD_LIMIT` sur `STTM_CUST_ACCOUNT`. |
+| **Overdraft non autorisé** | Solde débiteur d'un compte sans `TOD_LIMIT`, ou dépassant la limite accordée. |
+| **Standing Instruction (SI)** | Instruction permanente (prélèvement automatique) — module SI FCUBS. |
+| **Waiver** | Remise ou annulation d'un frais ou d'un intérêt, matérialisée dans FCUBS par des flags `WAIVE*` ou `WAIVER_*` selon la table. |
+| **Materiality (LCY)** | Seuil de matérialité exprimé en devise locale, en deçà duquel un écart est jugé non significatif. |
+| **Finding** | Constat d'audit unitaire, identifié par `[F-NNN]`, doté d'une sévérité, d'un impact, d'une recommandation. |
+| **Severity** | Niveau de gravité du constat : `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`. |
+| **Mode d'exécution** | `SUMMARY` (indicateurs agrégés), `FULL` (rapport complet), `DEEP` (avec top-N par dimension). |
+| **Photo comptable** | Instantané des soldes à une date donnée (fin de mois généralement), utilisé comme périmètre d'audit. |
+| **LCY / FCY** | Local Currency / Foreign Currency — convention FCUBS. |
+| **Branch** | Agence comptable au sens FCUBS (`BRANCH_CODE`). |
+
+### 2.2 Glossaire technique FCUBS (tables et modules clés)
+
+| Module / Table | Rôle fonctionnel |
+|---|---|
+| `ACTB_HISTORY` | Historique des écritures comptables (mouvements par compte / GL). |
+| `GLTB_GL_BAL` / `GLTB_GL_MASTER` | Soldes et paramétrage des comptes généraux (GL). |
+| `STTM_CUST_ACCOUNT` / `STTM_CUSTOMER` | Comptes clients et référentiel clientèle. |
+| `STDTB_BRANCH` | Référentiel des agences. |
+| **Module CL** — `CLTB_ACCOUNT_MASTER`, `CLTB_ACCOUNT_COMPONENTS`, `CLTB_LIQ`, `CLTB_SCHEDULES_DETAILS` | Consumer Lending (crédits à la clientèle) : principal, composantes (INT, PRINCIPAL, FEES), liquidations, échéanciers. |
+| **Module LD** — `LDTB_CONTRACT_MASTER`, `LDTM_PRODUCT_MASTER`, `LDTB_SCHEDULES` | Loans & Deposits (crédits/dépôts interbancaires et grands comptes). |
+| **Module SI** — `SITB_CONTRACTS`, `SITB_EXEC_LOG` | Standing Instructions (prélèvements/virements permanents). |
+| **Module IC** — `ICTB_ACCRUALS_TEMP`, `ICTB_LIQ_DETAILS` | Interest & Charges (moteur de calcul intérêts et frais). |
+| **Module MO** — `MOTB_CONTRACT_MASTER` | Manual Operations (écritures manuelles). |
+| **Module FT** — `FTTB_CONTRACT_MASTER` | Funds Transfer (virements). |
+| **Module FX** — `FXTB_CONTRACT_MASTER` | Foreign Exchange (contrats de change). |
+| `SMTB_USER`, `SMTB_ROLE` | Référentiel utilisateurs / droits applicatifs. |
+
+> La liste exhaustive des colonnes auditables est tirée de `fcubs.csv` (dictionnaire), seule source de vérité ; aucun champ ne doit être inventé (cf. `bonnes_pratiques.md` §5).
+
+### 2.3 Cadre comptable de référence — PCEC COBAC R-98/01
+
+Le **Plan Comptable des Établissements de Crédit de la CEMAC** (Règlement COBAC **R-98/01**, 1998) structure la comptabilité bancaire en **neuf classes** :
+
+| Classe | Nature | Pertinence pour l'audit RA / comptable |
+|---|---|---|
+| **1** | Opérations de trésorerie et opérations avec les établissements de crédit | Réconciliations interbancaires, NOSTRO/VOSTRO, accruals interbancaires. |
+| **2** | Opérations avec la clientèle | Crédits clientèle, découverts, dépôts ; **foyer principal** de fuite de revenus (intérêts, commissions, pénalités). |
+| **3** | Opérations sur titres et opérations diverses | Portefeuille titres, comptes de régularisation, **comptes d'attente / suspense** (38x). |
+| **4** | Valeurs immobilisées | Immobilisations, amortissements, participations — moins exposé à la RA quotidienne. |
+| **5** | Capitaux permanents | Fonds propres, réserves, résultat — contrôle d'intégrité du résultat net. |
+| **6** | Charges | **Charges d'exploitation bancaire** (intérêts versés), charges générales. |
+| **7** | Produits | **Produits d'exploitation bancaire** (intérêts reçus, commissions) — foyer des manques à gagner. |
+| **8** | Soldes caractéristiques de gestion | Produit net bancaire, résultat brut d'exploitation — indicateurs dérivés. |
+| **9** | Engagements hors bilan | Garanties données/reçues, engagements de financement — exposition non bilantielle. |
+
+Chaque **classe** se décline hiérarchiquement en :
+- **comptes principaux** (2 chiffres) ;
+- **comptes divisionnaires** (3 chiffres) ;
+- **sous-comptes** (4 chiffres et plus).
+
+L'audit doit, autant que possible, **rattacher chaque constat à la rubrique PCEC correspondante** (classe voire compte divisionnaire) pour faciliter la lecture par le contrôle de gestion et le reporting prudentiel.
+
+### 2.4 Références normatives et réglementaires
+
+- **COBAC R-98/01** (1998) — Plan Comptable des Établissements de Crédit de la CEMAC.
+- **COBAC R-2009/02** — dispositif de contrôle interne des établissements de crédit.
+- **Oracle Flexcube Universal Banking** — *Core Functional Guide* et *Data Model Reference* de la version en exploitation.
+- **ISO 20022** — pour les conventions de libellés et codes devises / pays (où pertinent).
+- **Normes IFRS / OHADA-SYSCOHADA** — cadre comptable supplétif ; le PCEC COBAC prime en matière bancaire CEMAC.
+- Documents internes : politique de tarification, grille des frais, circulaire de provisionnement, procédure dormance.
+
+### 2.5 Conventions de notation dans ce BRD
+
+- **MUST** / **DOIT** = exigence ferme, non négociable.
+- **SHOULD** / **DEVRAIT** = recommandation forte, toute dérogation doit être justifiée et tracée.
+- **MAY** / **PEUT** = option admise.
+- Les identifiants de constat d'audit sont formatés `[F-NNN]` (numéro séquentiel à trois chiffres, stable dans le temps).
+- Les références d'exigence métier sont formatées `[BR-NN]` (Business Requirement) et `[FR-NN]` (Functional Requirement) dans les sections suivantes.
+- Les libellés de rubriques PCEC sont notés `PCEC/<classe>` ou `PCEC/<compte>` (ex. `PCEC/2`, `PCEC/702`).
+
+---

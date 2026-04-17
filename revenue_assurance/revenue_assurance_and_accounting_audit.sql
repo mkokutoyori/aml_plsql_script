@@ -1136,6 +1136,161 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S02 - TOD OVERRUN / EXPIRED WITHOUT RENEWAL
+    -- -----------------------------------------------------------------
+    -- [F-010] ABS(solde debiteur) > TOD_LIMIT (depassement autorise)
+    -- [F-011] TOD_END_DATE < v_as_of_date mais solde toujours debiteur
+    --
+    -- Sources : STTM_CUST_ACCOUNT (TOD_LIMIT, TOD_START_DATE, TOD_END_DATE,
+    -- LCY_CURR_BALANCE, ACY_CURR_BALANCE).
+    -- Impact indicatif [F-010] : (|bal| - TOD_LIMIT) * taux_penal
+    --                            * nb_jours / 365
+    -- Taux penal indicatif : 10 % annuel (BRD §7.A S02).
+    -- Severite : HIGH par defaut, CRITICAL si depassement > 200 %.
+    -- =================================================================
+    DECLARE
+        l_cur        SYS_REFCURSOR;
+        l_ac_no      VARCHAR2(30);
+        l_cust_no    VARCHAR2(20);
+        l_branch     VARCHAR2(10);
+        l_ccy        VARCHAR2(3);
+        l_accl       VARCHAR2(10);
+        l_bal_lcy    NUMBER;
+        l_tod_limit  NUMBER;
+        l_tod_start  DATE;
+        l_tod_end    DATE;
+        l_excess     NUMBER;
+        l_ratio      NUMBER;
+        l_days       NUMBER;
+        l_impact     NUMBER;
+        l_sev        VARCHAR2(10);
+        l_n_010      PLS_INTEGER := 0;
+        l_n_011      PLS_INTEGER := 0;
+        l_rate_pen   CONSTANT NUMBER := 0.10;
+        l_base       CONSTANT NUMBER := 365;
+        l_sql        VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S02') THEN
+            log_info('Section S02 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S02',
+                'TOD limits overrun or expired without renewal');
+
+            l_days := GREATEST(1, (v_date_to - v_date_from) + 1);
+
+            l_sql :=
+                'SELECT CUST_AC_NO, CUST_NO, BRANCH_CODE, CCY, ACCOUNT_CLASS, '
+             || '       NVL(LCY_CURR_BALANCE,0)            AS BAL_LCY, '
+             || '       NVL(TOD_LIMIT,0)                   AS TOD_LIM, '
+             || '       TOD_START_DATE, TOD_END_DATE '
+             || '  FROM STTM_CUST_ACCOUNT '
+             || ' WHERE NVL(LCY_CURR_BALANCE,0) < 0 '
+             || '   AND (NVL(TOD_LIMIT,0) > 0 OR TOD_END_DATE IS NOT NULL) '
+             || '   AND (:p_branch IS NULL OR BRANCH_CODE = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR CUST_NO     = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR CUST_AC_NO  = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR CCY         = :p_ccy) '
+             || ' ORDER BY ABS(NVL(LCY_CURR_BALANCE,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_cust_no, l_branch, l_ccy, l_accl,
+                        l_bal_lcy, l_tod_limit, l_tod_start, l_tod_end;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR (l_n_010 + l_n_011) >= NVL(p_top_n, 50);
+
+                    -- [F-010] Overrun de TOD
+                    IF l_tod_limit > 0
+                       AND ABS(l_bal_lcy) > l_tod_limit THEN
+                        l_excess := ABS(l_bal_lcy) - l_tod_limit;
+                        l_ratio  := ROUND(100 * l_excess
+                                          / NULLIF(l_tod_limit, 0), 2);
+                        l_impact := ROUND(l_excess * l_rate_pen
+                                          * l_days / l_base, 2);
+                        l_sev    := CASE WHEN l_ratio > 200 THEN 'CRITICAL'
+                                         ELSE 'HIGH' END;
+
+                        IF l_impact >= NVL(p_materiality_lcy, 0) THEN
+                            print_finding(
+                                p_section    => 'S02',
+                                p_code       => 'RA-S02-F010',
+                                p_severity   => l_sev,
+                                p_message    => 'TOD overrun: bal=' || f_fmt_lcy(l_bal_lcy)
+                                             || ' limit=' || f_fmt_lcy(l_tod_limit)
+                                             || ' excess=' || f_fmt_lcy(l_excess)
+                                             || ' ratio=' || NVL(TO_CHAR(l_ratio,'FM9990.00',
+                                                  'NLS_NUMERIC_CHARACTERS=''.,'''),'N/A')
+                                             || '%',
+                                p_entity     => l_ac_no,
+                                p_impact_lcy => l_impact,
+                                p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                             || ' CUST=' || NVL(f_mask_pii(l_cust_no),'?')
+                                             || ' CCY=' || NVL(l_ccy,'?')
+                                             || ' ACCL=' || NVL(l_accl,'?')
+                            );
+                            l_n_010 := l_n_010 + 1;
+                        END IF;
+                    END IF;
+
+                    -- [F-011] TOD expiree mais solde debiteur
+                    IF l_tod_end IS NOT NULL
+                       AND l_tod_end < v_as_of_date THEN
+                        l_impact := ROUND(ABS(l_bal_lcy) * l_rate_pen
+                                          * l_days / l_base, 2);
+                        IF l_impact >= NVL(p_materiality_lcy, 0) THEN
+                            print_finding(
+                                p_section    => 'S02',
+                                p_code       => 'RA-S02-F011',
+                                p_severity   => 'HIGH',
+                                p_message    => 'Expired TOD still used: tod_end='
+                                             || f_fmt_ts(l_tod_end)
+                                             || ' bal=' || f_fmt_lcy(l_bal_lcy)
+                                             || ' limit=' || f_fmt_lcy(l_tod_limit),
+                                p_entity     => l_ac_no,
+                                p_impact_lcy => l_impact,
+                                p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                             || ' CUST=' || NVL(f_mask_pii(l_cust_no),'?')
+                                             || ' CCY=' || NVL(l_ccy,'?')
+                            );
+                            l_n_011 := l_n_011 + 1;
+                        END IF;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S02',
+                        'Main query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-010 findings (overrun)', TO_CHAR(l_n_010));
+            print_kv('F-011 findings (expired)', TO_CHAR(l_n_011));
+            print_kv('Penal rate (annual)',      TO_CHAR(l_rate_pen));
+            print_kv('Day-count base',           TO_CHAR(l_base));
+
+            print_section_footer('S02', l_n_010 + l_n_011);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S02', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S02', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

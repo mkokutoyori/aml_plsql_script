@@ -740,3 +740,77 @@ Chaque contrôle est décrit par :
 ---
 
 > La suite du catalogue (§7.B à §7.E) est décrite ci-dessous.
+
+### 7.B — Revenue Assurance : crédits CL et LD
+
+#### S06 — Overdue loan schedules (CL) not yet recovered
+
+- **Findings** : `[F-050]` overdue principal schedules ; `[F-051]` overdue interest schedules ; `[F-052]` overdue fee/charge schedules.
+- **Objectif** — Identifier toutes les **échéances** CL restant dues au-delà de `p_min_days_overdue` et quantifier les **intérêts de retard / pénalités** non facturés.
+- **Sources** — `CLTB_SCHEDULES_DETAILS` (`SCHEDULE_DUE_DATE`, `AMOUNT_DUE`, `AMOUNT_SETTLED`, `COMPONENT`, `ACCOUNT_NUMBER`), `CLTB_ACCOUNT_MASTER` (statut contrat), `CLTB_ACCOUNT_COMPONENTS` (paramétrage pénalités).
+- **Méthode** — `SCHEDULE_DUE_DATE < p_as_of_date - p_min_days_overdue` AND `AMOUNT_DUE > NVL(AMOUNT_SETTLED,0)` ; regroupement par composante (`PRINCIPAL` / `MAIN_INT` / `PENAL_INT` / `FEE`).
+- **Sévérité** — HIGH ; CRITICAL au-delà de 90 jours ou `p_materiality_critical_lcy`.
+- **Impact LCY** — Somme des `AMOUNT_DUE - AMOUNT_SETTLED` par composante + estimation d'intérêts de retard non comptabilisés (`solde × taux_penal × jours_retard/365`).
+- **Dimensions** — agence, produit CL (LDTM_PRODUCT_MASTER), segment client, tranches d'ancienneté (30/60/90/>90).
+- **Recommandation** — Relance / provisionnement / activation du module de pénalités.
+- **PCEC** — `PCEC/2` (clientèle), `PCEC/29` (créances douteuses / impayées), `PCEC/702` (intérêts perçus).
+- **Paramètres** — `p_min_days_overdue`, `p_date_from`, `p_date_to`, `p_branch_*`, `p_product_list`.
+- **Fondement exploration** — **1 620 échéances** en retard (section 14 du rapport).
+
+#### S07 — Frozen / on-hold loans with outstanding balance
+
+- **Findings** : `[F-060]` frozen CL loans (`USER_DEFINED_STATUS` / `FROZEN` flag) carrying outstanding principal ; `[F-061]` accruals still running on frozen contracts.
+- **Objectif** — Détecter les crédits **gelés** (frozen) qui conservent un solde restant dû et, pire, sur lesquels des accruals continuent à être comptabilisés.
+- **Sources** — `CLTB_ACCOUNT_MASTER` (`USER_DEFINED_STATUS`, colonnes de statut technique), `CLTB_ACCOUNT_COMPONENTS` (component balances), `ICTB_ACCRUALS_TEMP`.
+- **Méthode** — Filtre statut gelé + solde principal ≠ 0 + éventuelle existence d'accruals sur la période.
+- **Sévérité** — HIGH. CRITICAL si accruals toujours en cours (risque comptable).
+- **Impact LCY** — Solde gelé + accruals indûment comptabilisés.
+- **Dimensions** — agence, produit, ancienneté du gel.
+- **Recommandation** — Arrêter les accruals, statuer sur reprise ou provision intégrale.
+- **PCEC** — `PCEC/29` (douteux/litigieux), `PCEC/70`/`PCEC/60` pour les accruals inappropriés.
+- **Paramètres** — `p_date_to`, `p_branch_*`, `p_materiality_*`.
+- **Fondement exploration** — **662 prêts CL gelés** (section 14).
+
+#### S08 — Loan components pending liquidation
+
+- **Findings** : `[F-070]` CL components with amount due and no matching `CLTB_LIQ` row within expected window ; `[F-071]` components with rejected liquidation.
+- **Objectif** — Vérifier que toutes les **composantes** liquidables (intérêts dus, frais, principal) ont bien été **liquidées** et que les échecs sont traités.
+- **Sources** — `CLTB_ACCOUNT_COMPONENTS`, `CLTB_LIQ` (`VALUE_DATE`, `LIQ_AMOUNT`, `LIQ_STATUS`/`AUTH_STAT`).
+- **Méthode** — `LEFT JOIN` CL composantes vs `CLTB_LIQ` sur contrat + composante + date, détection d'absence et de rejets.
+- **Sévérité** — MEDIUM ; HIGH si impact > `p_materiality_impact_lcy`.
+- **Impact LCY** — Somme des `AMOUNT_DUE` non liquidés.
+- **Dimensions** — agence, composante, produit.
+- **Recommandation** — Relancer liquidation batch / déboguer le paramétrage IC.
+- **PCEC** — `PCEC/2`, `PCEC/702`, `PCEC/706`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — section CL indique des composantes actives ; à confirmer sur la colonne de statut exacte.
+
+#### S09 — Interbank / corporate loans (LD) — rate and schedule anomalies
+
+- **Findings** : `[F-080]` LD contracts with next schedule date passed ; `[F-081]` LD contracts with interest rate deviating from product range ; `[F-082]` LD expired but still active.
+- **Objectif** — Contrôler la bonne tenue du portefeuille **LD** (prêts/dépôts interbancaires, grands comptes) : échéances manquées, taux hors grille, contrats expirés non clôturés.
+- **Sources** — `LDTB_CONTRACT_MASTER` (`VALUE_DATE`, `MATURITY_DATE`, `PRODUCT`, `INT_RATE`/`FIXED_RATE`), `LDTM_PRODUCT_MASTER` (`PRODUCT`, paramétrage), `LDTB_SCHEDULES`.
+- **Méthode** — Comparaisons de dates vs `p_as_of_date` ; bornes de taux via paramétrage produit (ou seuils empiriques si paramétrage indisponible).
+- **Sévérité** — HIGH (taux anormal), MEDIUM (échéance manquée isolée).
+- **Impact LCY** — Écart de taux × notional × durée restante ; intérêts non courus.
+- **Dimensions** — produit, contrepartie, devise.
+- **Recommandation** — Corriger paramétrage, reclasser ou clôturer.
+- **PCEC** — `PCEC/1` (trésorerie / EC) si interbancaire, `PCEC/2` si clientèle corporate, `PCEC/70`/`PCEC/60` pour les intérêts.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_product_list`, `p_materiality_*`.
+- **Fondement exploration** — sections LD et LDTM dans le rapport (présence vérifiée des tables et colonnes).
+
+#### S10 — Loan component waivers and manual rate overrides
+
+- **Findings** : `[F-090]` loan components with `WAIVE='Y'` on interest/fee ; `[F-091]` user-defined interest rates below product minimum.
+- **Objectif** — Quantifier les **renonciations** (waivers) et **remises de taux** appliquées aux crédits, par utilisateur et par contrepartie.
+- **Sources** — `CLTB_ACCOUNT_COMPONENTS` (`WAIVE`, `USER_DEFINED_SPREAD` si présent), `CLTB_ACCOUNT_MASTER`, `SMTB_USER`.
+- **Méthode** — Filtre `WAIVE='Y'` + extraction top utilisateurs / top contreparties ; détection taux < seuil produit.
+- **Sévérité** — MEDIUM, HIGH si récurrent par utilisateur ou impact > `p_materiality_impact_lcy`.
+- **Impact LCY** — Somme estimée des intérêts/frais non perçus (`notional × spread_waive × durée`).
+- **Dimensions** — utilisateur, produit, client.
+- **Recommandation** — Revue politique crédit, contrôle SoD, plafonds de waiver par grade.
+- **PCEC** — `PCEC/7` produits non perçus, `PCEC/702` / `PCEC/706`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — colonne `WAIVE` confirmée sur `CLTB_ACCOUNT_COMPONENTS` (correction d'erreur passée lors du debug).
+
+---

@@ -374,3 +374,116 @@ Le nommage conseillé du fichier de sortie est `revenue_assurance_<YYYYMMDD>_<HH
 | BR-51 | FR-34 |
 
 ---
+
+## 5. Exigences non-fonctionnelles (NFR)
+
+Les exigences non-fonctionnelles décrivent **comment** le script doit se comporter (performance, robustesse, sécurité, maintenabilité, portabilité) indépendamment des fonctions qu'il réalise.
+
+### 5.1 Performance et scalabilité
+
+| Id | Exigence | Cible | Mesure |
+|---|---|---|---|
+| **NFR-01** | Temps d'exécution — mode `SUMMARY` | < **2 minutes** | Photo mensuelle standard (volumétries `fcubs.csv`). |
+| **NFR-02** | Temps d'exécution — mode `FULL` | < **15 minutes** | Photo mensuelle standard. |
+| **NFR-03** | Temps d'exécution — mode `DEEP` | < **60 minutes** | Photo mensuelle standard. |
+| **NFR-04** | Consommation mémoire PL/SQL | < **100 Mo** par session | Pas d'accumulation de collections massives. |
+| **NFR-05** | Buffer `DBMS_OUTPUT` | **ILLIMITÉ** | `SET SERVEROUTPUT ON SIZE UNLIMITED`. |
+| **NFR-06** | Pas de boucle **N+1** (une requête par ligne) | 0 | Toute extraction TOP-N fait une seule requête agrégée. |
+| **NFR-07** | Filtrage précoce par période | 100 % des sections temporelles | Aucune lecture full-scan non bornée. |
+| **NFR-08** | Volumétrie de sortie (rapport texte) | < **20 Mo** en `FULL`, < 80 Mo en `DEEP` | Borne par `p_top_n`. |
+
+> En cas de dépassement, le script DOIT **tronquer** proprement la section concernée et émettre un warning `[LOG]`, plutôt que d'échouer silencieusement.
+
+### 5.2 Robustesse et disponibilité
+
+| Id | Exigence |
+|---|---|
+| **NFR-10** | Aucune erreur non interceptée : chaque section est encadrée par `BEGIN ... EXCEPTION WHEN OTHERS ... END;`. |
+| **NFR-11** | Une erreur dans une section **n'interrompt pas** le rapport global : la section est marquée `SKIPPED — see error log` et les suivantes s'exécutent. |
+| **NFR-12** | Reprise après interruption : le script étant idempotent et sans état persistant, un simple re-run suffit. |
+| **NFR-13** | Défensivité des conversions : tout `NVL` sur colonne numérique/date utilise `TO_CHAR`, toute division utilise `NULLIF`, toute somme est enveloppée `NVL(SUM(...),0)`. |
+
+### 5.3 Sécurité et conformité technique
+
+| Id | Exigence |
+|---|---|
+| **NFR-20** | **Lecture seule stricte** : aucun `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`, `DROP`, `ALTER`, `CREATE`, `GRANT`, `REVOKE`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` dans le script. |
+| **NFR-21** | Aucune **donnée personnelle sensible** (identifiants pièces, numéros complets) ne doit être affichée en clair au-delà de ce qui est nécessaire au constat ; les numéros de compte sont partiellement masqués en mode `SUMMARY`. |
+| **NFR-22** | Le script ne crée **aucun objet persistant** : pas de `CREATE TABLE`, pas de `CREATE PROCEDURE`, pas de fichier écrit via `UTL_FILE` (sauf demande explicite documentée). |
+| **NFR-23** | Pas d'appel à `DBMS_EXECUTE_IMMEDIATE`, `DBMS_SQL`, ni aucun package permettant l'exécution dynamique arbitraire. Exception admise : `DBMS_UTILITY.GET_TIME`, `DBMS_UTILITY.GET_HASH_VALUE`, `DBMS_OUTPUT`. |
+| **NFR-24** | Compte d'exécution doté uniquement de `SELECT ANY TABLE` ou de `SELECT` granulaires sur les schémas FCUBS concernés. |
+
+### 5.4 Portabilité et compatibilité
+
+| Id | Exigence |
+|---|---|
+| **NFR-30** | Exécutable en **Oracle 11gR2** minimum, compatible 12c/19c/21c sans modification. |
+| **NFR-31** | Syntaxe proscrite : `FETCH FIRST N ROWS`, `WITHIN GROUP (ORDER BY)` postérieures à 11g, `JSON_OBJECT`, *PIVOT* moderne, *IDENTITY columns*, *Invisible columns*. |
+| **NFR-32** | ANSI JOIN **obligatoire** (pas de jointures `table1, table2 WHERE ...`). |
+| **NFR-33** | Compatible SQL\*Plus et SQLcl ; testé sur SQL Developer (exécution interactive). |
+| **NFR-34** | Encodage fichier : **UTF-8 sans BOM** ; pas de caractères latin-1 dépendant de l'environnement serveur. |
+
+### 5.5 Maintenabilité et lisibilité
+
+| Id | Exigence |
+|---|---|
+| **NFR-40** | Chaque section du script ≤ **300 lignes** ; au-delà, sous-sectionner. |
+| **NFR-41** | Nommage : variables `v_`, paramètres `p_`, constantes `C_`, curseurs `cur_`. |
+| **NFR-42** | Commentaires en **français** dans le code, libellés du rapport en **anglais**. |
+| **NFR-43** | Format : indentation 4 espaces, pas de tabulations ; lignes ≤ 200 caractères. |
+| **NFR-44** | Helpers réutilisés : `print_kv`, `safe_count`, `print_finding`, `log_error`, `print_section_header`, `print_section_footer`, déclarés une seule fois en tête. |
+| **NFR-45** | Le script DOIT passer une **compilation à blanc** (`SET AUTOPRINT OFF` + compile implicite du bloc anonyme) sans warning autre que `PLW-*` mineurs documentés. |
+
+### 5.6 Traçabilité et auditabilité
+
+| Id | Exigence |
+|---|---|
+| **NFR-50** | Horodatage en tête et en pied du rapport au format `YYYY-MM-DD HH24:MI:SS TZR`. |
+| **NFR-51** | Versioning : `C_SCRIPT_VERSION` mis à jour à chaque livraison, suivant le schéma `MAJOR.MINOR.PATCH`. |
+| **NFR-52** | Archivage du rapport : convention de nommage `revenue_assurance_<YYYYMMDD>_<HH24MISS>.txt`, répertoire `reports/` (hors Git). |
+| **NFR-53** | Les logs `[LOG]` et `[PERF]` DOIVENT être en fin de rapport, séparés du corps, pour extraction automatique possible. |
+
+### 5.7 Internationalisation (I18N)
+
+| Id | Exigence |
+|---|---|
+| **NFR-60** | Rapport en **anglais** uniquement (BR-02). Pas de localisation multi-langue dans cette version. |
+| **NFR-61** | Formats date ISO (`YYYY-MM-DD`), séparateur de décimales `.` (point), séparateur de milliers `,` (virgule) dans le rapport. |
+| **NFR-62** | Les devises sont explicitées par leur code ISO 4217 (ex. `XAF`, `USD`, `EUR`). Les montants LCY sont étiquetés « LCY (<ISO>) » lorsque la devise locale est connue. |
+
+### 5.8 Configuration et exploitation
+
+| Id | Exigence |
+|---|---|
+| **NFR-70** | Pré-requis d'exécution documentés en tête du script (version Oracle, commandes SQL\*Plus recommandées, droits requis). |
+| **NFR-71** | Le script DOIT être utilisable tel quel sans variable d'environnement autre que celles liées au compte Oracle (TNS). |
+| **NFR-72** | Le SPOOL conseillé est documenté dans un bloc `-- HOW TO RUN` en tête du fichier. |
+
+### 5.9 Dépendances externes
+
+| Id | Exigence |
+|---|---|
+| **NFR-80** | Aucune dépendance à un package PL/SQL applicatif FCUBS non standard (Flexcube Open Development Toolkit, etc.). |
+| **NFR-81** | Seules dépendances admises : dictionnaire Oracle (`ALL_*`, `USER_*`, `V$*`), `DBMS_OUTPUT`, `DBMS_UTILITY`. |
+
+### 5.10 Tests et qualité (cadrage ; détail en §11)
+
+| Id | Exigence |
+|---|---|
+| **NFR-90** | Un jeu de tests minimal : exécution à vide (périmètre nul), sur une agence, sur une période courte (1 jour), sur une période longue (1 mois), avec seuils restrictifs. |
+| **NFR-91** | Vérification de la **reproductibilité** : deux runs successifs sans changement de données doivent produire des rapports identiques à l'horodatage près. |
+| **NFR-92** | Tous les constats `CRITICAL`/`HIGH` d'un run de référence DOIVENT être ré-obtenus sur un run suivant, sauf changement documenté. |
+
+### 5.11 Synthèse des cibles chiffrées
+
+| Dimension | Cible | Seuil d'alerte |
+|---|---|---|
+| Durée `SUMMARY` | < 2 min | > 5 min |
+| Durée `FULL` | < 15 min | > 30 min |
+| Durée `DEEP` | < 60 min | > 120 min |
+| Taille rapport `FULL` | < 20 Mo | > 50 Mo |
+| Nb findings affichés | selon `p_top_n` (défaut 50) | > 500 par section |
+| Taux couverture PCEC | ≥ 95 % | < 80 % |
+| Taux d'erreurs interceptées | 100 % | toute exception non catch = bug |
+
+---

@@ -78,7 +78,7 @@ BEGIN
 
     FOR t IN (
         SELECT table_name, categorie FROM (
-            SELECT 'SMTB_USER'                   AS table_name, 'Utilisateurs'         AS categorie, 1  AS ord FROM DUAL UNION ALL
+            SELECT 'SMTB_USER'                   AS table_name, 'Utilisateurs'         AS categorie, 1  AS sort_ord FROM DUAL UNION ALL
             SELECT 'SMTB_USER_ROLE',               'Affectation role',                  2  FROM DUAL UNION ALL
             SELECT 'SMTB_USER_CENTRAL_ROLES',      'Roles centralises',                 3  FROM DUAL UNION ALL
             SELECT 'SMTB_USER_TILLS',              'Affectation caisse',                4  FROM DUAL UNION ALL
@@ -107,7 +107,7 @@ BEGIN
             SELECT 'FBTM_BRANCH',                  'Agences FlexBranch',               27  FROM DUAL UNION ALL
             SELECT 'FBTM_BRANCH_INFO',             'Informations agence',              28  FROM DUAL UNION ALL
             SELECT 'CSTM_FUNCTION_USERDEF_FIELDS', 'Champs UDF (SMDROLDF/USRDF/...)',  29  FROM DUAL
-            ORDER BY ord
+            ORDER BY sort_ord
         )
     ) LOOP
         BEGIN
@@ -670,7 +670,7 @@ BEGIN
     p_sub('Fonctions SENSIBLES — focus gestion des acces / parametres');
     FOR f IN (
         SELECT func FROM (
-            SELECT 'SMDUSRDF' AS func, 1 ord FROM DUAL UNION ALL
+            SELECT 'SMDUSRDF' AS func, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'SMDROLDF',        2 FROM DUAL UNION ALL
             SELECT 'SMDCHPWD',        3 FROM DUAL UNION ALL
             SELECT 'SMDBRGRT',        4 FROM DUAL UNION ALL
@@ -686,7 +686,7 @@ BEGIN
             SELECT 'STDBRANC',       14 FROM DUAL UNION ALL
             SELECT 'KYDKYCMN',       15 FROM DUAL UNION ALL
             SELECT 'STDKYCMN',       16 FROM DUAL UNION ALL
-            SELECT 'STDCUSTF',       17 FROM DUAL ORDER BY ord
+            SELECT 'STDCUSTF',       17 FROM DUAL ORDER BY sort_ord
         )
     ) LOOP
         SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
@@ -1413,7 +1413,7 @@ BEGIN
     p_sub('Actions sensibles — focus securite / parametres');
     FOR a IN (
         SELECT action FROM (
-            SELECT 'NEW' AS action, 1 ord FROM DUAL UNION ALL
+            SELECT 'NEW' AS action, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'MODIFY',         2 FROM DUAL UNION ALL
             SELECT 'DELETE',         3 FROM DUAL UNION ALL
             SELECT 'CLOSE',          4 FROM DUAL UNION ALL
@@ -1429,7 +1429,7 @@ BEGIN
             SELECT 'DELETEALL',     14 FROM DUAL UNION ALL
             SELECT 'COPY',          15 FROM DUAL UNION ALL
             SELECT 'PRINT',         16 FROM DUAL UNION ALL
-            SELECT 'REJECT',        17 FROM DUAL ORDER BY ord
+            SELECT 'REJECT',        17 FROM DUAL ORDER BY sort_ord
         )
     ) LOOP
         EXECUTE IMMEDIATE
@@ -1735,7 +1735,7 @@ BEGIN
         p_sub('Decompte des droits accordes (Y) par action');
         FOR a IN (
             SELECT col FROM (
-                SELECT 'GENERATE' col, 1 ord FROM DUAL UNION ALL
+                SELECT 'GENERATE' col, 1 sort_ord FROM DUAL UNION ALL
                 SELECT 'HOLD',             2 FROM DUAL UNION ALL
                 SELECT 'CANCEL',           3 FROM DUAL UNION ALL
                 SELECT 'TEST_INPUT',       4 FROM DUAL UNION ALL
@@ -1758,7 +1758,7 @@ BEGIN
                 SELECT 'CHANGE_MSG',      21 FROM DUAL UNION ALL
                 SELECT 'SUPPRESS',        22 FROM DUAL UNION ALL
                 SELECT 'DELETE_MSG',      23 FROM DUAL UNION ALL
-                SELECT 'AUTH_RIGHTS',     24 FROM DUAL ORDER BY ord
+                SELECT 'AUTH_RIGHTS',     24 FROM DUAL ORDER BY sort_ord
             )
         ) LOOP
             EXECUTE IMMEDIATE
@@ -2478,7 +2478,7 @@ BEGIN
     p_sub('A-17.1 Volume de privileges admin par fonction cible');
     FOR f IN (
         SELECT func, label FROM (
-            SELECT 'SMDUSRDF' func, 'Creation/modif utilisateurs' label, 1 ord FROM DUAL UNION ALL
+            SELECT 'SMDUSRDF' func, 'Creation/modif utilisateurs' label, 1 sort_ord FROM DUAL UNION ALL
             SELECT 'SMDROLDF',       'Creation/modif roles',               2 FROM DUAL UNION ALL
             SELECT 'SMDCHPWD',       'Reset mot de passe',                 3 FROM DUAL UNION ALL
             SELECT 'SMDCHKDT',       'Autorisation creation user',         4 FROM DUAL UNION ALL
@@ -2491,7 +2491,7 @@ BEGIN
             SELECT 'CSDXTCTL',       'Controle des executions',           11 FROM DUAL UNION ALL
             SELECT 'CSDXTFSR',       'Fonction reserve',                  12 FROM DUAL UNION ALL
             SELECT 'STDEODST',       'Statut End-of-day',                 13 FROM DUAL UNION ALL
-            SELECT 'EIDMANOP',       'Operations manuelles EOD',          14 FROM DUAL ORDER BY ord
+            SELECT 'EIDMANOP',       'Operations manuelles EOD',          14 FROM DUAL ORDER BY sort_ord
         )
     ) LOOP
         SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL

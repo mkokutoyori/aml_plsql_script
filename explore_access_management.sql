@@ -2463,6 +2463,124 @@ BEGIN
     p_kv('  Lignes privileges role/fonction', TO_CHAR(v_count));
 
     -- =========================================================
+    -- A-17. CARTOGRAPHIE DES ADMINISTRATEURS
+    --        — Qui a acces aux fonctions de securite (SM*) ?
+    -- =========================================================
+    p_section('A-17. CARTOGRAPHIE ADMINISTRATEURS — acces aux fonctions SM* / parametrage');
+
+    p_sub('A-17.1 Volume de privileges admin par fonction cible');
+    FOR f IN (
+        SELECT func, label FROM (
+            SELECT 'SMDUSRDF' func, 'Creation/modif utilisateurs' label, 1 ord FROM DUAL UNION ALL
+            SELECT 'SMDROLDF',       'Creation/modif roles',               2 FROM DUAL UNION ALL
+            SELECT 'SMDCHPWD',       'Reset mot de passe',                 3 FROM DUAL UNION ALL
+            SELECT 'SMDCHKDT',       'Autorisation creation user',         4 FROM DUAL UNION ALL
+            SELECT 'SMDPARAM',       'Parametres globaux SMS',             5 FROM DUAL UNION ALL
+            SELECT 'SMSPARAM',       'Parametres SMS bis',                 6 FROM DUAL UNION ALL
+            SELECT 'SMDUSRHL',       'Historique utilisateurs',            7 FROM DUAL UNION ALL
+            SELECT 'SMDCLRUS',       'Clear users',                        8 FROM DUAL UNION ALL
+            SELECT 'SMDAUTH',        'Autorisation generique',             9 FROM DUAL UNION ALL
+            SELECT 'CSDUDFMT',       'UDF maintenance',                   10 FROM DUAL UNION ALL
+            SELECT 'CSDXTCTL',       'Controle des executions',           11 FROM DUAL UNION ALL
+            SELECT 'CSDXTFSR',       'Fonction reserve',                  12 FROM DUAL UNION ALL
+            SELECT 'STDEODST',       'Statut End-of-day',                 13 FROM DUAL UNION ALL
+            SELECT 'EIDMANOP',       'Operations manuelles EOD',          14 FROM DUAL ORDER BY ord
+        )
+    ) LOOP
+        SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
+            WHERE UPPER(ROLE_FUNCTION) = f.func OR UPPER(RAD_FUNCTION_ID) = f.func;
+        SELECT COUNT(DISTINCT ur.USER_ID) INTO v_count2 FROM SMTB_USER_ROLE ur
+            JOIN SMTB_ROLE_DETAIL rd ON rd.ROLE_ID = ur.ROLE_ID
+            WHERE UPPER(rd.ROLE_FUNCTION) = f.func OR UPPER(rd.RAD_FUNCTION_ID) = f.func;
+        p_kv('  ' || RPAD(f.func,10) || ' (' || f.label || ')',
+             TO_CHAR(v_count) || ' role(s) / ' || TO_CHAR(v_count2) || ' user(s)');
+    END LOOP;
+
+    p_sub('A-17.2 Top 15 utilisateurs "superadmin" (acces >=3 fonctions SM*)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ur.USER_ID, COUNT(DISTINCT rd.ROLE_FUNCTION) nb_func
+            FROM SMTB_USER_ROLE ur
+            JOIN SMTB_ROLE_DETAIL rd ON rd.ROLE_ID = ur.ROLE_ID
+            WHERE rd.ROLE_FUNCTION LIKE 'SM%' OR rd.RAD_FUNCTION_ID LIKE 'SM%'
+            GROUP BY ur.USER_ID
+            HAVING COUNT(DISTINCT rd.ROLE_FUNCTION) >= 3
+            ORDER BY nb_func DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  USER=' || r.USER_ID, TO_CHAR(r.nb_func) || ' fonction(s) SM* distinctes');
+    END LOOP;
+
+    p_sub('A-17.3 Top 15 roles "admin" (nombre de fonctions SM* couvertes)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_ID, COUNT(DISTINCT ROLE_FUNCTION) nb
+            FROM SMTB_ROLE_DETAIL
+            WHERE ROLE_FUNCTION LIKE 'SM%' OR RAD_FUNCTION_ID LIKE 'SM%'
+            GROUP BY ROLE_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ROLE=' || r.ROLE_ID, TO_CHAR(r.nb) || ' fonction(s) SM*');
+    END LOOP;
+
+    p_sub('A-17.4 Admins historiques : MAKER_ID de SMTB_USER (qui a cree les comptes)');
+    SELECT COUNT(DISTINCT MAKER_ID) INTO v_count FROM SMTB_USER WHERE MAKER_ID IS NOT NULL;
+    p_kv('  Nombre de createurs distincts', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT * FROM (
+            SELECT MAKER_ID, COUNT(*) nb,
+                   MIN(MAKER_DT_STAMP) premiere,
+                   MAX(MAKER_DT_STAMP) derniere
+            FROM SMTB_USER
+            WHERE MAKER_ID IS NOT NULL
+            GROUP BY MAKER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  MAKER=' || r.MAKER_ID || ' | ' || r.nb || ' comptes',
+             TO_CHAR(r.premiere,'DD/MM/YYYY') || ' -> ' || TO_CHAR(r.derniere,'DD/MM/YYYY'));
+    END LOOP;
+
+    p_sub('A-17.5 Admins historiques : CHECKER_ID de SMTB_USER');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT CHECKER_ID, COUNT(*) nb,
+                   MAX(CHECKER_DT_STAMP) derniere
+            FROM SMTB_USER
+            WHERE CHECKER_ID IS NOT NULL
+            GROUP BY CHECKER_ID ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  CHECKER=' || r.CHECKER_ID || ' | ' || r.nb || ' autorisations',
+             'derniere=' || TO_CHAR(r.derniere,'DD/MM/YYYY'));
+    END LOOP;
+
+    p_sub('A-17.6 MAKER_ID / CHECKER_ID absents de SMTB_USER (traces orphelines)');
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT DISTINCT MAKER_ID FROM SMTB_USER WHERE MAKER_ID IS NOT NULL
+        AND MAKER_ID NOT IN (SELECT USER_ID FROM SMTB_USER)
+    );
+    p_kv('  MAKER_ID fantomes dans SMTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT DISTINCT CHECKER_ID FROM SMTB_USER WHERE CHECKER_ID IS NOT NULL
+        AND CHECKER_ID NOT IN (SELECT USER_ID FROM SMTB_USER)
+    );
+    p_kv('  CHECKER_ID fantomes dans SMTB_USER', TO_CHAR(v_count));
+
+    p_sub('A-17.7 Cumul d''activite admin recente (SMTB_SMS_ACTION_LOG 90 j)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT SUBSTR(PKVALS, 1, 20) user_cible, COUNT(*) nb
+            FROM SMTB_SMS_ACTION_LOG
+            WHERE REQ_TIME >= SYSDATE - 90
+              AND UPPER(ACTION) IN ('NEW','MODIFY','DELETE','AUTH','AUTHORIZE','CLOSE','REOPEN','UNLOCK')
+              AND PKVALS IS NOT NULL
+            GROUP BY SUBSTR(PKVALS, 1, 20) ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  PK_prefix=' || NVL(r.user_cible,'(NULL)'), TO_CHAR(r.nb) || ' action(s) admin / 90 j');
+    END LOOP;
+
+    -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
     p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');

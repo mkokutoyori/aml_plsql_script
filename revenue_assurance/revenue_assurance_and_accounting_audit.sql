@@ -4190,6 +4190,277 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S19 -- FX revaluation anomalies
+    -- =================================================================
+    -- [F-180] FCY GL where FCY_BAL * closing_rate diverges from
+    --         LCY_BAL beyond materiality (re-evaluation gap).
+    -- [F-181] FCY GL with non-zero FCY balance but no reval posting
+    --         over the period (batch reval skipped).
+    -- [F-182] Position-currency imbalance: for a given CCY, sum of
+    --         DR FCY positions ne SUM of CR FCY positions beyond
+    --         tolerance.
+    -- PCEC/3, PCEC/7.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_180     PLS_INTEGER := 0;
+        l_n_181     PLS_INTEGER := 0;
+        l_n_182     PLS_INTEGER := 0;
+        l_gl        VARCHAR2(30);
+        l_branch    VARCHAR2(10);
+        l_ccy       VARCHAR2(10);
+        l_fcy_bal   NUMBER;
+        l_lcy_bal   NUMBER;
+        l_rate      NUMBER;
+        l_theo_lcy  NUMBER;
+        l_gap       NUMBER;
+        l_reval_cnt NUMBER;
+        l_sum_pos   NUMBER;
+        l_sum_neg   NUMBER;
+        l_sev       VARCHAR2(10);
+        l_local_ccy VARCHAR2(3);
+    BEGIN
+        IF NOT f_section_enabled('S19') THEN
+            log_info('Section S19 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S19',
+                'FX revaluation anomalies');
+
+            -- Resolve local currency (LCY) from SMTB_BANK_PARAMETERS.
+            -- Fallback to 'XAF' per BRD assumption A-05.
+            BEGIN
+                EXECUTE IMMEDIATE
+                    'SELECT LOCAL_CCY FROM SMTB_BANK_PARAMETERS '
+                 || ' WHERE ROWNUM = 1'
+                    INTO l_local_ccy;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    l_local_ccy := 'XAF';
+                    log_warn('S19: LOCAL_CCY lookup failed, '
+                        || 'fallback to XAF (' || SUBSTR(SQLERRM,1,80)
+                        || ').');
+            END;
+            print_kv('Local currency (LCY)', NVL(l_local_ccy,'XAF'));
+
+            -- [F-180] Reval gap per FCY GL ------------------------------
+            l_sql :=
+                'SELECT b.GL_CODE, b.BRANCH_CODE, b.CCY, '
+             || '       NVL(b.FCY_CLOSING_BAL, 0) AS FCY_BAL, '
+             || '       NVL(b.CLOSING_BAL_LCY, 0) AS LCY_BAL, '
+             || '       NVL(r.BUY_RATE, r.MID_RATE) AS RATE '
+             || '  FROM GLTB_GL_BAL b '
+             || '  LEFT JOIN CYTB_RATES r '
+             || '    ON r.CCY1 = b.CCY '
+             || '   AND r.RATE_DATE = TRUNC(:d_to) '
+             || ' WHERE NVL(b.CCY, '''') <> '''' '
+             || '   AND NVL(b.CCY, '''') <> :lcy '
+             || '   AND ABS(NVL(b.FCY_CLOSING_BAL,0)) > 0 '
+             || '   AND (:p_branch IS NULL '
+             || '        OR b.BRANCH_CODE = :p_branch) '
+             || ' ORDER BY ABS(NVL(b.CLOSING_BAL_LCY,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_to, l_local_ccy,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_branch, l_ccy,
+                          l_fcy_bal, l_lcy_bal, l_rate;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_180 >= NVL(p_top_n, 50);
+
+                    IF NVL(l_rate, 0) = 0 THEN
+                        -- cannot compute theoretical LCY without a rate
+                        l_theo_lcy := NULL;
+                        l_gap      := NULL;
+                    ELSE
+                        l_theo_lcy := NVL(l_fcy_bal, 0) * l_rate;
+                        l_gap      := ABS(NVL(l_lcy_bal, 0) - l_theo_lcy);
+                    END IF;
+
+                    IF l_gap IS NULL
+                       OR l_gap < NVL(p_materiality_lcy, 0) THEN
+                        NULL;
+                    ELSE
+                        l_sev := f_promote_severity('HIGH', l_gap);
+                        IF l_gap >= NVL(p_materiality_critical_lcy, 0) THEN
+                            l_sev := 'CRITICAL';
+                        END IF;
+
+                        print_finding(
+                            p_section    => 'S19',
+                            p_code       => 'RA-S19-F180',
+                            p_severity   => l_sev,
+                            p_message    => 'FX reval gap: ccy='
+                                         || l_ccy
+                                         || ' fcy=' || f_fmt_lcy(l_fcy_bal)
+                                         || ' lcy=' || f_fmt_lcy(l_lcy_bal)
+                                         || ' rate='
+                                         || TO_CHAR(l_rate,
+                                                'FM999999990.000000')
+                                         || ' theo_lcy='
+                                         || f_fmt_lcy(l_theo_lcy)
+                                         || ' gap='
+                                         || f_fmt_lcy(l_gap),
+                            p_entity     => l_gl,
+                            p_impact_lcy => l_gap,
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                        );
+                        l_n_180 := l_n_180 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S19 F-180 unavailable (GLTB_GL_BAL.FCY '
+                        || 'or CYTB_RATES missing): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-181] FCY GL with balance but no reval posting ----------
+            l_sql :=
+                'SELECT b.GL_CODE, b.BRANCH_CODE, b.CCY, '
+             || '       NVL(b.FCY_CLOSING_BAL, 0) AS FCY_BAL, '
+             || '       ( SELECT COUNT(*) '
+             || '           FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = b.GL_CODE '
+             || '            AND h.BRANCH_CODE = b.BRANCH_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '            AND ( UPPER(NVL(h.TRN_CODE,'''')) '
+             || '                  LIKE ''%REVAL%'' '
+             || '               OR UPPER(NVL(h.MODULE,'''')) = ''EL'' ) '
+             || '       ) AS REVAL_CNT '
+             || '  FROM GLTB_GL_BAL b '
+             || ' WHERE NVL(b.CCY,'''') <> '''' '
+             || '   AND NVL(b.CCY,'''') <> :lcy '
+             || '   AND ABS(NVL(b.FCY_CLOSING_BAL,0)) > 0 '
+             || '   AND (:p_branch IS NULL '
+             || '        OR b.BRANCH_CODE = :p_branch) '
+             || ' ORDER BY ABS(NVL(b.CLOSING_BAL_LCY,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      l_local_ccy,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_branch, l_ccy, l_fcy_bal, l_reval_cnt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_181 >= NVL(p_top_n, 50);
+
+                    IF NVL(l_reval_cnt, 0) = 0
+                       AND ABS(NVL(l_fcy_bal, 0))
+                           >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S19',
+                            p_code       => 'RA-S19-F181',
+                            p_severity   => 'HIGH',
+                            p_message    => 'FCY GL without reval posting: '
+                                         || 'ccy=' || l_ccy
+                                         || ' fcy=' || f_fmt_lcy(l_fcy_bal),
+                            p_entity     => l_gl,
+                            p_impact_lcy => ABS(NVL(l_fcy_bal, 0)),
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                         || ' REVAL_CNT=0'
+                        );
+                        l_n_181 := l_n_181 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S19 F-181 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-182] Position imbalance per currency -------------------
+            l_sql :=
+                'SELECT b.CCY, '
+             || '       SUM(CASE WHEN NVL(b.FCY_CLOSING_BAL,0) > 0 '
+             || '                THEN NVL(b.FCY_CLOSING_BAL,0) ELSE 0 END) '
+             || '                                     AS SUM_POS, '
+             || '       SUM(CASE WHEN NVL(b.FCY_CLOSING_BAL,0) < 0 '
+             || '                THEN NVL(b.FCY_CLOSING_BAL,0) ELSE 0 END) '
+             || '                                     AS SUM_NEG, '
+             || '       SUM(NVL(b.CLOSING_BAL_LCY,0)) AS TOTAL_LCY '
+             || '  FROM GLTB_GL_BAL b '
+             || ' WHERE NVL(b.CCY,'''') <> '''' '
+             || '   AND NVL(b.CCY,'''') <> :lcy '
+             || ' GROUP BY b.CCY '
+             || 'HAVING ABS(SUM(NVL(b.FCY_CLOSING_BAL,0))) > 0 '
+             || ' ORDER BY ABS(SUM(NVL(b.CLOSING_BAL_LCY,0))) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING l_local_ccy;
+                LOOP
+                    FETCH l_cur
+                     INTO l_ccy, l_sum_pos, l_sum_neg, l_lcy_bal;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_182 >= NVL(p_top_n, 50);
+
+                    IF ABS(NVL(l_lcy_bal, 0))
+                       < NVL(p_materiality_impact_lcy, 0) THEN
+                        NULL;
+                    ELSE
+                        print_finding(
+                            p_section    => 'S19',
+                            p_code       => 'RA-S19-F182',
+                            p_severity   => 'HIGH',
+                            p_message    => 'FX position imbalance: ccy='
+                                         || l_ccy
+                                         || ' sum_pos='
+                                         || f_fmt_lcy(l_sum_pos)
+                                         || ' sum_neg='
+                                         || f_fmt_lcy(l_sum_neg)
+                                         || ' net_lcy='
+                                         || f_fmt_lcy(l_lcy_bal),
+                            p_entity     => l_ccy,
+                            p_impact_lcy => ABS(NVL(l_lcy_bal, 0)),
+                            p_evidence   => 'LCY=' || l_local_ccy
+                        );
+                        l_n_182 := l_n_182 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S19 F-182 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-180 findings (reval gap)',
+                TO_CHAR(l_n_180));
+            print_kv('F-181 findings (no reval posting)',
+                TO_CHAR(l_n_181));
+            print_kv('F-182 findings (ccy position imbalance)',
+                TO_CHAR(l_n_182));
+
+            print_section_footer('S19',
+                l_n_180 + l_n_181 + l_n_182);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S19', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S19', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

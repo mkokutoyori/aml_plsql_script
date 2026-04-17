@@ -888,3 +888,77 @@ Chaque contrôle est décrit par :
 - **Fondement exploration** — à confirmer via mini-script d'exploration dédié FX si le module FX est effectivement utilisé.
 
 ---
+
+### 7.D — Contrôle comptable : GL, écritures manuelles, FX reval, suspense
+
+#### S16 — GL balance vs movement history consistency
+
+- **Findings** : `[F-150]` GLs where `SUM(ACTB_HISTORY movements over period) ≠ (GLTB_GL_BAL closing − opening)` beyond tolerance ; `[F-151]` GLs with zero balance but active movements ; `[F-152]` GLs with movements but frozen status.
+- **Objectif** — Vérifier la **cohérence** entre l'historique comptable (`ACTB_HISTORY`) et les soldes GL (`GLTB_GL_BAL`) pour un sous-ensemble de GL critiques (produits, charges, suspense, clientèle).
+- **Sources** — `ACTB_HISTORY` (`TRN_DT`, `AC_NO`, `DR_CR`, `LCY_AMOUNT`, `FCY_AMOUNT`, `BRANCH_CODE`), `GLTB_GL_BAL` (`OPENING_BAL_LCY`, `CLOSING_BAL_LCY`, `PERIOD_CODE`), `GLTB_GL_MASTER`.
+- **Méthode** — Agrégation `SUM(CASE DR_CR WHEN 'D' THEN -LCY_AMOUNT ELSE LCY_AMOUNT END)` sur période vs `CLOSING_BAL_LCY − OPENING_BAL_LCY` ; tolérance absolue `p_materiality_lcy`.
+- **Sévérité** — HIGH au-delà du seuil, CRITICAL si GL de résultat (classes 6/7).
+- **Impact LCY** — Valeur absolue de l'écart.
+- **Dimensions** — classe PCEC, agence, période.
+- **Recommandation** — Ouvrir un ticket de réconciliation, purger / rejouer les batchs concernés.
+- **PCEC** — Toutes classes, focus sur `PCEC/6`, `PCEC/7`, `PCEC/38`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`, `p_branch_*`.
+- **Fondement exploration** — présence confirmée de `ACTB_HISTORY` et `GLTB_GL_BAL`, schéma mappé lors de l'exploration.
+
+#### S17 — Manual journal entries — volume, concentration, sensitive GLs
+
+- **Findings** : `[F-160]` manual entries count / amount per user over period ; `[F-161]` manual entries on income/expense GLs (classes 6/7) ; `[F-162]` manual entries passed outside business hours ; `[F-163]` manual entries reversed within 24h.
+- **Objectif** — Détecter les **écritures manuelles** à risque (SoD, manipulation de résultat, opérations de dernière minute).
+- **Sources** — `MOTB_CONTRACT_MASTER` (si module MO), `ACTB_HISTORY` filtré par `TRN_CODE` manuel, `SMTB_USER`.
+- **Méthode** — Agrégation par utilisateur, par GL sensible, par plage horaire (`TO_CHAR(CREATION_DATE,'HH24')`), détection des renversements (`REVERSAL_MARKER` / amount négation).
+- **Sévérité** — MEDIUM par défaut, HIGH en cas de concentration (> 50 % des écritures manuelles sur un utilisateur) ou sur GL sensible.
+- **Impact LCY** — Somme des montants LCY concernés.
+- **Dimensions** — utilisateur, GL, agence, tranche horaire.
+- **Recommandation** — Revue maker/checker, analyse SoD, justification écrite requise.
+- **PCEC** — Focus sur `PCEC/6`, `PCEC/7`, `PCEC/38`, `PCEC/5`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_top_n`, `p_materiality_lcy`.
+- **Fondement exploration** — tables MO et ACTB_HISTORY confirmées.
+
+#### S18 — Suspense accounts ageing (PCEC/38)
+
+- **Findings** : `[F-170]` suspense account balances > 30/60/90/180 days old ; `[F-171]` suspense accounts with only one-sided movements ; `[F-172]` suspense accounts with balance opposite to expected side.
+- **Objectif** — Surveiller les **comptes d'attente / suspense** (classe PCEC 38x) pour éviter l'accumulation et le risque de résultat latent.
+- **Sources** — `GLTB_GL_MASTER` (filtre sur GL de la famille suspense), `ACTB_HISTORY`, `GLTB_GL_BAL`.
+- **Méthode** — Pour chaque GL suspense, ancienneté du solde courant = `p_as_of_date − date du premier mouvement non soldé` ; agrégation par tranches.
+- **Sévérité** — HIGH au-delà de 90 jours, CRITICAL au-delà de 180 jours ou montant > `p_materiality_critical_lcy`.
+- **Impact LCY** — Solde absolu par tranche.
+- **Dimensions** — agence, GL, ancienneté.
+- **Recommandation** — Apurement mensuel obligatoire, escalade par ancienneté, provisionnement.
+- **PCEC** — `PCEC/38` (comptes de régularisation et d'attente).
+- **Paramètres** — `p_as_of_date`, `p_materiality_lcy`, `p_branch_*`.
+- **Fondement exploration** — mapping GL à compléter par un mini-script d'exploration pour identifier la liste réelle des GL suspense à la banque.
+
+#### S19 — FX revaluation anomalies
+
+- **Findings** : `[F-180]` FX revaluation GL with abnormal swings (> X % mean daily) ; `[F-181]` FCY GL balance without matching reval posting over period ; `[F-182]` position-currency imbalance (actif ≠ passif FCY).
+- **Objectif** — Contrôler la **revalorisation FX** : tous les soldes FCY doivent être réévalués à la bonne date et la position bilantielle par devise doit être équilibrée.
+- **Sources** — `GLTB_GL_BAL` (`FCY_BALANCE`, `LCY_BALANCE`, `CCY`), `ACTB_HISTORY` pour postings de reval, table de taux de clôture.
+- **Méthode** — Recalcul théorique `FCY_BALANCE × taux_clôture` vs `LCY_BALANCE` ; détection d'écart > tolérance.
+- **Sévérité** — HIGH, CRITICAL si écart > `p_materiality_critical_lcy`.
+- **Impact LCY** — Somme absolue des écarts.
+- **Dimensions** — devise, agence, classe PCEC.
+- **Recommandation** — Rejouer le batch de reval, corriger la table de taux.
+- **PCEC** — Toutes classes, focus `PCEC/3` (opérations diverses) et `PCEC/7`.
+- **Paramètres** — `p_as_of_date`, `p_ccy_list`, `p_materiality_lcy`.
+- **Fondement exploration** — à confirmer : présence de GL FCY identifiée, mais le détail du batch de reval requiert un mini-script d'exploration.
+
+#### S20 — GL mapping gaps vs PCEC COBAC
+
+- **Findings** : `[F-190]` GL accounts without PCEC class assignable ; `[F-191]` GLs whose first-digit class is inconsistent with nature (e.g., a product GL in class 1) ; `[F-192]` significant volumes routed to an `OTHER / MISC` bucket.
+- **Objectif** — Garantir la **couverture PCEC** pour le reporting COBAC ; aucune fuite d'activité vers un GL non classé ne doit subsister.
+- **Sources** — `GLTB_GL_MASTER` (code GL, description, classe éventuelle), `GLTB_GL_BAL`.
+- **Méthode** — Dérivation de la classe PCEC à partir du préfixe du code GL (convention interne) + comparaison à un mapping de référence (fichier externe ou convention documentée).
+- **Sévérité** — MEDIUM, HIGH si GL à volume significatif non mappé.
+- **Impact LCY** — Volume total des mouvements sur GL non mappés.
+- **Dimensions** — classe PCEC, agence.
+- **Recommandation** — Compléter le mapping, republier le reporting COBAC rétroactivement si nécessaire.
+- **PCEC** — Transverse, objectif de couverture ≥ 95 %.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — nécessaire mini-script d'exploration pour établir la convention de préfixe GL→PCEC propre à cette banque.
+
+---

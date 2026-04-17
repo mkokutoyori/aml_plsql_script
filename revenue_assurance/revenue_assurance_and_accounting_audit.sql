@@ -3436,6 +3436,237 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S16 -- GL balance vs movement history consistency
+    -- =================================================================
+    -- [F-150] GLs where SUM(ACTB_HISTORY net DR over period)
+    --         != (GLTB_GL_BAL CLOSING_BAL - OPENING_BAL).
+    -- [F-151] GLs with zero closing balance but active movements.
+    -- [F-152] GLs flagged blocked/frozen but bearing movements.
+    -- Severity HIGH, promoted CRITICAL on PCEC classes 6/7.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_150     PLS_INTEGER := 0;
+        l_n_151     PLS_INTEGER := 0;
+        l_n_152     PLS_INTEGER := 0;
+        l_gl        VARCHAR2(30);
+        l_branch    VARCHAR2(10);
+        l_opening   NUMBER;
+        l_closing   NUMBER;
+        l_net_dr    NUMBER;
+        l_delta     NUMBER;
+        l_discrep   NUMBER;
+        l_movsum    NUMBER;
+        l_movcnt    NUMBER;
+        l_class     VARCHAR2(1);
+        l_sev       VARCHAR2(10);
+        l_blocked   VARCHAR2(1);
+    BEGIN
+        IF NOT f_section_enabled('S16') THEN
+            log_info('Section S16 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S16',
+                'GL balance vs movement history consistency');
+
+            -- [F-150] Aggregate reconciliation --------------------------
+            l_sql :=
+                'SELECT h.GL_CODE, h.BRANCH_CODE, '
+             || '       SUM(CASE WHEN h.DR_CR = ''D'' '
+             || '                THEN NVL(h.LCY_AMOUNT,0) '
+             || '                ELSE -NVL(h.LCY_AMOUNT,0) END) AS NET_DR, '
+             || '       COUNT(*) AS CNT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND (:p_branch IS NULL '
+             || '        OR h.BRANCH_CODE = :p_branch) '
+             || ' GROUP BY h.GL_CODE, h.BRANCH_CODE '
+             || ' ORDER BY ABS(SUM(CASE WHEN h.DR_CR = ''D'' '
+             || '                       THEN NVL(h.LCY_AMOUNT,0) '
+             || '                       ELSE -NVL(h.LCY_AMOUNT,0) END)) '
+             || ' DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_branch, l_net_dr, l_movcnt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_150 >= NVL(p_top_n, 50);
+
+                    -- Try to fetch opening/closing balances for that GL
+                    l_opening := NULL;
+                    l_closing := NULL;
+                    BEGIN
+                        EXECUTE IMMEDIATE
+                            'SELECT NVL(SUM(NVL(OPENING_BAL_LCY,0)),0), '
+                         || '       NVL(SUM(NVL(CLOSING_BAL_LCY,0)),0) '
+                         || '  FROM GLTB_GL_BAL '
+                         || ' WHERE GL_CODE = :gl '
+                         || '   AND BRANCH_CODE = :br '
+                         || '   AND PERIOD_CODE = TO_CHAR(:d,''MON-YYYY'') '
+                            INTO l_opening, l_closing
+                            USING l_gl, l_branch, v_date_to;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            l_opening := NULL;
+                            l_closing := NULL;
+                    END;
+
+                    IF l_opening IS NULL OR l_closing IS NULL THEN
+                        -- Fallback: period-less scan
+                        BEGIN
+                            EXECUTE IMMEDIATE
+                                'SELECT NVL(SUM(NVL(OPENING_BAL_LCY,0)),0), '
+                             || '       NVL(SUM(NVL(CLOSING_BAL_LCY,0)),0) '
+                             || '  FROM GLTB_GL_BAL '
+                             || ' WHERE GL_CODE = :gl '
+                             || '   AND BRANCH_CODE = :br '
+                                INTO l_opening, l_closing
+                                USING l_gl, l_branch;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                l_opening := 0;
+                                l_closing := 0;
+                        END;
+                    END IF;
+
+                    l_delta   := NVL(l_closing, 0) - NVL(l_opening, 0);
+                    l_discrep := ABS(NVL(l_net_dr, 0) - l_delta);
+
+                    l_class := SUBSTR(NVL(l_gl, ' '), 1, 1);
+
+                    IF l_discrep < NVL(p_materiality_lcy, 0) THEN
+                        NULL;
+                    ELSE
+                        l_sev := f_promote_severity('HIGH', l_discrep);
+                        IF l_class IN ('6','7') THEN
+                            l_sev := 'CRITICAL';
+                        END IF;
+
+                        print_finding(
+                            p_section    => 'S16',
+                            p_code       => 'RA-S16-F150',
+                            p_severity   => l_sev,
+                            p_message    => 'GL mvmt vs balance mismatch: '
+                                         || 'net_DR=' || f_fmt_lcy(l_net_dr)
+                                         || ' delta=' || f_fmt_lcy(l_delta)
+                                         || ' discr=' || f_fmt_lcy(l_discrep),
+                            p_entity     => l_gl,
+                            p_impact_lcy => l_discrep,
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                         || ' PCEC=' || l_class
+                                         || ' CNT=' || TO_CHAR(l_movcnt)
+                        );
+                        l_n_150 := l_n_150 + 1;
+                    END IF;
+
+                    -- [F-151] Zero closing but movements present --------
+                    IF NVL(l_closing, 0) = 0 AND NVL(l_movcnt, 0) > 0
+                       AND ABS(NVL(l_net_dr, 0))
+                           >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S16',
+                            p_code       => 'RA-S16-F151',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'GL with zero closing bal but '
+                                         || 'movements: net_DR='
+                                         || f_fmt_lcy(l_net_dr)
+                                         || ' cnt=' || TO_CHAR(l_movcnt),
+                            p_entity     => l_gl,
+                            p_impact_lcy => ABS(NVL(l_net_dr,0)),
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                        );
+                        l_n_151 := l_n_151 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S16 F-150/F-151 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-152] Movements on blocked/frozen GL --------------------
+            l_sql :=
+                'SELECT m.GL_CODE, NVL(m.BLOCKED,''N'') AS BLK, '
+             || '       ( SELECT COUNT(*) FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '       ) AS CNT, '
+             || '       ( SELECT NVL(SUM(NVL(h.LCY_AMOUNT,0)),0) '
+             || '           FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = m.GL_CODE '
+             || '            AND TRUNC(h.TRN_DT) BETWEEN :d3 AND :d4 '
+             || '       ) AS AMT '
+             || '  FROM GLTM_MASTER m '
+             || ' WHERE UPPER(NVL(m.BLOCKED, ''N'')) = ''Y'' '
+             || ' ORDER BY 4 DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_blocked, l_movcnt, l_movsum;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_152 >= NVL(p_top_n, 50);
+
+                    IF NVL(l_movcnt, 0) = 0 THEN
+                        EXIT;  -- remaining rows have 0 activity
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S16',
+                        p_code       => 'RA-S16-F152',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Movements on blocked GL: cnt='
+                                     || TO_CHAR(l_movcnt)
+                                     || ' amt=' || f_fmt_lcy(l_movsum),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_movsum, 0)),
+                        p_evidence   => 'BLOCKED=' || l_blocked
+                    );
+                    l_n_152 := l_n_152 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S16 F-152 unavailable '
+                        || '(GLTM_MASTER.BLOCKED may not exist): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-150 findings (mvmt/bal mismatch)',
+                TO_CHAR(l_n_150));
+            print_kv('F-151 findings (zero bal + mvmt)',
+                TO_CHAR(l_n_151));
+            print_kv('F-152 findings (blocked GL + mvmt)',
+                TO_CHAR(l_n_152));
+
+            print_section_footer('S16',
+                l_n_150 + l_n_151 + l_n_152);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S16', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S16', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

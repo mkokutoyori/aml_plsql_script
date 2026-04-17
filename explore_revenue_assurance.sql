@@ -5036,5 +5036,259 @@ BEGIN
         print_kv('  ' || r.s, TO_CHAR(r.nb));
     END LOOP;
 
+    ----------------------------------------------------------------
+    -- SECTION 19 : Branches, facilités, codes & chéquiers
+    --   Revenue Assurance :
+    --    - FBTM_BRANCH / FBTM_BRANCH_INFO : arrêtés de date, branches
+    --    - GETM_FACILITY : lignes de crédit, utilisation, expiration
+    --      (revenu commissions d'engagement / utilisation)
+    --    - STTM_TRN_CODE : codes tran et paramétrage IC/interest
+    --    - CATM_CHECK_BOOK : chéquiers émis, frais d'émission
+    --    - STTM_ACCOUNT_CLASS : référentiel classes de compte
+    ----------------------------------------------------------------
+    print_section('SECTION 19 — Branches, facilités, codes & chéquiers');
+
+    -- 19.1 FBTM_BRANCH — branches
+    DBMS_OUTPUT.PUT_LINE('  [19.1 FBTM_BRANCH]');
+    safe_count('FBTM_BRANCH', '  Total branches');
+    SELECT COUNT(*) INTO v_count FROM FBTM_BRANCH WHERE NVL(END_OF_INPUT,'N')='Y';
+    print_kv('  Branches END_OF_INPUT=Y (journée clôturée)', TO_CHAR(v_count));
+
+    -- 19.2 FBTM_BRANCH_INFO — arrêtés de date, LCY par branche
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.2 FBTM_BRANCH_INFO]');
+    safe_count('FBTM_BRANCH_INFO', '  Total infos branches');
+
+    FOR r IN (SELECT MIN(CURRENTPOSTINGDATE) mn, MAX(CURRENTPOSTINGDATE) mx
+              FROM FBTM_BRANCH_INFO) LOOP
+        print_kv('  Plage CURRENTPOSTINGDATE',
+                 TO_CHAR(r.mn,'YYYY-MM-DD') || ' → ' || TO_CHAR(r.mx,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 19.2.b Branches en retard de posting (arrêté en arrière)
+    SELECT COUNT(*) INTO v_count FROM FBTM_BRANCH_INFO
+    WHERE CURRENTPOSTINGDATE IS NOT NULL
+      AND CURRENTPOSTINGDATE < TRUNC(SYSDATE) - 3;
+    print_kv('  CURRENTPOSTINGDATE en retard >3j (batch figé ?)', TO_CHAR(v_count));
+
+    -- 19.2.c Distribution LCY des branches
+    FOR r IN (SELECT NVL(BRANCH_LCY,'(NULL)') s, COUNT(*) nb
+              FROM FBTM_BRANCH_INFO GROUP BY BRANCH_LCY
+              ORDER BY nb DESC) LOOP
+        print_kv('  BRANCH_LCY = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.3 FBTB_USER — utilisateurs FCC front-end
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.3 FBTB_USER]');
+    safe_count('FBTB_USER', '  Total users FCC');
+    FOR r IN (SELECT NVL(USER_STATUS,'(NULL)') s, COUNT(*) nb
+              FROM FBTB_USER GROUP BY USER_STATUS
+              ORDER BY nb DESC) LOOP
+        print_kv('  USER_STATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+    FOR r IN (SELECT NVL(LOGINSTATUS,'(NULL)') s, COUNT(*) nb
+              FROM FBTB_USER GROUP BY LOGINSTATUS
+              ORDER BY nb DESC) LOOP
+        print_kv('  LOGINSTATUS = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.3.b Users avec MAXTXNAMT/MAXAUTHAMT élevés
+    SELECT COUNT(*) INTO v_count FROM FBTB_USER
+    WHERE MAXTXNAMT IS NOT NULL AND MAXTXNAMT > 0;
+    print_kv('  Users avec MAXTXNAMT défini', TO_CHAR(v_count));
+
+    FOR r IN (
+        SELECT * FROM (
+            SELECT USERID, LIMITCCY,
+                   MAXTXNAMT, MAXAUTHAMT, USERTXNLIMIT
+            FROM FBTB_USER
+            WHERE MAXAUTHAMT IS NOT NULL
+            ORDER BY MAXAUTHAMT DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.USERID,
+                 r.LIMITCCY || ' MAXAUTH=' || TO_CHAR(r.MAXAUTHAMT) ||
+                 ' MAXTXN=' || TO_CHAR(r.MAXTXNAMT));
+    END LOOP;
+
+    -- 19.4 GETM_FACILITY — lignes de crédit
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.4 GETM_FACILITY — facilités]');
+    safe_count('GETM_FACILITY', '  Total facilités');
+    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE AUTH_STAT='A';
+    print_kv('  Autorisées', TO_CHAR(v_count));
+
+    -- 19.4.b CATEGORY
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CATEGORY,'(NULL)') s, COUNT(*) nb
+            FROM GETM_FACILITY GROUP BY CATEGORY
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  CATEGORY = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.4.c Agrégats montants
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.4.c Agrégats GETM_FACILITY]');
+    SELECT NVL(SUM(APPROVED_AMT),0) INTO v_num FROM GETM_FACILITY;
+    print_kv('  Σ APPROVED_AMT', TO_CHAR(v_num));
+    SELECT NVL(SUM(AVAILABLE_AMOUNT),0) INTO v_num FROM GETM_FACILITY;
+    print_kv('  Σ AVAILABLE_AMOUNT', TO_CHAR(v_num));
+    SELECT NVL(SUM(AMOUNT_UTILISED_TODAY),0) INTO v_num FROM GETM_FACILITY;
+    print_kv('  Σ AMOUNT_UTILISED_TODAY', TO_CHAR(v_num));
+    SELECT NVL(SUM(BLOCK_AMOUNT),0) INTO v_num FROM GETM_FACILITY;
+    print_kv('  Σ BLOCK_AMOUNT', TO_CHAR(v_num));
+
+    -- 19.4.d Taux d'utilisation moyen
+    FOR r IN (
+        SELECT ROUND(AVG(CASE WHEN APPROVED_AMT > 0
+                              THEN (APPROVED_AMT - AVAILABLE_AMOUNT) / APPROVED_AMT * 100
+                              END),2) pct_util,
+               COUNT(*) nb
+        FROM GETM_FACILITY
+        WHERE APPROVED_AMT IS NOT NULL AND APPROVED_AMT > 0
+          AND AVAILABLE_AMOUNT IS NOT NULL
+    ) LOOP
+        print_kv('  Taux d''utilisation moyen (%)', TO_CHAR(r.pct_util) || ' (sur ' || TO_CHAR(r.nb) || ' lignes)');
+    END LOOP;
+
+    -- 19.4.e Lignes expirées mais encore AVAILABLE
+    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY
+    WHERE LINE_EXPIRY_DATE IS NOT NULL
+      AND LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+      AND NVL(AVAILABLE_AMOUNT,0) > 0;
+    print_kv('  Lignes expirées avec AVAILABLE > 0 (leak RA)', TO_CHAR(v_count));
+
+    -- 19.4.f Lignes sur-utilisées (utilisation > approuvé)
+    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY
+    WHERE APPROVED_AMT IS NOT NULL AND AVAILABLE_AMOUNT IS NOT NULL
+      AND (APPROVED_AMT - AVAILABLE_AMOUNT) > APPROVED_AMT
+      AND APPROVED_AMT > 0;
+    print_kv('  Lignes dépassées (util > approuvé)', TO_CHAR(v_count));
+
+    -- 19.4.g Overdraft historique (DATE_OF_LAST_OD récent)
+    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY
+    WHERE DATE_OF_LAST_OD IS NOT NULL
+      AND DATE_OF_LAST_OD >= TRUNC(SYSDATE) - 90;
+    print_kv('  Lignes avec OD dans les 90 derniers jours', TO_CHAR(v_count));
+
+    -- 19.4.h Top 10 facilités par APPROVED_AMT
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.4.h Top 10 facilités par APPROVED_AMT]');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT LINE_CODE, CATEGORY,
+                   APPROVED_AMT, AVAILABLE_AMOUNT, LINE_EXPIRY_DATE
+            FROM GETM_FACILITY
+            WHERE APPROVED_AMT IS NOT NULL
+            ORDER BY APPROVED_AMT DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.LINE_CODE,
+                 'appr=' || TO_CHAR(r.APPROVED_AMT) ||
+                 ' avail=' || TO_CHAR(r.AVAILABLE_AMOUNT) ||
+                 ' expiry=' || TO_CHAR(r.LINE_EXPIRY_DATE,'YYYY-MM-DD'));
+    END LOOP;
+
+    -- 19.5 STTM_TRN_CODE — codes transaction & paramétrage IC
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.5 STTM_TRN_CODE]');
+    safe_count('STTM_TRN_CODE', '  Total codes tran');
+
+    FOR r IN (SELECT NVL(COMPONENT_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_TRN_CODE GROUP BY COMPONENT_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  COMPONENT_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.5.b Flags IC (inclusion dans calcul intérêt / turnover)
+    FOR r IN (
+        SELECT 'IC_BAL_INCLUSION=Y'   lbl, COUNT(*) nb FROM STTM_TRN_CODE WHERE IC_BAL_INCLUSION='Y'   UNION ALL
+        SELECT 'IC_BAL_INCLUSION=N',         COUNT(*)    FROM STTM_TRN_CODE WHERE IC_BAL_INCLUSION='N'   UNION ALL
+        SELECT 'IC_TOVER_INCLUSION=Y',       COUNT(*)    FROM STTM_TRN_CODE WHERE IC_TOVER_INCLUSION='Y' UNION ALL
+        SELECT 'IC_TOVER_INCLUSION=N',       COUNT(*)    FROM STTM_TRN_CODE WHERE IC_TOVER_INCLUSION='N' UNION ALL
+        SELECT 'IC_PENALTY=Y',               COUNT(*)    FROM STTM_TRN_CODE WHERE IC_PENALTY='Y'        UNION ALL
+        SELECT 'EXEMPT_ADV_INTEREST=Y',      COUNT(*)    FROM STTM_TRN_CODE WHERE EXEMPT_ADV_INTEREST='Y' UNION ALL
+        SELECT 'AML_MONITORING=Y',           COUNT(*)    FROM STTM_TRN_CODE WHERE AML_MONITORING='Y'
+    ) LOOP
+        print_kv('  ' || r.lbl, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.5.c Codes tran exemptés d'intérêt (impact RA direct)
+    SELECT COUNT(*) INTO v_count FROM STTM_TRN_CODE
+    WHERE EXEMPT_ADV_INTEREST='Y' AND AUTH_STAT='A';
+    print_kv('  Codes tran exemptés intérêt (autorisés)', TO_CHAR(v_count));
+
+    -- 19.6 CATM_CHECK_BOOK — chéquiers
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.6 CATM_CHECK_BOOK]');
+    safe_count('CATM_CHECK_BOOK', '  Total chéquiers');
+    SELECT COUNT(*) INTO v_count FROM CATM_CHECK_BOOK WHERE AUTH_STAT='A';
+    print_kv('  Autorisés', TO_CHAR(v_count));
+    SELECT NVL(SUM(CHECK_LEAVES),0) INTO v_num FROM CATM_CHECK_BOOK;
+    print_kv('  Σ CHECK_LEAVES émises', TO_CHAR(v_num));
+
+    -- 19.6.b Par CHEQUE_BOOK_TYPE
+    FOR r IN (
+        SELECT * FROM (
+            SELECT NVL(CHEQUE_BOOK_TYPE,'(NULL)') s, COUNT(*) nb,
+                   NVL(SUM(CHECK_LEAVES),0) lv
+            FROM CATM_CHECK_BOOK GROUP BY CHEQUE_BOOK_TYPE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  ' || r.s, 'nb=' || TO_CHAR(r.nb) || ' | leaves=' || TO_CHAR(r.lv));
+    END LOOP;
+
+    -- 19.6.c Delivery status
+    FOR r IN (SELECT NVL(CHQBOOK_DELIVERD,'(NULL)') s, COUNT(*) nb
+              FROM CATM_CHECK_BOOK GROUP BY CHQBOOK_DELIVERD
+              ORDER BY nb DESC) LOOP
+        print_kv('  DELIVERED = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.6.d Commandés mais non livrés depuis > 60j
+    SELECT COUNT(*) INTO v_count FROM CATM_CHECK_BOOK
+    WHERE NVL(CHQBOOK_DELIVERD,'N')='N'
+      AND ORDER_DATE IS NOT NULL
+      AND ORDER_DATE < TRUNC(SYSDATE) - 60;
+    print_kv('  Non livrés > 60j depuis commande', TO_CHAR(v_count));
+
+    -- 19.6.e Volume par année d'émission
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.6.e Chéquiers émis par année]');
+    FOR r IN (
+        SELECT TO_CHAR(ISSUE_DATE,'YYYY') yr, COUNT(*) nb
+        FROM CATM_CHECK_BOOK
+        WHERE ISSUE_DATE IS NOT NULL
+        GROUP BY TO_CHAR(ISSUE_DATE,'YYYY')
+        ORDER BY yr DESC
+    ) LOOP
+        print_kv('  ' || r.yr, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.7 STTM_ACCOUNT_CLASS — référentiel classes
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [19.7 STTM_ACCOUNT_CLASS]');
+    safe_count('STTM_ACCOUNT_CLASS', '  Total classes');
+    SELECT COUNT(*) INTO v_count FROM STTM_ACCOUNT_CLASS WHERE AUTH_STAT='A';
+    print_kv('  Autorisées', TO_CHAR(v_count));
+    FOR r IN (SELECT NVL(AC_CLASS_TYPE,'(NULL)') s, COUNT(*) nb
+              FROM STTM_ACCOUNT_CLASS GROUP BY AC_CLASS_TYPE
+              ORDER BY nb DESC) LOOP
+        print_kv('  AC_CLASS_TYPE = ' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 19.7.b Classes avec END_DATE passée mais encore référencées
+    SELECT COUNT(DISTINCT a.ACCOUNT_CLASS) INTO v_count FROM STTM_CUST_ACCOUNT a
+    JOIN STTM_ACCOUNT_CLASS c ON c.ACCOUNT_CODE = a.ACCOUNT_CLASS
+    WHERE c.END_DATE IS NOT NULL
+      AND c.END_DATE < TRUNC(SYSDATE)
+      AND NVL(a.RECORD_STAT,'O')='O';
+    print_kv('  Classes END_DATE passée utilisées par cptes ouverts', TO_CHAR(v_count));
+
 END;
 /

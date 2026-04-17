@@ -1357,3 +1357,100 @@ Ces sections suivront strictement la même grille §7.0.
 - Les fusions / éclatements de classes entre versions du PCEC ne sont pas gérés automatiquement : la version COBAC R-98/01 (1998) fait foi jusqu'à décision contraire documentée.
 
 ---
+
+## 10. Risques, hypothèses et limites
+
+### 10.1 Cartographie des risques du livrable
+
+| Id | Risque | Probabilité | Impact | Mitigation |
+|---|---|:-:|:-:|---|
+| **R-01** | Script qui écrit en base par erreur | Faible | Critique | NFR-20 (interdiction SQL), revue de code systématique, compte SELECT-only. |
+| **R-02** | Temps d'exécution > fenêtre d'exploitation | Moyenne | Élevé | Modes `SUMMARY`/`FULL`/`DEEP`, `p_top_n`, filtrage précoce, exécution sur standby/DWH. |
+| **R-03** | Faux positifs massifs (mauvaise interprétation d'un flag) | Moyenne | Élevé | Validation par exemple sur périmètre restreint, cross-check avec l'exploration, seuil de matérialité. |
+| **R-04** | Faux négatifs (contrôle qui ne détecte pas son cas cible) | Moyenne | Élevé | Tests `§11` sur jeux de données connus, revue par Audit Interne. |
+| **R-05** | Divergence de schéma entre environnements (DEV/UAT/PROD) | Moyenne | Moyen | Vérification FR-07 des tables/colonnes critiques au démarrage, warning non bloquant. |
+| **R-06** | Fuite d'information PII dans le rapport | Faible | Élevé | `p_mask_pii = 'Y'` par défaut, règles de diffusion du rapport, archivage sécurisé. |
+| **R-07** | Interprétation erronée du mapping PCEC | Moyenne | Moyen | Publication de la convention en §9.5, validation par Contrôle de Gestion. |
+| **R-08** | Évolution des tables FCUBS (upgrade patch) qui casse le script | Faible | Moyen | Bannière de version Oracle/FCUBS, revue après chaque upgrade majeur. |
+| **R-09** | Dépendance à un tarif / taux de référence non documenté | Élevée | Moyen | Hypothèses explicitement déclarées en tête et en `KNOWN LIMITATIONS`. |
+| **R-10** | Exécution simultanée perturbant l'intégrité de la photo | Faible | Moyen | Lancement recommandé en dehors des batchs de nuit / après la clôture métier. |
+| **R-11** | Surcharge I/O sur instance PROD | Moyenne | Moyen | Privilégier une réplique ; sinon lancer en heures creuses, mode `SUMMARY` d'abord. |
+| **R-12** | Version Oracle obsolète non supportée | Faible | Élevé | NFR-30 : vérification explicite ; warning si < 11gR2. |
+
+### 10.2 Hypothèses structurantes
+
+Toutes les hypothèses DOIVENT être **listées** en tête de rapport (`ASSUMPTIONS` dans le bloc PARAMETERS ou dédié).
+
+| Id | Hypothèse | Source |
+|---|---|---|
+| **A-01** | Oracle 11gR2 ou supérieur. | NFR-30 |
+| **A-02** | Droits SELECT sur tous les schémas FCUBS nécessaires. | BR-11 |
+| **A-03** | `fcubs.csv` est la **source de vérité** des colonnes. | `bonnes_pratiques.md` §5 |
+| **A-04** | La photo comptable est stable pendant l'exécution (pas de DML concurrent massif sur la période). | R-10 |
+| **A-05** | La devise locale est `XAF` (zone CEMAC) sauf paramétrage contraire. | §2 |
+| **A-06** | Le taux d'intérêt « overdraft standard » utilisé pour l'estimation S01/S02 est un paramètre dérivé ou une valeur hypothèse documentée. | S01 |
+| **A-07** | Les accruals IC sont liquidés périodiquement selon un cycle paramétré produit par produit. | S14 |
+| **A-08** | Le mapping GL → PCEC utilise la convention de préfixe en `STDTB_BRANCH_PARAMETERS` ou équivalent, à défaut dérivation par premier chiffre du code. | §9.5 |
+| **A-09** | Les utilisateurs techniques (`SYSTEM`, `SYS_BATCH_USER`, etc.) sont **exclus** des contrôles SoD (S21–S23). | Convention |
+| **A-10** | Les seuils de matérialité par défaut (`100k`, `1M`, `10M` LCY) sont provisoires et seront calibrés avec la Direction Financière. | §6.2.6 |
+
+### 10.3 Limites connues du périmètre v1
+
+- **L-01** — **Pas** de contrôle temps réel : le script opère sur une photo. Les opérations intraday non encore déversées ne sont pas auditées.
+- **L-02** — **Pas** de persistance des findings : la comparaison inter-runs est manuelle (`diff` sur rapports). Une v2 pourrait créer une table `RA_FINDINGS_HISTORY`.
+- **L-03** — **Pas** d'audit de configuration applicative (paramétrage produit, grille des frais) en profondeur : seuls les effets (données) sont contrôlés.
+- **L-04** — **Pas** de contrôle hors bilan (classe 9 PCEC) en v1.
+- **L-05** — **Pas** d'audit du module monétique / mobile money / trésorerie non FCUBS.
+- **L-06** — Les **impacts monétaires** sont des **estimations** ; elles dépendent d'hypothèses (taux, durée, etc.) explicitées dans chaque contrôle.
+- **L-07** — Les **libellés** COBAC officiels sont rattachés par classe/compte principal ; la lecture ultra-fine (sous-compte 5-6 chiffres) reste à la charge de l'utilisateur.
+- **L-08** — La **localisation** est verrouillée à `EN` en v1 (NFR-60).
+- **L-09** — Le script ne fait **pas** de provisionnement théorique (IFRS 9 / OHADA) ; cela relève d'un autre livrable.
+- **L-10** — Les **exceptions de la politique interne** (waivers approuvés par instance) ne sont pas détectables sans une table de référence des approbations, qui sera adressée en §7.Z si présente.
+
+### 10.4 Dépendances externes (organisationnelles et techniques)
+
+| Dépendance | Responsable | Criticité |
+|---|---|---|
+| Accès lecture sur les schémas FCUBS PROD ou réplique | DSI / DBA | Bloquant |
+| Validation des seuils de matérialité | Direction Financière | Bloquant pour interprétation |
+| Convention de mapping GL → PCEC | Contrôle de Gestion | Bloquant pour §9 |
+| Liste des GL sensibles et GL suspense | Comptabilité / Audit | Bloquant pour S17, S18 |
+| Politique de waiver et grille des frais | Commercial / Risk | Souhaitable pour S04, S10, S11 |
+| Liste des utilisateurs techniques à exclure | Sécurité SI | Souhaitable pour S21–S23 |
+| Taux d'intérêt de pénalité standard | Direction Financière | Souhaitable pour S01, S02, S06 |
+
+Une **check-list de pré-exécution** reprend ces dépendances et est validée avant chaque run officiel (voir §12).
+
+### 10.5 Contraintes réglementaires et éthiques
+
+- Le rapport peut contenir des **données à caractère personnel** (numéros de compte, identifiants client) ; il DOIT être diffusé selon la politique interne de sécurité de l'information et selon les règles CEMAC applicables à la protection des données.
+- Les **constats** portés à la connaissance du management doivent être traités **sans diffusion externe** avant analyse : les findings sont des **hypothèses à investiguer**, pas des conclusions définitives.
+- Tout usage à des fins disciplinaires d'un constat DOIT faire l'objet d'une **validation contradictoire** avec les parties concernées (utilisateur listé dans un finding SoD, par exemple).
+
+### 10.6 Plan de maîtrise des risques (synthèse)
+
+| Niveau de risque | Actions-clés |
+|---|---|
+| **R-01 / R-12 (critiques)** | Revue de code systématique, CI manuelle par pair, run contrôlé sur UAT avant PROD. |
+| **R-02 / R-04 (élevés)** | Tests (§11), mesure de durée `[PERF]`, mode `SUMMARY` en priorité. |
+| **R-03 / R-09 (élevés)** | Calibration progressive des seuils, dialogue Direction Financière. |
+| **R-05 / R-08 / R-11 (moyens)** | Vérifications dictionnaire (FR-07), fenêtre d'exécution, observation des temps. |
+| **R-06 (élevé mais peu probable)** | Masquage PII activé par défaut, archivage contrôlé. |
+| **R-07 / R-10 (moyens)** | Revue Contrôle de Gestion ; exécution hors heures sensibles. |
+
+### 10.7 Registre des exceptions acceptées
+
+Toute **dérogation** à une règle du §5 (NFR) ou §7 (contrôles) DOIT être consignée dans un registre tenu en annexe du présent BRD (section future, ou fichier séparé `exceptions_register.md`), avec :
+- date ;
+- objet ;
+- justification ;
+- porteur ;
+- durée d'applicabilité ;
+- validation (visa).
+
+Aucune exception n'est admise pour :
+- NFR-20 (lecture seule),
+- NFR-23 (pas de SQL dynamique non borné),
+- BR-11 (zéro modification de données).
+
+---

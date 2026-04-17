@@ -115,6 +115,7 @@ DECLARE
     p_materiality_critical_lcy  NUMBER := 10000000;     -- Promotion automatique en CRITICAL.
     p_min_days_overdue          NUMBER := 30;
     p_min_days_dormant          NUMBER := 180;
+    p_fx_spread_bps             NUMBER := 10;    -- Tolerance FX spread (bps) S15.
 
     -- --------------------------------------------------------------
     -- 1.8 Mode d'execution et verbosite
@@ -3218,6 +3219,218 @@ BEGIN
                 || SUBSTR(SQLERRM, 1, 300));
             BEGIN
                 print_section_footer('S14', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
+    -- =================================================================
+    -- S15 -- FX trade / cash deal revenue leakage (spread not applied)
+    -- =================================================================
+    -- [F-140] FX contracts with DEAL_RATE within +/- p_fx_spread_bps
+    --         bps of MID_RATE (spread nul ou insuffisant).
+    --         Impact LCY ~= |DEAL_RATE - MID_RATE| * notional_LCY.
+    -- [F-141] FX fees waived without justification (WAIVE flags on
+    --         ICTB_LIQ_DETAILS linked to FX reference, or 0-amount
+    --         charge components on FX contracts).
+    -- PCEC/7 (produits de change), PCEC/706 (frais de change).
+    DECLARE
+        l_cur        SYS_REFCURSOR;
+        l_sql        VARCHAR2(4000);
+        l_n_140      PLS_INTEGER := 0;
+        l_n_141      PLS_INTEGER := 0;
+        l_ref        VARCHAR2(30);
+        l_cpty       VARCHAR2(30);
+        l_ccy1       VARCHAR2(10);
+        l_ccy2       VARCHAR2(10);
+        l_deal_rate  NUMBER;
+        l_mid_rate   NUMBER;
+        l_notional   NUMBER;
+        l_impact     NUMBER;
+        l_bps        NUMBER;
+        l_user       VARCHAR2(30);
+        l_fx_avail   BOOLEAN := TRUE;
+        l_sev        VARCHAR2(10);
+        l_bps_thr    NUMBER;
+    BEGIN
+        IF NOT f_section_enabled('S15') THEN
+            log_info('Section S15 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S15',
+                'FX trade / cash deal revenue leakage (spread control)');
+
+            l_bps_thr := NVL(p_fx_spread_bps, 10);
+            print_kv('FX spread tolerance (bps)', TO_CHAR(l_bps_thr));
+
+            -- Probe FX module presence ---------------------------------
+            BEGIN
+                EXECUTE IMMEDIATE
+                    'SELECT COUNT(*) FROM FXTB_CONTRACT_MASTER '
+                 || ' WHERE ROWNUM <= 0'
+                    INTO l_n_140;
+                l_n_140 := 0;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    l_fx_avail := FALSE;
+                    log_warn('S15 skipped: FXTB_CONTRACT_MASTER not '
+                        || 'available (' || SUBSTR(SQLERRM,1,120)
+                        || ').');
+            END;
+
+            IF l_fx_avail THEN
+                -- [F-140] Deal rate vs mid-market rate -----------------
+                l_sql :=
+                    'SELECT f.CONTRACT_REF_NO AS REF, '
+                 || '       NVL(f.COUNTERPARTY, ''?'') AS CPTY, '
+                 || '       f.CCY1, f.CCY2, '
+                 || '       f.EXCHANGE_RATE AS DEAL_RATE, '
+                 || '       NVL(r.MID_RATE, f.EXCHANGE_RATE) AS MID_RATE, '
+                 || '       NVL(f.AMOUNT_CCY1, f.BOUGHT_AMOUNT) AS NOTIONAL, '
+                 || '       NVL(f.MAKER_ID, f.USER_ID) AS USR '
+                 || '  FROM FXTB_CONTRACT_MASTER f '
+                 || '  LEFT JOIN CYTB_RATES r '
+                 || '    ON r.CCY1 = f.CCY1 '
+                 || '   AND r.CCY2 = f.CCY2 '
+                 || '   AND r.RATE_DATE = TRUNC(f.BOOKING_DATE) '
+                 || ' WHERE TRUNC(f.BOOKING_DATE) BETWEEN :d1 AND :d2 '
+                 || '   AND (:p_branch IS NULL '
+                 || '        OR f.BRANCH_CODE = :p_branch) '
+                 || '   AND f.EXCHANGE_RATE IS NOT NULL '
+                 || '   AND NVL(r.MID_RATE, f.EXCHANGE_RATE) <> 0 '
+                 || '   AND ABS(f.EXCHANGE_RATE - NVL(r.MID_RATE,0)) '
+                 || '       * 10000 / NULLIF(NVL(r.MID_RATE,1),0) '
+                 || '       <= :bps '
+                 || ' ORDER BY NVL(f.AMOUNT_CCY1, f.BOUGHT_AMOUNT) DESC';
+
+                BEGIN
+                    OPEN l_cur FOR l_sql USING
+                        v_date_from, v_date_to,
+                        p_branch_code, p_branch_code,
+                        l_bps_thr;
+                    LOOP
+                        FETCH l_cur
+                         INTO l_ref, l_cpty, l_ccy1, l_ccy2,
+                              l_deal_rate, l_mid_rate, l_notional,
+                              l_user;
+                        EXIT WHEN l_cur%NOTFOUND
+                               OR l_n_140 >= NVL(p_top_n, 50);
+
+                        IF NVL(l_mid_rate, 0) = 0 THEN
+                            l_bps := 0;
+                        ELSE
+                            l_bps := ABS(l_deal_rate - l_mid_rate)
+                                   * 10000 / l_mid_rate;
+                        END IF;
+
+                        l_impact := ABS(NVL(l_deal_rate, 0)
+                                      - NVL(l_mid_rate, 0))
+                                  * ABS(NVL(l_notional, 0));
+
+                        IF l_impact < NVL(p_materiality_lcy, 0) THEN
+                            NULL;
+                        ELSE
+                            l_sev := f_promote_severity('MEDIUM', l_impact);
+                            IF l_impact
+                               >= NVL(p_materiality_impact_lcy, 0) THEN
+                                IF l_sev = 'MEDIUM' THEN
+                                    l_sev := 'HIGH';
+                                END IF;
+                            END IF;
+
+                            print_finding(
+                                p_section    => 'S15',
+                                p_code       => 'RA-S15-F140',
+                                p_severity   => l_sev,
+                                p_message    => 'FX spread below tolerance: '
+                                             || l_ccy1 || '/' || l_ccy2
+                                             || ' deal='
+                                             || TO_CHAR(l_deal_rate,
+                                                    'FM999999990.000000')
+                                             || ' mid='
+                                             || TO_CHAR(l_mid_rate,
+                                                    'FM999999990.000000')
+                                             || ' bps='
+                                             || TO_CHAR(ROUND(l_bps, 2)),
+                                p_entity     => l_ref,
+                                p_impact_lcy => l_impact,
+                                p_evidence   => 'CPTY='
+                                             || f_mask_pii(l_cpty)
+                                             || ' USR='
+                                             || f_mask_pii(l_user)
+                                             || ' NOTIONAL='
+                                             || f_fmt_lcy(l_notional)
+                            );
+                            l_n_140 := l_n_140 + 1;
+                        END IF;
+                    END LOOP;
+                    CLOSE l_cur;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        IF l_cur%ISOPEN THEN
+                            CLOSE l_cur;
+                        END IF;
+                        log_warn('S15 F-140 unavailable (FXTB/CYTB): '
+                            || SUBSTR(SQLERRM, 1, 120));
+                END;
+
+                -- [F-141] FX fees waived / zero on FX contracts ---------
+                l_sql :=
+                    'SELECT d.REFERENCE_NO AS REF, '
+                 || '       NVL(d.COMPONENT,''?'') AS COMP, '
+                 || '       NVL(d.USER_ID, ''?'') AS USR, '
+                 || '       NVL(d.AMOUNT, 0) AS AMT '
+                 || '  FROM ICTB_LIQ_DETAILS d '
+                 || ' WHERE NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) '
+                 || '       BETWEEN :d1 AND :d2 '
+                 || '   AND UPPER(NVL(d.MODULE, '''')) IN (''FX'',''FT'') '
+                 || '   AND ( NVL(d.AMOUNT,0) = 0 '
+                 || '         OR UPPER(NVL(d.WAIVE_FLAG, ''N'')) = ''Y'' ) '
+                 || ' ORDER BY d.LIQUIDATION_DATE DESC';
+
+                BEGIN
+                    OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                    LOOP
+                        FETCH l_cur
+                         INTO l_ref, l_ccy1, l_user, l_impact;
+                        EXIT WHEN l_cur%NOTFOUND
+                               OR l_n_141 >= NVL(p_top_n, 50);
+
+                        print_finding(
+                            p_section    => 'S15',
+                            p_code       => 'RA-S15-F141',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'FX fee waived or zero: comp='
+                                         || l_ccy1
+                                         || ' amt='
+                                         || f_fmt_lcy(l_impact),
+                            p_entity     => l_ref,
+                            p_impact_lcy => NULL,
+                            p_evidence   => 'USR=' || f_mask_pii(l_user)
+                        );
+                        l_n_141 := l_n_141 + 1;
+                    END LOOP;
+                    CLOSE l_cur;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        IF l_cur%ISOPEN THEN
+                            CLOSE l_cur;
+                        END IF;
+                        log_warn('S15 F-141 unavailable (FX fee scan): '
+                            || SUBSTR(SQLERRM, 1, 120));
+                END;
+            END IF;
+
+            print_kv('F-140 findings (spread nul)',  TO_CHAR(l_n_140));
+            print_kv('F-141 findings (fees waived)', TO_CHAR(l_n_141));
+
+            print_section_footer('S15', l_n_140 + l_n_141);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S15', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S15', 0);
             EXCEPTION
                 WHEN OTHERS THEN NULL;
             END;

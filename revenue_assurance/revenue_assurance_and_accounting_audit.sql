@@ -866,6 +866,159 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION 5 - KPIs GLOBAUX ET COUVERTURE PCEC
+    -- -----------------------------------------------------------------
+    -- 5.1 Volumetrie referentielle : nombre de clients, de comptes
+    --     client, de GL, d'agences et de devises actives.
+    -- 5.2 Activite comptable sur la fenetre [v_date_from ; v_date_to] :
+    --     nombre de lignes, somme des debits / credits en LCY, ecart
+    --     partie-double a titre indicatif (doit etre nul sur un
+    --     systeme sain - toute divergence est reprise dans le finding
+    --     principal de S16/S17).
+    -- 5.3 Couverture PCEC (COBAC R-98/01) : part des GL dont la
+    --     premiere decimale correspond a une classe CEMAC valide
+    --     (1 a 9). Un taux < 95 % declenche un [WARN] global.
+    -- 5.4 Breakdown par classe PCEC (1..9).
+    -- =================================================================
+    DECLARE
+        l_n_customer  NUMBER;
+        l_n_cust_acc  NUMBER;
+        l_n_gl        NUMBER;
+        l_n_branch    NUMBER;
+        l_n_ccy       NUMBER;
+        l_n_lines     NUMBER;
+        l_sum_dr      NUMBER;
+        l_sum_cr      NUMBER;
+        l_pcec_total  NUMBER;
+        l_pcec_valid  NUMBER;
+        l_coverage    NUMBER;
+        l_cur         SYS_REFCURSOR;
+        l_class       VARCHAR2(1);
+        l_class_n     NUMBER;
+    BEGIN
+        IF NOT f_section_enabled('KPI') THEN
+            log_info('Section KPI skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('KPI', 'Global KPIs & PCEC coverage');
+
+            -- 5.1 Volumetrie referentielle -----------------------------
+            l_n_customer := safe_count('KPI', 'SELECT COUNT(*) FROM STTM_CUSTOMER');
+            l_n_cust_acc := safe_count('KPI', 'SELECT COUNT(*) FROM STTM_CUST_ACCOUNT');
+            l_n_gl       := safe_count('KPI', 'SELECT COUNT(*) FROM GLTM_MASTER');
+            l_n_branch   := safe_count('KPI', 'SELECT COUNT(*) FROM STTM_BRANCH');
+            l_n_ccy      := safe_count('KPI', 'SELECT COUNT(*) FROM STTM_CURRENCY');
+
+            print_kv('Customers #',         NVL(TO_CHAR(l_n_customer), 'N/A'));
+            print_kv('Customer accounts #', NVL(TO_CHAR(l_n_cust_acc), 'N/A'));
+            print_kv('GL accounts #',       NVL(TO_CHAR(l_n_gl),       'N/A'));
+            print_kv('Branches #',          NVL(TO_CHAR(l_n_branch),   'N/A'));
+            print_kv('Currencies #',        NVL(TO_CHAR(l_n_ccy),      'N/A'));
+
+            -- 5.2 Activite comptable sur la periode --------------------
+            BEGIN
+                EXECUTE IMMEDIATE
+                    'SELECT COUNT(*), '
+                    || ' NVL(SUM(DR_AMOUNT_LCY),0), '
+                    || ' NVL(SUM(CR_AMOUNT_LCY),0) '
+                    || ' FROM ACTB_HISTORY '
+                    || ' WHERE TRN_DT BETWEEN :1 AND :2'
+                    INTO l_n_lines, l_sum_dr, l_sum_cr
+                    USING v_date_from, v_date_to;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    log_error('KPI', 'Journal scan failed: ' || SUBSTR(SQLERRM, 1, 200));
+                    l_n_lines := NULL; l_sum_dr := NULL; l_sum_cr := NULL;
+            END;
+
+            print_kv('Journal period',  f_fmt_ts(v_date_from) || ' -> ' || f_fmt_ts(v_date_to));
+            print_kv('Journal lines #', NVL(TO_CHAR(l_n_lines), 'N/A'));
+            print_kv('Sum DR LCY',      f_fmt_lcy(l_sum_dr));
+            print_kv('Sum CR LCY',      f_fmt_lcy(l_sum_cr));
+            print_kv('Partie double DR-CR',
+                CASE
+                    WHEN l_sum_dr IS NULL OR l_sum_cr IS NULL THEN 'N/A'
+                    ELSE f_fmt_lcy(l_sum_dr - l_sum_cr)
+                END);
+
+            IF l_sum_dr IS NOT NULL AND l_sum_cr IS NOT NULL
+               AND ABS(l_sum_dr - l_sum_cr) > NVL(p_materiality_lcy, 0) THEN
+                log_warn('Global DR vs CR mismatch on period : '
+                    || f_fmt_lcy(l_sum_dr - l_sum_cr) || ' LCY (see S16).');
+            END IF;
+
+            -- 5.3 Couverture PCEC --------------------------------------
+            BEGIN
+                EXECUTE IMMEDIATE
+                    'SELECT COUNT(*), '
+                    || ' SUM(CASE WHEN SUBSTR(GL_CODE,1,1) '
+                    || '         IN (''1'',''2'',''3'',''4'',''5'',''6'',''7'',''8'',''9'') '
+                    || '    THEN 1 ELSE 0 END) '
+                    || ' FROM GLTM_MASTER'
+                    INTO l_pcec_total, l_pcec_valid;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    log_error('KPI', 'PCEC coverage scan failed: ' || SUBSTR(SQLERRM, 1, 200));
+                    l_pcec_total := NULL; l_pcec_valid := NULL;
+            END;
+
+            IF NVL(l_pcec_total, 0) > 0 THEN
+                l_coverage := ROUND(100 * NVL(l_pcec_valid, 0) / NULLIF(l_pcec_total, 0), 2);
+            ELSE
+                l_coverage := NULL;
+            END IF;
+
+            print_kv('PCEC GL total',      NVL(TO_CHAR(l_pcec_total), 'N/A'));
+            print_kv('PCEC GL CEMAC-like', NVL(TO_CHAR(l_pcec_valid), 'N/A'));
+            print_kv('PCEC coverage %',
+                CASE WHEN l_coverage IS NULL THEN 'N/A'
+                     ELSE TO_CHAR(l_coverage, 'FM990.00',
+                                  'NLS_NUMERIC_CHARACTERS=''.,''')
+                END);
+
+            IF l_coverage IS NOT NULL AND l_coverage < 95 THEN
+                log_warn('PCEC coverage below 95% ('
+                    || TO_CHAR(l_coverage, 'FM990.00',
+                               'NLS_NUMERIC_CHARACTERS=''.,''')
+                    || '%) - some GL codes do not follow COBAC R-98/01.');
+            END IF;
+
+            -- 5.4 Breakdown par classe PCEC ----------------------------
+            print_line('PCEC class breakdown (COBAC R-98/01 classes 1..9):');
+            BEGIN
+                OPEN l_cur FOR
+                    'SELECT SUBSTR(GL_CODE,1,1) AS CLASS_ID, COUNT(*) AS N '
+                    || ' FROM GLTM_MASTER '
+                    || ' WHERE SUBSTR(GL_CODE,1,1) BETWEEN ''1'' AND ''9'' '
+                    || ' GROUP BY SUBSTR(GL_CODE,1,1) '
+                    || ' ORDER BY 1';
+                LOOP
+                    FETCH l_cur INTO l_class, l_class_n;
+                    EXIT WHEN l_cur%NOTFOUND;
+                    print_kv('  Class ' || l_class,
+                        TO_CHAR(l_class_n) || ' GL accounts');
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('KPI', 'PCEC breakdown failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_section_footer('KPI', 0);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('KPI', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('KPI', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

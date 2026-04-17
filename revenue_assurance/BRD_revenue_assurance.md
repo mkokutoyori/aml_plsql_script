@@ -814,3 +814,77 @@ Chaque contrôle est décrit par :
 - **Fondement exploration** — colonne `WAIVE` confirmée sur `CLTB_ACCOUNT_COMPONENTS` (correction d'erreur passée lors du debug).
 
 ---
+
+### 7.C — Revenue Assurance : SI, IC, commissions et frais
+
+#### S11 — Standing Instructions without `APPLY_CHG_*` flags set
+
+- **Findings** : `[F-100]` SI contracts without `APPLY_CHG_FLAG`/`APPLY_CHG_ON_REJECT`/`APPLY_CHG_ON_LIQ` properly set ; `[F-101]` SI products configured to apply charges but executions not generating any charge event.
+- **Objectif** — S'assurer que toutes les SI qui **devraient** facturer des frais (en exécution ou en cas de rejet) sont bien paramétrées pour le faire.
+- **Sources** — `SITB_CONTRACTS` (`APPLY_CHG_FLAG`, `APPLY_CHG_REJT`, `APPLY_CHG_ON_LIQ`, `PROD_CODE`, `EXEC_STATUS`), `SITB_EXEC_LOG`.
+- **Méthode** — Filtres sur flags NULL / `'N'` ; jointure aux logs d'exécution pour confirmer l'absence d'événement de charge.
+- **Sévérité** — HIGH si volume significatif, MEDIUM sinon.
+- **Impact LCY** — `nb_exécutions × frais_standard_par_SI` (frais par défaut à paramétrer en hypothèse ou par produit).
+- **Dimensions** — agence, produit SI, contrepartie.
+- **Recommandation** — Activer les flags, régulariser par facturation rétroactive si politique le permet.
+- **PCEC** — `PCEC/702` / `PCEC/706` (commissions / frais).
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_branch_*`, `p_product_list`.
+- **Fondement exploration** — **51 SI sans APPLY_CHG_\*** + **782 SI en échec avec `APPLY_CHG_REJT='N'`** (section 14).
+
+#### S12 — Expired or stalled Standing Instructions
+
+- **Findings** : `[F-110]` SI contracts with `LAST_EXEC_DATE < p_as_of_date - N days` while still active ; `[F-111]` SI with `EXEC_STATUS` in failure state over period ; `[F-112]` SI with `END_DATE < p_as_of_date` still active.
+- **Objectif** — Mettre en évidence les SI dormantes ou en échec répété, source de perte de commissions et de risque client.
+- **Sources** — `SITB_CONTRACTS`, `SITB_EXEC_LOG`.
+- **Méthode** — Comparaison dates + comptage des échecs par SI sur la période.
+- **Sévérité** — MEDIUM, HIGH si SI génère des frais potentiels > `p_materiality_impact_lcy`.
+- **Impact LCY** — Frais non perçus + risque d'avoir à justifier auprès du client final.
+- **Dimensions** — agence, produit, ancienneté du dernier échec.
+- **Recommandation** — Relance client / reparamétrage / clôture propre.
+- **PCEC** — `PCEC/702` / `PCEC/706`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_*`.
+- **Fondement exploration** — **281 SI expirées** (section 14).
+
+#### S13 — Charges posted but unlinked to expected account / product
+
+- **Findings** : `[F-120]` charge transactions without a corresponding product-rule match ; `[F-121]` charges with `CHARGE_AMT = 0` on products that should charge.
+- **Objectif** — Détecter les commissions **paramétrées mais non perçues** (ligne créée avec montant 0) ou **comptabilisées sans règle** (écart de paramétrage produit).
+- **Sources** — `CHTB_CONTRACT_MASTER` (si module CH utilisé), `ACTB_HISTORY` filtré par `TRN_CODE` de charge, paramétrage produit IC/CH.
+- **Méthode** — Jointure comptable ↔ paramétrage produit ; détection de montants nuls inattendus.
+- **Sévérité** — MEDIUM, HIGH si concentration sur un produit.
+- **Impact LCY** — Estimation sur base tarif officiel.
+- **Dimensions** — produit, agence, composante.
+- **Recommandation** — Vérifier politique tarifaire et batch IC.
+- **PCEC** — `PCEC/706` (commissions et frais divers).
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — à confirmer via mini-script d'exploration (tables CH / IC non systématiquement détaillées dans le rapport initial).
+
+#### S14 — Interest accruals not liquidated within expected cycle
+
+- **Findings** : `[F-130]` accruals older than `p_min_days_overdue` still in `ICTB_ACCRUALS_TEMP` ; `[F-131]` discrepancies between accrued amount and sum of liquidations since last reset.
+- **Objectif** — S'assurer que le moteur IC **liquide** ses accruals selon la périodicité attendue et qu'aucun écart d'arrondi significatif ne s'accumule.
+- **Sources** — `ICTB_ACCRUALS_TEMP`, `ICTB_LIQ_DETAILS`, paramétrage produit IC.
+- **Méthode** — Pour chaque couple compte/composante, comparer la date du plus ancien accrual non liquidé à la date attendue de liquidation ; sommer les écarts par agence.
+- **Sévérité** — HIGH si écart cumulé > `p_materiality_impact_lcy`.
+- **Impact LCY** — Somme des accruals non liquidés LCY.
+- **Dimensions** — agence, composante, produit.
+- **Recommandation** — Lancer une liquidation corrective, investiguer paramétrage produit.
+- **PCEC** — `PCEC/38` (régularisation) en attente, `PCEC/702`/`PCEC/602` à la liquidation.
+- **Paramètres** — `p_date_to`, `p_min_days_overdue`, `p_materiality_impact_lcy`.
+- **Fondement exploration** — accruals présents dans le rapport ; complétude à vérifier.
+
+#### S15 — FX trade / cash deal revenue leakage (spread not applied)
+
+- **Findings** : `[F-140]` FX contracts with rate within ±X bps of mid-market (spread nul) ; `[F-141]` FX fees waived without justification.
+- **Objectif** — Détecter les opérations de change clientèle pour lesquelles la **marge** (spread) n'a pas été appliquée conformément à la politique de pricing, ou pour lesquelles les frais ont été annulés.
+- **Sources** — `FXTB_CONTRACT_MASTER` (`DEAL_RATE`, `MID_RATE` si disponible), table de taux mid (`CYTB_RATES` ou équivalent).
+- **Méthode** — Comparaison `DEAL_RATE` vs `MID_RATE` ; tolérance en bps paramétrable.
+- **Sévérité** — HIGH pour contreparties corporate / FX volume > `p_materiality_impact_lcy`.
+- **Impact LCY** — `|DEAL_RATE − MID_RATE| × notional_converti_LCY`.
+- **Dimensions** — utilisateur, contrepartie, devise.
+- **Recommandation** — Revue grille de pricing, contrôles maker/checker.
+- **PCEC** — `PCEC/7` produits de change.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`, `p_ccy_list`.
+- **Fondement exploration** — à confirmer via mini-script d'exploration dédié FX si le module FX est effectivement utilisé.
+
+---

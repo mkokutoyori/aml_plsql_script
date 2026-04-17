@@ -25,6 +25,13 @@ DECLARE
     v_sep           VARCHAR2(120) := RPAD('=', 110, '=');
     v_subsep        VARCHAR2(120) := RPAD('-', 110, '-');
 
+    -- Collections pour resultats dynamiques (EXECUTE IMMEDIATE BULK COLLECT)
+    TYPE t_vc30_tab IS TABLE OF VARCHAR2(30);
+    TYPE t_num_tab  IS TABLE OF NUMBER;
+    v_maker_tab     t_vc30_tab;
+    v_count_tab     t_num_tab;
+    v_aux_tab       t_vc30_tab;
+
     -- -------------------------------------------------------
     -- Utilitaires d'affichage
     -- -------------------------------------------------------
@@ -2698,6 +2705,186 @@ BEGIN
     ) LOOP
         p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s) NEW+AUTH');
     END LOOP;
+
+    -- =========================================================
+    -- A-19. ACCES AUX DONNEES SENSIBLES (CLIENT / KYC / COMPTES / AML)
+    -- =========================================================
+    p_section('A-19. ACCES AUX DONNEES SENSIBLES — perimetre CIF/KYC/Comptes/AML');
+
+    p_sub('A-19.1 Roles ayant acces aux fonctions CIF (STDCIF, STDCUMNT, STDCUSAC)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE ROLE_FUNCTION IN ('STDCIF','STDCUMNT','STDCUSAC','STDCIFAD','STDCIFMT')
+        GROUP BY ROLE_FUNCTION
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('A-19.2 Roles ayant acces aux fonctions KYC (STDKYCMN, STDKYCRT, STDKYCCR)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE ROLE_FUNCTION LIKE 'ST%KYC%'
+           OR ROLE_FUNCTION LIKE '%KYC%'
+           OR ROLE_FUNCTION LIKE '%PEP%'
+        GROUP BY ROLE_FUNCTION
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('A-19.3 Roles ayant acces aux fonctions comptes (STDCUSAC, STDACCLS, STDACBRP)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE ROLE_FUNCTION LIKE 'STDAC%'
+           OR ROLE_FUNCTION LIKE 'STDCUSAC%'
+           OR ROLE_FUNCTION LIKE 'STDACCLS%'
+        GROUP BY ROLE_FUNCTION
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('A-19.4 Fonctions STATUT COMPTE / GEL / DORMANCE (dormancy, freeze, block, close)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE UPPER(ROLE_FUNCTION) LIKE '%DORM%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%FRZ%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%BLOCK%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%CLOS%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%FREEZ%'
+        GROUP BY ROLE_FUNCTION
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('A-19.5 Fonctions AML / fraude / ecritures manuelles (AM*, FP*, DE*, XP*)');
+    FOR r IN (
+        SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE SUBSTR(ROLE_FUNCTION,1,2) IN ('AM','AL','FP','DE','XP','IB','JE')
+           OR UPPER(ROLE_FUNCTION) LIKE '%AML%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%FRAUD%'
+           OR UPPER(ROLE_FUNCTION) LIKE '%JRNL%'
+        GROUP BY ROLE_FUNCTION
+        ORDER BY nb DESC
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s)');
+    END LOOP;
+
+    p_sub('A-19.6 Top 20 utilisateurs avec acces combines CIF + KYC + Compte (risque consolide)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ur.USER_ID,
+                   COUNT(DISTINCT rd.ROLE_FUNCTION) nb_func_sens
+            FROM SMTB_USER_ROLE ur, SMTB_ROLE_DETAIL rd
+            WHERE ur.ROLE_ID = rd.ROLE_ID
+              AND (rd.ROLE_FUNCTION LIKE 'STDCIF%'
+                OR rd.ROLE_FUNCTION LIKE 'STDKYC%'
+                OR rd.ROLE_FUNCTION LIKE 'STDCUSAC%'
+                OR rd.ROLE_FUNCTION LIKE 'STDACCLS%')
+            GROUP BY ur.USER_ID
+            ORDER BY nb_func_sens DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        p_kv('  USER=' || r.USER_ID, TO_CHAR(r.nb_func_sens) || ' fonctions sensibles');
+    END LOOP;
+
+    p_sub('A-19.7 Makers/Checkers historiques de STTM_CUSTOMER (creation/modif CIF)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAKER_ID, COUNT(*) nb
+            FROM STTM_CUSTOMER
+            WHERE MAKER_ID IS NOT NULL
+            GROUP BY MAKER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  MAKER_CIF=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' CIF crees');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_CUSTOMER', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-19.8 Makers/Checkers historiques de STTB_ACCOUNT (ouverture/modif compte)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAKER_ID, COUNT(*) nb
+            FROM STTB_ACCOUNT
+            WHERE MAKER_ID IS NOT NULL
+            GROUP BY MAKER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  MAKER_ACC=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' comptes crees/modif');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTB_ACCOUNT', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-19.9 Makers orphelins sur STTM_CUSTOMER (CIF cree par user supprime de SMTB_USER)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT c.MAKER_ID)
+            FROM STTM_CUSTOMER c
+            WHERE c.MAKER_ID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SMTB_USER u WHERE u.USER_ID = c.MAKER_ID)'
+        INTO v_count;
+        p_kv('  MAKER_ID CIF absents de SMTB_USER', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_CUSTOMER-SMTB_USER jointure', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-19.10 Poids des makers sur STTM_KYC_MASTER');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAKER_ID, COUNT(*) nb
+            FROM STTM_KYC_MASTER
+            WHERE MAKER_ID IS NOT NULL
+            GROUP BY MAKER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  MAKER_KYC=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' KYC maj');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_KYC_MASTER', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-19.11 SMTB_SMS_LOG — acces recents aux ecrans sensibles (90 jours)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE UPPER(NVL(OPERATION,''''))  LIKE ''%CIF%''
+              AND TRUNC(OPERATION_DATE) >= TRUNC(SYSDATE)-90
+            GROUP BY USER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 10) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' acces CIF 90j');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  SMTB_SMS_LOG/CIF 90j', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-19.12 Ratio de concentration — Top 1 maker STTM_CUSTOMER / total');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAX(nb), SUM(nb) FROM (
+                SELECT COUNT(*) nb FROM STTM_CUSTOMER
+                WHERE MAKER_ID IS NOT NULL
+                GROUP BY MAKER_ID
+            )' INTO v_count, v_total;
+        p_pct('  Poids du maker dominant CIF', v_count, v_total);
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Concentration CIF', 'inaccessible - ' || SQLERRM);
+    END;
 
     -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES

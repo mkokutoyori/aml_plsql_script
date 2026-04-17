@@ -600,3 +600,155 @@ Un script d'audit complet peut compter 3 000+ lignes et couvrir 20+ sections. **
 3. On passe à la section suivante.
 
 Cette discipline permet de détecter très tôt les désalignements métier et évite de refondre un gros livrable à la dernière minute.
+
+---
+
+## 7. Structure & format du rapport de sortie
+
+### 7.1 Langue
+
+Le rapport de sortie du script d'audit est **rédigé en anglais**. Public cible : direction financière, comité d'audit, auditeurs externes (dont COBAC), régulateurs. L'anglais est la langue de travail standard pour ces audiences.
+
+Les commentaires dans le code source du script peuvent rester en français pour l'équipe de développement, mais tout texte imprimé via `DBMS_OUTPUT.PUT_LINE` **doit** être en anglais.
+
+### 7.2 Structure hiérarchique obligatoire
+
+Chaque rapport suit la structure fixe suivante :
+
+```
+================================================================
+HEADER BLOCK
+  - Title, execution timestamp, database instance, script version
+----------------------------------------------------------------
+AUDIT PARAMETERS
+  - All parameters actually used (cf. §2.4)
+================================================================
+EXECUTIVE SUMMARY
+  - Top 10 findings ranked by LCY impact
+  - Overall risk rating (LOW / MEDIUM / HIGH / CRITICAL)
+  - Comparison vs previous run (if available)
+================================================================
+SECTION 1 — <AUDIT THEME 1>
+  1.1 <sub-test>
+    Finding [F-001] <severity> ....... <LCY impact>
+      Description : ...
+      Evidence    : ...
+      Population  : N records
+      Recommendation : ...
+  1.2 <sub-test>
+    ...
+================================================================
+SECTION 2 — <AUDIT THEME 2>
+  ...
+================================================================
+APPENDICES
+  - Detailed top-N listings referenced in findings
+  - Data dictionary cross-reference
+  - Glossary
+================================================================
+FOOTER
+  - End-of-run timestamp, total findings count, execution duration
+```
+
+### 7.3 Executive summary
+
+Le bloc `EXECUTIVE SUMMARY` est **obligatoire**. Il agrège les findings les plus matériels et permet à un directeur non-technique de saisir l'essentiel en 30 secondes. Il doit contenir :
+
+- **Overall risk rating** — un seul mot : `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+- **Total estimated revenue leakage** — somme des impacts LCY quantifiables.
+- **Top 10 findings** — tableau formaté : référence du finding, sévérité, impact LCY, description courte.
+- **Key ratios** — par ex. ratio de waivers sur encours, ratio de comptes dormants avec matière, couverture du GL income vs ACTB accrued.
+- **Trend indicator** (si exécutions antérieures stockées) — évolution depuis la dernière exécution.
+
+### 7.4 Format d'un finding
+
+Chaque finding suit un format standardisé :
+
+```
+  Finding [F-042] ........... SEVERITY: HIGH .... IMPACT: 52,916,870 XAF
+  ------------------------------------------------------------
+  Title       : Accrued debit interest on dormant accounts
+  Description : 179 dormant accounts hold positive ACY_ACCRUED_DR_IC,
+                creating frozen receivables that should be booked as
+                interest income but remain off-balance-sheet.
+  Population  : 179 accounts
+  LCY impact  : 6,392,829.25 XAF
+  Evidence    : STTM_CUST_ACCOUNT where AC_STAT_DORMANT='Y'
+                AND ACY_ACCRUED_DR_IC > 0
+  Root cause  : Dormancy flag frozen IC accrual posting but not
+                reversed the accrued balance.
+  Recommendation :
+    1. Run dormant account review for accrued IC > 1,000 LCY.
+    2. Either book to income or reverse the accrual.
+    3. Update dormancy procedure to handle residual accrued balance.
+  Owner       : Finance — Revenue Assurance
+  Target date : +30d
+  ------------------------------------------------------------
+```
+
+### 7.5 Référencement des findings
+
+Chaque finding reçoit un identifiant **stable** : `[F-NNN]` où `NNN` est une numérotation séquentielle maintenue entre exécutions. Cela permet au management de suivre la résolution d'un finding spécifique sur plusieurs audits successifs.
+
+Si un finding disparaît entre deux exécutions (problème résolu), son numéro **n'est pas réattribué**. Un nouveau finding reçoit le prochain numéro libre.
+
+### 7.6 Niveaux de sévérité
+
+Normaliser strictement :
+
+| Sévérité | Critère (indicatif) |
+|---|---|
+| `CRITICAL` | Impact > 1 % du PNB annuel OU risque réglementaire direct |
+| `HIGH` | Impact > 10 000 000 XAF OU > 100 comptes concernés |
+| `MEDIUM` | Impact > 1 000 000 XAF OU > 10 comptes |
+| `LOW` | En dessous des seuils ci-dessus, mais anomalie avérée |
+| `INFO` | Observation sans impact immédiat, à surveiller |
+
+Les seuils sont paramétrables (cf. §2.2 `p_materiality_lcy`) et doivent être rappelés dans l'en-tête du rapport.
+
+### 7.7 Formatage des nombres
+
+- Séparateurs de milliers : virgule en anglais (`52,916,870`).
+- Deux décimales pour les montants monétaires (`6,392,829.25 XAF`).
+- Pourcentages : `12.35 %` (espace avant le %).
+- Dates : ISO `YYYY-MM-DD` ; timestamps : `YYYY-MM-DD HH24:MI:SS`.
+- Padding à droite avec `.` ou ` ` pour aligner les valeurs (`RPAD(label, 55, '.')`).
+- Largeur de ligne maximale : 100 caractères pour tenir dans une console standard.
+
+### 7.8 Tableaux
+
+Pour les listes (top-N), utiliser un format de colonnes fixes avec en-tête et séparateur :
+
+```
+  Rank  Branch   Product   LCY Amount       Count
+  ----  -------  --------  ---------------  -------
+     1  001      LD01      12,345,678.90      4,521
+     2  055      CL05       9,876,543.21      3,210
+```
+
+Pas de tableaux exotiques (pas d'ASCII art, pas de barres de progression). Un lecteur doit pouvoir copier-coller le rapport dans Excel en un seul clic.
+
+### 7.9 Cross-référencement
+
+- Chaque finding référence les tables FCUBS interrogées (cf. §5.5).
+- Chaque finding à dimension réglementaire cite le compte PCEC concerné (ex. `PCEC 70 — Produits sur opérations de trésorerie`).
+- Les recommandations pointent vers les sections du script qui pourraient servir à vérifier la correction après remédiation.
+
+### 7.10 Footer & métriques d'exécution
+
+En clôture du rapport :
+
+```
+================================================================
+END OF AUDIT RUN
+  Started at  : 2026-04-17 11:27:45
+  Ended at    : 2026-04-17 11:34:12
+  Duration    : 00:06:27
+  Sections    : 20 / 20 executed
+  Findings    : 42 raised (5 CRITICAL, 12 HIGH, 18 MEDIUM, 7 LOW)
+  Errors      : 0 blocking, 2 non-blocking (logged inline)
+  Report hash : <optional SHA-256 of the report body for integrity>
+================================================================
+```
+
+Les métriques d'exécution permettent au client de suivre la dérive de performance dans le temps et d'identifier les sections qui ralentissent.

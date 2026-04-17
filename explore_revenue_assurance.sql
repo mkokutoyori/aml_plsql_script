@@ -4991,7 +4991,7 @@ BEGIN
     print_kv('  Actions CURR_BRANCH <> HOME_BRANCH', TO_CHAR(v_count));
 
     -- 18.7.c EXITFLAG erreurs
-    FOR r IN (SELECT NVL(EXITFLAG,'(NULL)') s, COUNT(*) nb
+    FOR r IN (SELECT NVL(TO_CHAR(EXITFLAG),'(NULL)') s, COUNT(*) nb
               FROM SMTB_SMS_ACTION_LOG GROUP BY EXITFLAG
               ORDER BY nb DESC) LOOP
         print_kv('  EXITFLAG = ' || r.s, TO_CHAR(r.nb));

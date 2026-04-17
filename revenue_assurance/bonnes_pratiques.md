@@ -274,3 +274,130 @@ EXCEPTION
                  'N/A (' || SUBSTR(SQLERRM, 1, 200) || ')');
 END;
 ```
+
+---
+
+## 4. Compatibilité Oracle & conventions SQL
+
+### 4.1 Version cible
+
+La base FCUBS du client tourne sur un moteur Oracle qui n'accepte pas toutes les syntaxes modernes (retours d'erreurs observés pendant la phase d'exploration). Il faut **écrire en ciblant Oracle 11gR2** comme dénominateur commun. Toute fonctionnalité postérieure doit être évitée ou feature-detected.
+
+### 4.2 Pagination / Top-N
+
+**Interdit** : `FETCH FIRST n ROWS ONLY` et `OFFSET n ROWS` (syntaxe 12c+).
+
+**Correct** : utiliser `ROWNUM` dans une sous-requête, après l'ORDER BY :
+
+```sql
+SELECT * FROM (
+    SELECT col1, col2, SUM(amount) sm
+    FROM t
+    GROUP BY col1, col2
+    ORDER BY sm DESC
+) WHERE ROWNUM <= p_top_n;
+```
+
+Ne pas appliquer `ROWNUM <= N` au même niveau que `ORDER BY` : Oracle applique le filtre avant le tri et le résultat est non-déterministe.
+
+### 4.3 ANSI JOIN vs jointure WHERE
+
+Préférer la syntaxe ANSI `JOIN … ON …` à la jointure implicite par `WHERE`. Elle est plus lisible et détache clairement la logique de jointure de la logique de filtre :
+
+```sql
+-- BIEN
+FROM STTM_CUST_ACCOUNT a
+JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+WHERE a.AC_STAT_DORMANT = 'Y'
+
+-- TOLÉRÉ mais moins bien
+FROM STTM_CUST_ACCOUNT a, STTM_CUSTOMER c
+WHERE c.CUSTOMER_NO = a.CUST_NO
+  AND a.AC_STAT_DORMANT = 'Y'
+```
+
+### 4.4 Alias systématiques
+
+Toute table dans une jointure doit avoir un alias court et mnémotechnique (`a` pour `STTM_CUST_ACCOUNT`, `c` pour `STTM_CUSTOMER`, `h` pour `ACTB_HISTORY`, `g` pour `GLTB_GL_BAL`, etc.). Chaque colonne référencée dans un `SELECT` ou un `WHERE` sur plus d'une table doit être préfixée par son alias. Cela évite les ambiguïtés et facilite la lecture.
+
+### 4.5 Scalar subquery — seulement en contexte SQL
+
+Les `(SELECT ...)` scalaires sont autorisés **uniquement** dans un `SELECT` ou un `WHERE` (contexte SQL), jamais dans un appel de procédure PL/SQL (cf. §3.8).
+
+### 4.6 Dates — comparaisons et formats
+
+- Utiliser `TRUNC(SYSDATE)` pour éliminer la composante horaire quand on compare à une `DATE` tronquée.
+- Éviter `SYSDATE - 30` ; préférer `ADD_MONTHS(SYSDATE, -1)` pour la lisibilité métier.
+- Les comparaisons `d >= DATE '2025-01-01'` sont préférables à `d >= TO_DATE('01-01-2025', 'DD-MM-YYYY')` (format ISO, pas de dépendance au NLS).
+- Pour borner une période inclusive, utiliser `>= p_date_from AND < p_date_to + 1` si on veut couvrir la journée entière du `p_date_to`.
+
+### 4.7 NULL-safe comparisons
+
+Les comparaisons `=` et `<>` renvoient `UNKNOWN` (non `TRUE`) sur un opérande NULL. Pour filtrer les valeurs différentes d'une valeur donnée en incluant les NULL, utiliser :
+
+```sql
+WHERE NVL(STATUS, 'X') <> 'LIQD'
+```
+
+Ou, pour les comparaisons NULL-safe :
+
+```sql
+WHERE LNNVL(STATUS = 'LIQD')  -- vrai si STATUS <> 'LIQD' OU STATUS IS NULL
+```
+
+### 4.8 Conversions explicites
+
+- `TO_CHAR(num)` pour concaténer un NUMBER à une VARCHAR2.
+- `TO_CHAR(d, 'YYYY-MM-DD')` pour imprimer une DATE (format ISO toujours).
+- `TO_CHAR(d, 'YYYY-MM-DD HH24:MI:SS')` pour les timestamps.
+- `TO_NUMBER(txt DEFAULT NULL ON CONVERSION ERROR)` est 12c+ : l'éviter. Utiliser `REGEXP_LIKE(txt, '^-?[0-9]+(\.[0-9]+)?$')` comme garde.
+
+### 4.9 Regex — pattern de guard
+
+Pour convertir une colonne VARCHAR2 qui contient parfois des valeurs non numériques :
+
+```sql
+SELECT NVL(SUM(
+           TO_NUMBER(REGEXP_SUBSTR(CALC_SI_AMT, '^-?[0-9]+(\.[0-9]+)?$'))
+       ), 0)
+INTO v_num
+FROM SITB_CONTRACT_MASTER
+WHERE REGEXP_LIKE(CALC_SI_AMT, '^-?[0-9]+(\.[0-9]+)?$');
+```
+
+Ce pattern isole les seules valeurs numériques avant conversion, évitant ORA-01722.
+
+### 4.10 Commentaires SQL / PL/SQL
+
+- `--` en début de ligne pour un commentaire de section (lisible dans les diff Git).
+- `/* ... */` pour un commentaire bloc en en-tête de fichier ou de procédure.
+- **Jamais** de `--` en fin de ligne exécutable (risque de confusion lors de la copie vers SQL*Plus).
+- Les commentaires doivent expliquer le **pourquoi** (l'intention d'audit), pas le **quoi** (le SQL se lit).
+
+### 4.11 SET SERVEROUTPUT & tailles de buffer
+
+En tête de script, toujours :
+
+```sql
+SET SERVEROUTPUT ON SIZE UNLIMITED FORMAT WRAPPED
+SET LINESIZE 200
+SET PAGESIZE 0
+SET TRIMSPOOL ON
+SET FEEDBACK OFF
+SET VERIFY OFF
+SET TIMING ON
+```
+
+Sans `SIZE UNLIMITED`, le buffer `DBMS_OUTPUT` sature vers 20 000 lignes et le script se tait silencieusement.
+
+### 4.12 Spool vers fichier
+
+Pour livrer le rapport au client, prévoir un bloc `SPOOL` commenté qu'il suffit de décommenter :
+
+```sql
+-- SPOOL /tmp/revenue_assurance_audit_YYYYMMDD.txt
+-- (corps du script)
+-- SPOOL OFF
+```
+
+Documenter la convention de nommage du fichier de sortie (avec date d'exécution).

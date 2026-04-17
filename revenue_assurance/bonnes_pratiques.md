@@ -137,3 +137,140 @@ Pour les scripts complexes, prévoir un paramètre de mode d'exécution :
 | `DEEP` | Inclut les investigations détaillées (listes nominatives top-100, drill-down) |
 
 Ce paramètre (`p_mode VARCHAR2(10) := 'FULL'`) permet au management d'obtenir rapidement un tableau de bord sans relancer l'intégralité de l'audit.
+
+---
+
+## 3. Défensivité & robustesse PL/SQL
+
+### 3.1 Philosophie
+
+Un audit ne doit **jamais s'arrêter sur une erreur isolée**. Si une requête sur une table marginale échoue (table absente, colonne renommée, donnée corrompue), l'audit doit logger l'incident et continuer. Un rapport partiel avec 95 % d'indicateurs vaut mille fois mieux qu'une exécution interrompue au bout de 10 minutes sur une table anecdotique.
+
+Règle fondamentale : **chaque contrôle d'audit est un îlot isolé**. Il ne partage pas son sort avec le contrôle suivant.
+
+### 3.2 Bloc BEGIN/EXCEPTION systématique
+
+Chaque requête `SELECT INTO` et chaque `FOR r IN (…) LOOP` interrogeant une table non critique **doit** être encadré :
+
+```sql
+BEGIN
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE WAIVE = 'Y';
+    print_kv('  Composants prêt WAIVE=Y', TO_CHAR(v_count));
+EXCEPTION
+    WHEN OTHERS THEN
+        print_kv('  Composants prêt WAIVE=Y', 'N/A (' || SQLERRM || ')');
+END;
+```
+
+Ne pas mettre de `EXCEPTION WHEN OTHERS THEN NULL;` silencieux : **toujours** remonter le `SQLERRM` dans le rapport pour que l'auditeur sache quel contrôle n'a pas abouti.
+
+### 3.3 Helpers obligatoires
+
+Chaque script définit en préambule un jeu minimal de procédures réutilisables :
+
+| Helper | Rôle |
+|---|---|
+| `print_section(p_title)` | Imprime une en-tête de section avec séparateur visuel |
+| `print_subsection(p_title)` | Imprime un sous-titre indenté |
+| `print_kv(p_label, p_value)` | Imprime une paire `label...........value` avec padding |
+| `print_finding(p_ref, p_severity, p_msg, p_lcy_impact)` | Imprime un finding formaté pour le rapport |
+| `safe_count(p_table, p_label)` | `COUNT(*)` d'une table avec gestion d'absence |
+| `safe_sum(p_table, p_col, p_label)` | Somme d'une colonne avec gestion d'absence |
+| `print_warning(p_msg)` | Imprime un avertissement non-bloquant |
+
+Chaque helper doit gérer lui-même les exceptions. Le corps principal du script doit rester lisible, focalisé sur la logique d'audit.
+
+### 3.4 Typage strict — NVL et conversions
+
+**Règle** : dans un `NVL(expr1, expr2)`, les deux opérandes doivent être du même type. Si `expr1` est NUMBER ou DATE et `expr2` une chaîne (ex. `'(NULL)'`), Oracle tente une conversion implicite qui plante à la première valeur incompatible (ORA-01722, ORA-01858).
+
+Pattern correct pour imprimer une valeur optionnelle non-VARCHAR :
+
+```sql
+-- Colonne NUMBER
+SELECT NVL(TO_CHAR(FREQUENCY_UNIT), '(NULL)') FROM ...
+
+-- Colonne DATE
+SELECT NVL(TO_CHAR(LAST_DT, 'YYYY-MM-DD'), '(NULL)') FROM ...
+```
+
+Jamais :
+
+```sql
+-- FAUX si FREQUENCY_UNIT est NUMBER
+SELECT NVL(FREQUENCY_UNIT, '(NULL)') FROM ...
+```
+
+Avant d'utiliser `NVL(COL, 'string_default')`, vérifier le type de `COL` dans `fcubs.csv`.
+
+### 3.5 Division par zéro
+
+Tout ratio doit être protégé par `NULLIF` ou `GREATEST` :
+
+```sql
+-- Taux d'utilisation d'une facilité
+ROUND(100 * UTILIZED / NULLIF(APPROVED, 0), 2) AS pct_util
+
+-- Protection par GREATEST (choix personnel selon la sémantique)
+ROUND(100 * UTILIZED / GREATEST(APPROVED, 1), 2) AS pct_util
+```
+
+### 3.6 Sémantique des agrégats sur ensembles vides
+
+`SUM(x)` sur un ensemble vide retourne `NULL`, pas 0. Toujours envelopper : `NVL(SUM(x), 0)`. Même règle pour `MIN`, `MAX`, `AVG` si le résultat doit être imprimé ou concaténé.
+
+### 3.7 Valeurs extrêmes & overflow
+
+Les données comptables peuvent contenir des valeurs aberrantes (ex. `209 041 988 673 235 797 936 015 431 909 324 978 823 600 000 000 000 …`, vu lors de l'exploration). Un `SUM` ou une conversion peut alors dépasser la précision NUMBER d'Oracle.
+
+Règles :
+
+- Pour afficher un grand nombre : utiliser `TO_CHAR(v_num, 'FM999G999G999G999G999G999G999G990D00')` avec séparateurs.
+- Avant toute somme sensible, filtrer les valeurs aberrantes : `WHERE ABS(AMOUNT_DUE) < 1E15` et logger le nombre de lignes écartées.
+- Ne jamais faire de `SUM` d'une colonne VARCHAR2 sans vérifier son type (cf. cas `CALC_SI_AMT`).
+
+### 3.8 Scalar subquery dans un appel procédural
+
+**Interdit** : placer une `(SELECT ...)` scalaire directement dans un argument de procédure PL/SQL. Cause l'erreur PLS-00122.
+
+```sql
+-- FAUX
+print_kv('Label', TO_CHAR((SELECT SUM(x) FROM t)));
+
+-- CORRECT
+SELECT SUM(x) INTO v_num FROM t;
+print_kv('Label', TO_CHAR(v_num));
+```
+
+### 3.9 Variables locales typées selon l'usage
+
+Déclarer :
+
+- `v_count NUMBER` pour les dénombrements
+- `v_num NUMBER` pour les montants monétaires
+- `v_pct NUMBER` pour les pourcentages
+- `v_dt DATE` pour les dates
+- `v_txt VARCHAR2(4000)` pour les chaînes concaténées
+- `v_sep VARCHAR2(80) := RPAD('=', 79, '=')` pour les séparateurs
+
+Ne jamais réutiliser `v_count` pour stocker un montant : cela rend le code illisible à la relecture.
+
+### 3.10 Gestion défensive des jointures
+
+Toute jointure croisant deux tables dont au moins une est marginale doit être encapsulée dans `BEGIN/EXCEPTION`. Pattern typique :
+
+```sql
+BEGIN
+    SELECT COUNT(*) INTO v_count
+    FROM LDTB_CONTRACT_MASTER c
+    JOIN LDTM_PRODUCT_MASTER p ON p.PRODUCT = c.PRODUCT
+    WHERE p.BLOCK_PRODUCT = 'Y';
+    print_kv('  Contrats actifs sur produits bloqués', TO_CHAR(v_count));
+EXCEPTION
+    WHEN OTHERS THEN
+        print_kv('  Contrats actifs sur produits bloqués',
+                 'N/A (' || SUBSTR(SQLERRM, 1, 200) || ')');
+END;
+```

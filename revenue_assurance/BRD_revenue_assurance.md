@@ -1964,6 +1964,91 @@ Le script S24 lit (en mémoire / hard-codé en première itération) l'ensemble 
 
 ---
 
+## 14. Principes et méthodes comptables applicables
+
+### 14.1 Cadre général
+
+La banque applique en premier lieu le **Plan Comptable des Établissements de Crédit de la CEMAC** — règlement **COBAC R-98/01** (1998) — qui prévaut en matière bancaire. En supplétif, et pour les points non couverts, le **droit OHADA** (SYSCOHADA révisé) s'applique. Lorsque les comptes consolidés ou statutaires doivent intégrer des **normes IFRS**, celles-ci s'ajoutent sans remplacer le PCEC pour les comptes sociaux.
+
+Le présent script est fondé sur le cadre **PCEC COBAC R-98/01** ; toute extension IFRS fera l'objet d'une v2 dédiée.
+
+### 14.2 Principes comptables fondamentaux
+
+Les principes ci-dessous sont **normatifs** : chaque principe se traduit par **au moins un contrôle** du §7.
+
+| # | Principe | Définition | Traduction opérationnelle | Contrôle(s) §7 |
+|---|---|---|---|---|
+| **P1** | **Continuité d'exploitation** | Les comptes sont établis en supposant la continuité de l'activité. | Détection d'opérations massives de liquidation atypiques ; alerte si solde fonds propres en territoire négatif. | S16, S28 |
+| **P2** | **Prudence** | Les produits ne sont comptabilisés que s'ils sont certains ; les charges / pertes probables sont provisionnées. | Vérification de la présence d'accruals en fin de période ; détection de produits reconnus sans fait générateur (S07 frozen CL avec accruals). | S06, S07, S14 |
+| **P3** | **Spécialisation des exercices (cut-off)** | Chaque charge / produit est rattaché à la période à laquelle il se rapporte. | Détection des écritures antidatées / post-datées ; accruals de fin de période ; mouvements sur comptes clos. | S26 |
+| **P4** | **Non-compensation** | Un actif et un passif, un produit et une charge, ne peuvent être nets sauf exception prévue. | Détection de GL mixtes (actifs/passifs) ; positions opposées du même client non scindées. | S25 |
+| **P5** | **Permanence des méthodes** | Les méthodes comptables (amortissements, taux, règles de provisionnement) sont constantes d'un exercice à l'autre. | Détection des changements de taux / de grilles tarifaires en cours d'exercice, surtout rétroactifs. | S27 |
+| **P6** | **Coût historique** | Les actifs et passifs sont enregistrés à leur coût d'acquisition (sauf reval FX ou titres à valeur de marché). | Contrôle des revalorisations FX régulières (S19) ; pas de réévaluation arbitraire des autres actifs. | S19, S28 |
+| **P7** | **Importance significative (materiality)** | Les anomalies en deçà d'un seuil ne sont pas remontées. | Seuils `p_materiality_*` (§6.2.6) ; promotion de sévérité au-delà des seuils. | Transverse |
+| **P8** | **Intangibilité du bilan d'ouverture** | Le bilan d'ouverture d'un exercice est le bilan de clôture du précédent. | Vérification de cohérence : `OPENING_BAL(N) = CLOSING_BAL(N-1)` par GL. | S16 |
+| **P9** | **Image fidèle** | Les états financiers doivent donner une image fidèle du patrimoine, de la situation financière et du résultat. | Agrégation : synthèse COBAC transverse (§8.6), taux de couverture PCEC. | S20, §9 |
+| **P10** | **Partie double** | Toute écriture comporte au moins un débit et un crédit d'égal montant. | Contrôle paire DR/CR sur `TRN_REF_NO` ; somme algébrique nulle. | S24 |
+| **P11** | **Permanence des soldes** | Le sens normal du solde d'un GL (débit/crédit) correspond à sa nature. | Contrôle du sens du solde. | S28 |
+| **P12** | **Traçabilité / audit trail** | Chaque écriture doit être rattachée à un tiers, à un utilisateur, à une date, à un justificatif. | Contrôles maker/checker (S21), utilisateurs inactifs (S22), modifications référentiel (S34). | S21, S22, S34 |
+
+### 14.3 Méthodes comptables applicables
+
+| Domaine | Méthode de référence | Remarque |
+|---|---|---|
+| **Intérêts** | Prorata temporis sur base **ACT/360** ou **ACT/365** selon le produit | À valider par Comptabilité (mini-script `describe_ic_accrual_cycle.sql`). |
+| **Amortissement immobilisations** | Linéaire sauf exception (dégressif autorisé pour certains actifs) | Hors scope v1. |
+| **Provisions créances douteuses** | Classification douteuse → litigieuse → contentieuse + provision par strate (politique interne). | Rapprochement S07 avec politique interne. |
+| **Revalorisation FX** | Cours de clôture (BEAC) pour les positions FCY bilantielles | S19. |
+| **Commissions** | Comptabilisation au moment du fait générateur (émission, exécution) | S11–S13. |
+| **Comptes d'attente / suspense** | Apurement mensuel obligatoire | S18. |
+| **Dormance** | Classification après N mois sans mouvement clientèle (politique interne) ; accruals suspendus | S03. |
+| **Écritures manuelles** | Autorisées pour régularisation ; maker/checker obligatoire ; justificatif archivé | S17, S21. |
+
+### 14.4 Hiérarchie des règles en cas de conflit
+
+1. **COBAC R-98/01** (PCEC).
+2. **Circulaires internes** de la banque (politique de provisionnement, de tarification, de dormance).
+3. **OHADA-SYSCOHADA** en supplétif.
+4. **IFRS** pour les exercices consolidés uniquement.
+
+### 14.5 Points d'attention spécifiques banque CEMAC
+
+- **Reporting COBAC** mensuel / trimestriel sur base PCEC → importance de la couverture PCEC (§9.6).
+- **Position de change** : limitation réglementaire par devise (hors scope v1, cité pour contexte).
+- **Ratio de solvabilité** : non audité ici (cf. §1.3 hors portée).
+- **Normes de clôture** : EOD/EOM/EOQ/EOY paramétrés dans FCUBS ; l'audit se fait **après** clôture journalière pour stabiliser la photo.
+
+### 14.6 Traçabilité des principes dans le rapport
+
+Chaque finding produit par §7.F ou §7.G DOIT citer le **principe comptable** qu'il invoque (champ supplémentaire `Principle: Pxx` dans le bloc `[F-NNN]`). Cela facilite :
+- la lecture par l'Audit Interne et la COBAC ;
+- l'agrégation « findings par principe » pour dégager des tendances structurelles (nouvelle vue en §8.7).
+
+### 14.7 Limites de l'approche par principes
+
+- Les principes sont **généraux** : leur traduction opérationnelle est **approximative** quand le paramétrage FCUBS ne permet pas une détection fiable (ex. P5 requiert un historique de paramétrage souvent non trivialement disponible).
+- Les **exceptions autorisées** (ex. compensation autorisée par norme spécifique) DOIVENT être listées dans `exceptions_register.md` (§10.7) pour éviter les faux positifs systémiques.
+- Les **méthodes IFRS** (juste valeur, TIE, ECL) **ne sont pas** contrôlées en v1.
+
+### 14.8 Synthèse Principes ↔ Contrôles
+
+| Principe | Contrôle(s) §7 | Criticité |
+|---|---|---|
+| P1 Continuité | S16, S28 | HIGH |
+| P2 Prudence | S06, S07, S14 | CRITICAL |
+| P3 Cut-off | S26 | HIGH |
+| P4 Non-compensation | S25 | HIGH |
+| P5 Permanence des méthodes | S27 | HIGH |
+| P6 Coût historique | S19, S28 | MEDIUM |
+| P7 Matérialité | Transverse | HIGH |
+| P8 Intangibilité bilan | S16 | CRITICAL |
+| P9 Image fidèle | §9 + S20 | CRITICAL |
+| P10 Partie double | S24 | CRITICAL |
+| P11 Permanence des soldes | S28 | HIGH |
+| P12 Traçabilité | S21, S22, S34 | CRITICAL |
+
+---
+
 
 ### Annexe A — Références
 

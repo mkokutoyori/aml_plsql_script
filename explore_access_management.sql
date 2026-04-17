@@ -2581,6 +2581,125 @@ BEGIN
     END LOOP;
 
     -- =========================================================
+    -- A-18. DECODAGE CONTROL_STRING
+    --        — Matrice fine des droits N/C/D/A/Q/M/U/P/R/L/H/X/I/E/B/T
+    --          (Convention Flexcube : chaque position = un droit unitaire)
+    -- =========================================================
+    p_section('A-18. DECODAGE CONTROL_STRING — matrice fine des droits unitaires');
+
+    SELECT COUNT(*) INTO v_total FROM SMTB_ROLE_DETAIL;
+    p_kv('Total lignes SMTB_ROLE_DETAIL analysees', TO_CHAR(v_total));
+
+    p_sub('A-18.1 Longueur des CONTROL_STRING rencontrees');
+    FOR r IN (
+        SELECT LENGTH(CONTROL_STRING) ln, COUNT(*) nb
+        FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+        GROUP BY LENGTH(CONTROL_STRING)
+        ORDER BY ln
+    ) LOOP
+        p_kv('  Longueur = ' || NVL(TO_CHAR(r.ln),'NULL'), TO_CHAR(r.nb));
+    END LOOP;
+
+    p_sub('A-18.2 Comptage des droits Y par position (1->16)');
+    FOR p IN (SELECT LEVEL pos FROM DUAL CONNECT BY LEVEL <= 16) LOOP
+        EXECUTE IMMEDIATE
+            'SELECT COUNT(*) FROM SMTB_ROLE_DETAIL '
+            || 'WHERE CONTROL_STRING IS NOT NULL '
+            || 'AND LENGTH(CONTROL_STRING) >= :1 '
+            || 'AND SUBSTR(CONTROL_STRING, :2, 1) = ''Y'''
+            INTO v_count USING p.pos, p.pos;
+        p_pct('  Position ' || LPAD(TO_CHAR(p.pos),2) || ' (CONTROL_' || p.pos || ')',
+              v_count, v_total);
+    END LOOP;
+
+    p_sub('A-18.3 Mappage conventionnel des positions (observation)');
+    DBMS_OUTPUT.PUT_LINE('  Position 1  = NEW (creation)');
+    DBMS_OUTPUT.PUT_LINE('  Position 2  = COPY');
+    DBMS_OUTPUT.PUT_LINE('  Position 3  = DELETE');
+    DBMS_OUTPUT.PUT_LINE('  Position 4  = CLOSE');
+    DBMS_OUTPUT.PUT_LINE('  Position 5  = UNLOCK / AMEND');
+    DBMS_OUTPUT.PUT_LINE('  Position 6  = REOPEN');
+    DBMS_OUTPUT.PUT_LINE('  Position 7  = PRINT');
+    DBMS_OUTPUT.PUT_LINE('  Position 8  = AUTHORIZE');
+    DBMS_OUTPUT.PUT_LINE('  Position 9  = QUERY');
+    DBMS_OUTPUT.PUT_LINE('  Position 10 = REVERSE / ROLLOVER');
+    DBMS_OUTPUT.PUT_LINE('  Position 11 = LIQUIDATE / HOLD');
+    DBMS_OUTPUT.PUT_LINE('  Position 12 = EXECUTE');
+    DBMS_OUTPUT.PUT_LINE('  Position 13 = REJECT / CONFIRM');
+    DBMS_OUTPUT.PUT_LINE('  Position 14 = UPLOAD / IMPORT');
+    DBMS_OUTPUT.PUT_LINE('  Position 15 = EXPORT');
+    DBMS_OUTPUT.PUT_LINE('  Position 16 = AUDIT / HISTORY');
+
+    p_sub('A-18.4 Roles avec droit NEW + AUTH simultanes (SoD : auto-autorisation possible)');
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+          AND LENGTH(CONTROL_STRING) >= 8
+          AND SUBSTR(CONTROL_STRING,1,1) = 'Y'
+          AND SUBSTR(CONTROL_STRING,8,1) = 'Y';
+    p_kv('  Roles distincts avec NEW + AUTH', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+          AND LENGTH(CONTROL_STRING) >= 8
+          AND SUBSTR(CONTROL_STRING,1,1) = 'Y'
+          AND SUBSTR(CONTROL_STRING,8,1) = 'Y';
+    p_pct('  Lignes role/fonction avec NEW + AUTH', v_count, v_total);
+
+    p_sub('A-18.5 Roles avec droit DELETE + AUTH (suppression auto-autorisee)');
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+          AND LENGTH(CONTROL_STRING) >= 8
+          AND SUBSTR(CONTROL_STRING,3,1) = 'Y'
+          AND SUBSTR(CONTROL_STRING,8,1) = 'Y';
+    p_kv('  Roles distincts DELETE + AUTH', TO_CHAR(v_count));
+
+    p_sub('A-18.6 Roles avec droits FULL (>= 12 positions a Y)');
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+          AND (LENGTH(REPLACE(CONTROL_STRING,'Y','')) <= LENGTH(CONTROL_STRING) - 12);
+    p_kv('  Roles distincts avec >= 12 droits actifs', TO_CHAR(v_count));
+
+    p_sub('A-18.7 Top 15 roles/fonctions les plus "permissifs" (plus de Y dans CONTROL_STRING)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_ID, ROLE_FUNCTION,
+                   (LENGTH(CONTROL_STRING) - LENGTH(REPLACE(CONTROL_STRING,'Y',''))) nb_y,
+                   CONTROL_STRING
+            FROM SMTB_ROLE_DETAIL
+            WHERE CONTROL_STRING IS NOT NULL
+            ORDER BY (LENGTH(CONTROL_STRING) - LENGTH(REPLACE(CONTROL_STRING,'Y',''))) DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        p_kv('  ROLE=' || RPAD(r.ROLE_ID,15) || ' FUNC=' || RPAD(r.ROLE_FUNCTION,12),
+             TO_CHAR(r.nb_y) || ' droits | CTRL=' || SUBSTR(r.CONTROL_STRING,1,20));
+    END LOOP;
+
+    p_sub('A-18.8 Roles/fonctions en QUERY seule (lecture pure)');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_DETAIL
+        WHERE CONTROL_STRING IS NOT NULL
+          AND LENGTH(CONTROL_STRING) >= 9
+          AND SUBSTR(CONTROL_STRING,9,1) = 'Y'
+          AND SUBSTR(CONTROL_STRING,1,1) = 'N'
+          AND SUBSTR(CONTROL_STRING,3,1) = 'N'
+          AND SUBSTR(CONTROL_STRING,8,1) = 'N';
+    p_pct('  Lignes QUERY seule (saine separation)', v_count, v_total);
+
+    p_sub('A-18.9 Matrice N+AUTH par fonction sensible (Top 10 fonctions concernees)');
+    FOR r IN (
+        SELECT * FROM (
+            SELECT ROLE_FUNCTION, COUNT(DISTINCT ROLE_ID) nb
+            FROM SMTB_ROLE_DETAIL
+            WHERE CONTROL_STRING IS NOT NULL
+              AND LENGTH(CONTROL_STRING) >= 8
+              AND SUBSTR(CONTROL_STRING,1,1) = 'Y'
+              AND SUBSTR(CONTROL_STRING,8,1) = 'Y'
+            GROUP BY ROLE_FUNCTION ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        p_kv('  FUNC=' || r.ROLE_FUNCTION, TO_CHAR(r.nb) || ' role(s) NEW+AUTH');
+    END LOOP;
+
+    -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
     p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');

@@ -3667,6 +3667,292 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S17 -- Manual journal entries -- volume, concentration,
+    --        sensitive GLs and off-hours posting
+    -- =================================================================
+    -- [F-160] Manual entries count / amount per user over period.
+    -- [F-161] Manual entries on income/expense GLs (class 6/7).
+    -- [F-162] Manual entries passed outside business hours (20h-06h)
+    --         or on weekends.
+    -- [F-163] Manual entries reversed within 24h (suspect window-
+    --         dressing).
+    -- PCEC focus /6 /7 /38 /5.
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_160     PLS_INTEGER := 0;
+        l_n_161     PLS_INTEGER := 0;
+        l_n_162     PLS_INTEGER := 0;
+        l_n_163     PLS_INTEGER := 0;
+        l_user      VARCHAR2(30);
+        l_cnt       NUMBER;
+        l_amt       NUMBER;
+        l_gl        VARCHAR2(30);
+        l_class     VARCHAR2(1);
+        l_trn_ref   VARCHAR2(30);
+        l_hour      NUMBER;
+        l_dow       VARCHAR2(10);
+        l_sev       VARCHAR2(10);
+        l_branch    VARCHAR2(10);
+        l_total_manual_cnt PLS_INTEGER := 0;
+    BEGIN
+        IF NOT f_section_enabled('S17') THEN
+            log_info('Section S17 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S17',
+                'Manual entries risk: volume, concentration, '
+             || 'sensitive GLs, off-hours');
+
+            -- Baseline: total manual entries in period ------------------
+            BEGIN
+                EXECUTE IMMEDIATE
+                    'SELECT COUNT(*) FROM ACTB_HISTORY '
+                 || ' WHERE TRUNC(TRN_DT) BETWEEN :d1 AND :d2 '
+                 || '   AND (UPPER(NVL(MODULE,''  '')) = ''MO'' '
+                 || '        OR UPPER(NVL(TRN_CODE,'''')) LIKE ''MAN%'' '
+                 || '        OR UPPER(NVL(TRN_CODE,'''')) LIKE ''%MANUAL%'')'
+                    INTO l_total_manual_cnt
+                    USING v_date_from, v_date_to;
+                print_kv('Manual entries total (period)',
+                    TO_CHAR(l_total_manual_cnt));
+            EXCEPTION
+                WHEN OTHERS THEN
+                    l_total_manual_cnt := 0;
+                    log_warn('S17 baseline: ACTB_HISTORY.MODULE not '
+                        || 'queryable (' || SUBSTR(SQLERRM,1,120)
+                        || ').');
+            END;
+
+            -- [F-160] Concentration per user ----------------------------
+            l_sql :=
+                'SELECT NVL(h.MAKER_ID, h.AUTH_ID) AS USR, '
+             || '       COUNT(*) AS CNT, '
+             || '       SUM(NVL(h.LCY_AMOUNT,0)) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND (UPPER(NVL(h.MODULE,''  '')) = ''MO'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''MAN%'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''%MANUAL%'') '
+             || '   AND (:p_branch IS NULL '
+             || '        OR h.BRANCH_CODE = :p_branch) '
+             || ' GROUP BY NVL(h.MAKER_ID, h.AUTH_ID) '
+             || ' ORDER BY COUNT(*) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur INTO l_user, l_cnt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_160 >= NVL(p_top_n, 50);
+
+                    -- Severity: HIGH if > 50% of total volume
+                    l_sev := 'MEDIUM';
+                    IF l_total_manual_cnt > 0
+                       AND l_cnt * 2 > l_total_manual_cnt THEN
+                        l_sev := 'HIGH';
+                    END IF;
+                    IF ABS(NVL(l_amt, 0))
+                       >= NVL(p_materiality_impact_lcy, 0) THEN
+                        l_sev := 'HIGH';
+                    END IF;
+
+                    print_finding(
+                        p_section    => 'S17',
+                        p_code       => 'RA-S17-F160',
+                        p_severity   => l_sev,
+                        p_message    => 'Manual-entry concentration: cnt='
+                                     || TO_CHAR(l_cnt)
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => f_mask_pii(l_user),
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'TOTAL_MANUAL='
+                                     || TO_CHAR(l_total_manual_cnt)
+                    );
+                    l_n_160 := l_n_160 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S17 F-160 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-161] Manual entries on P&L GLs (class 6/7) -------------
+            l_sql :=
+                'SELECT h.GL_CODE, h.BRANCH_CODE, '
+             || '       COUNT(*) AS CNT, '
+             || '       SUM(NVL(h.LCY_AMOUNT,0)) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND SUBSTR(NVL(h.GL_CODE,''0''),1,1) IN (''6'',''7'') '
+             || '   AND (UPPER(NVL(h.MODULE,''  '')) = ''MO'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''MAN%'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''%MANUAL%'') '
+             || ' GROUP BY h.GL_CODE, h.BRANCH_CODE '
+             || ' ORDER BY SUM(NVL(h.LCY_AMOUNT,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_gl, l_branch, l_cnt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_161 >= NVL(p_top_n, 50);
+
+                    l_sev := f_promote_severity('HIGH', ABS(NVL(l_amt, 0)));
+
+                    print_finding(
+                        p_section    => 'S17',
+                        p_code       => 'RA-S17-F161',
+                        p_severity   => l_sev,
+                        p_message    => 'Manual entry on P&L GL: cnt='
+                                     || TO_CHAR(l_cnt)
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                     || ' PCEC=' || SUBSTR(l_gl,1,1)
+                    );
+                    l_n_161 := l_n_161 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S17 F-161 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-162] Off-hours manual postings -------------------------
+            l_sql :=
+                'SELECT NVL(h.MAKER_ID, h.AUTH_ID) AS USR, '
+             || '       TO_NUMBER(TO_CHAR(h.MAKER_DT_STAMP,''HH24'')) '
+             || '                                  AS HR, '
+             || '       TO_CHAR(h.MAKER_DT_STAMP,''DY'',' ||
+                '''NLS_DATE_LANGUAGE=ENGLISH'') AS DOW, '
+             || '       h.TRN_REF_NO, '
+             || '       NVL(h.LCY_AMOUNT,0) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND (UPPER(NVL(h.MODULE,''  '')) = ''MO'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''MAN%'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''%MANUAL%'') '
+             || '   AND ( TO_NUMBER(TO_CHAR(h.MAKER_DT_STAMP,''HH24'')) '
+             || '         NOT BETWEEN 6 AND 19 '
+             || '      OR TO_CHAR(h.MAKER_DT_STAMP,''DY'',' ||
+                '''NLS_DATE_LANGUAGE=ENGLISH'') IN (''SAT'',''SUN'') ) '
+             || ' ORDER BY h.MAKER_DT_STAMP DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur
+                     INTO l_user, l_hour, l_dow, l_trn_ref, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_162 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S17',
+                        p_code       => 'RA-S17-F162',
+                        p_severity   => 'MEDIUM',
+                        p_message    => 'Off-hours manual posting: hr='
+                                     || TO_CHAR(l_hour)
+                                     || ' dow=' || l_dow
+                                     || ' amt=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_trn_ref,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'USR=' || f_mask_pii(l_user)
+                    );
+                    l_n_162 := l_n_162 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S17 F-162 unavailable (MAKER_DT_STAMP '
+                        || 'may not exist): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-163] Manual entries reversed within 24h ---------------
+            l_sql :=
+                'SELECT h.TRN_REF_NO, '
+             || '       NVL(h.MAKER_ID, h.AUTH_ID) AS USR, '
+             || '       NVL(h.LCY_AMOUNT,0) AS AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND (UPPER(NVL(h.MODULE,''  '')) = ''MO'' '
+             || '        OR UPPER(NVL(h.TRN_CODE,'''')) LIKE ''MAN%'') '
+             || '   AND EXISTS ( '
+             || '         SELECT 1 FROM ACTB_HISTORY r '
+             || '          WHERE r.RELATED_REFERENCE = h.TRN_REF_NO '
+             || '            AND UPPER(NVL(r.REVERSAL_MARKER,''N'')) = ''R'' '
+             || '            AND r.TRN_DT <= h.TRN_DT + 1 '
+             || '       ) '
+             || ' ORDER BY h.TRN_DT DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_trn_ref, l_user, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_163 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S17',
+                        p_code       => 'RA-S17-F163',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Manual entry reversed <24h: amt='
+                                     || f_fmt_lcy(l_amt),
+                        p_entity     => l_trn_ref,
+                        p_impact_lcy => ABS(NVL(l_amt, 0)),
+                        p_evidence   => 'USR=' || f_mask_pii(l_user)
+                    );
+                    l_n_163 := l_n_163 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S17 F-163 unavailable (REVERSAL_MARKER / '
+                        || 'RELATED_REFERENCE may not exist): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-160 findings (user concentration)',
+                TO_CHAR(l_n_160));
+            print_kv('F-161 findings (P&L GL manual)',
+                TO_CHAR(l_n_161));
+            print_kv('F-162 findings (off-hours manual)',
+                TO_CHAR(l_n_162));
+            print_kv('F-163 findings (reversed <24h)',
+                TO_CHAR(l_n_163));
+
+            print_section_footer('S17',
+                l_n_160 + l_n_161 + l_n_162 + l_n_163);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S17', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S17', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

@@ -176,6 +176,393 @@ DECLARE
     g_t_start            PLS_INTEGER;
     g_t_section_start    PLS_INTEGER;
 
+    -- =================================================================
+    -- SECTION 2 - PROCEDURES HELPERS (PRINT, LOG, FINDING)
+    -- -----------------------------------------------------------------
+    -- Helpers locaux reutilises par toutes les sections d'audit.
+    -- - Tous declares AVANT le BEGIN principal (bonnes_pratiques.md).
+    -- - Aucun ne realise de DML.
+    -- - Chaque helper capture WHEN OTHERS afin de ne jamais interrompre
+    --   un rapport pour une erreur d'impression ou de journalisation.
+    -- - Ordre de declaration respecte les dependances (forward refs
+    --   interdits en PL/SQL local).
+    -- =================================================================
+
+    -----------------------------------------------------------------
+    -- 2.1 f_mask_pii : masquage optionnel des numeros PII.
+    --     Garde les 4 premiers caracteres, remplace le reste par '*'.
+    --     Si p_mask_pii <> 'Y', la valeur est rendue telle quelle.
+    -----------------------------------------------------------------
+    FUNCTION f_mask_pii(p_val IN VARCHAR2) RETURN VARCHAR2 IS
+        l_len  PLS_INTEGER;
+        l_keep CONSTANT PLS_INTEGER := 4;
+    BEGIN
+        IF p_val IS NULL THEN
+            RETURN NULL;
+        END IF;
+        IF NVL(p_mask_pii,'N') <> 'Y' THEN
+            RETURN p_val;
+        END IF;
+        l_len := LENGTH(p_val);
+        IF l_len <= l_keep THEN
+            RETURN RPAD('*', l_len, '*');
+        END IF;
+        RETURN SUBSTR(p_val, 1, l_keep) || RPAD('*', l_len - l_keep, '*');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '***';
+    END f_mask_pii;
+
+    -----------------------------------------------------------------
+    -- 2.2 f_fmt_lcy : formatage numerique stable, insensible a la NLS.
+    -----------------------------------------------------------------
+    FUNCTION f_fmt_lcy(p_amt IN NUMBER) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_amt IS NULL THEN
+            RETURN 'N/A';
+        END IF;
+        RETURN TO_CHAR(p_amt, 'FM999,999,999,999,990.00',
+                       'NLS_NUMERIC_CHARACTERS=''.,''');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN TO_CHAR(p_amt);
+    END f_fmt_lcy;
+
+    -----------------------------------------------------------------
+    -- 2.3 f_fmt_ts : horodatage stable YYYY-MM-DD HH24:MI:SS.
+    -----------------------------------------------------------------
+    FUNCTION f_fmt_ts(p_d IN DATE) RETURN VARCHAR2 IS
+    BEGIN
+        IF p_d IS NULL THEN
+            RETURN 'N/A';
+        END IF;
+        RETURN TO_CHAR(p_d, 'YYYY-MM-DD HH24:MI:SS');
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN NULL;
+    END f_fmt_ts;
+
+    -----------------------------------------------------------------
+    -- 2.4 f_elapsed_ms : temps ecoule en ms depuis DBMS_UTILITY.GET_TIME.
+    --     GET_TIME rend des centisecondes : *10 pour passer en ms.
+    -----------------------------------------------------------------
+    FUNCTION f_elapsed_ms(p_t_start IN PLS_INTEGER) RETURN PLS_INTEGER IS
+    BEGIN
+        IF p_t_start IS NULL THEN
+            RETURN NULL;
+        END IF;
+        RETURN (DBMS_UTILITY.GET_TIME - p_t_start) * 10;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN NULL;
+    END f_elapsed_ms;
+
+    -----------------------------------------------------------------
+    -- 2.5 print_line : impression brute d'une ligne.
+    -----------------------------------------------------------------
+    PROCEDURE print_line(p_txt IN VARCHAR2 DEFAULT NULL) IS
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE(NVL(p_txt, ''));
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END print_line;
+
+    -----------------------------------------------------------------
+    -- 2.6 print_kv : impression cle-valeur alignee.
+    -----------------------------------------------------------------
+    PROCEDURE print_kv(
+        p_key   IN VARCHAR2,
+        p_val   IN VARCHAR2,
+        p_width IN PLS_INTEGER DEFAULT 32
+    ) IS
+        l_w PLS_INTEGER := NVL(p_width, 32);
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE(RPAD(NVL(p_key,''), l_w, ' ') || ': ' || NVL(p_val,''));
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END print_kv;
+
+    -----------------------------------------------------------------
+    -- 2.7 print_section_header : banniere d'ouverture + chrono section.
+    -----------------------------------------------------------------
+    PROCEDURE print_section_header(
+        p_code  IN VARCHAR2,
+        p_title IN VARCHAR2
+    ) IS
+    BEGIN
+        g_t_section_start := DBMS_UTILITY.GET_TIME;
+        DBMS_OUTPUT.PUT_LINE(RPAD('=', 78, '='));
+        DBMS_OUTPUT.PUT_LINE('[' || NVL(p_code,'SXX') || '] ' || NVL(p_title,''));
+        DBMS_OUTPUT.PUT_LINE(RPAD('=', 78, '='));
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END print_section_header;
+
+    -----------------------------------------------------------------
+    -- 2.8 print_section_footer : cloture + nombre de findings + ms.
+    -----------------------------------------------------------------
+    PROCEDURE print_section_footer(
+        p_code       IN VARCHAR2,
+        p_n_findings IN PLS_INTEGER DEFAULT NULL
+    ) IS
+        l_ms PLS_INTEGER;
+    BEGIN
+        l_ms := f_elapsed_ms(g_t_section_start);
+        DBMS_OUTPUT.PUT_LINE('[' || NVL(p_code,'SXX') || '] END'
+            || ' findings=' || NVL(TO_CHAR(p_n_findings), '0')
+            || ' elapsed_ms=' || NVL(TO_CHAR(l_ms), 'N/A'));
+        DBMS_OUTPUT.PUT_LINE(RPAD('-', 78, '-'));
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END print_section_footer;
+
+    -----------------------------------------------------------------
+    -- 2.9 log_info / log_warn / log_error : journalisation technique.
+    --     log_warn incremente g_limitations ; log_error incremente
+    --     g_section_errors. Les deux sont exploites par [LOG] final.
+    -----------------------------------------------------------------
+    PROCEDURE log_info(p_msg IN VARCHAR2) IS
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('[LOG][INFO ] '
+            || f_fmt_ts(SYSDATE) || ' ' || NVL(p_msg,''));
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END log_info;
+
+    PROCEDURE log_warn(p_msg IN VARCHAR2) IS
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('[LOG][WARN ] '
+            || f_fmt_ts(SYSDATE) || ' ' || NVL(p_msg,''));
+        g_limitations := NVL(g_limitations, 0) + 1;
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END log_warn;
+
+    PROCEDURE log_error(p_section IN VARCHAR2, p_msg IN VARCHAR2) IS
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('[LOG][ERROR] '
+            || f_fmt_ts(SYSDATE)
+            || ' SEC=' || NVL(p_section,'?')
+            || ' ' || NVL(p_msg,''));
+        g_section_errors := NVL(g_section_errors, 0) + 1;
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END log_error;
+
+    -----------------------------------------------------------------
+    -- 2.10 f_promote_severity : promotion automatique selon l'impact.
+    --      - impact >= p_materiality_critical_lcy => CRITICAL
+    --      - impact >= p_materiality_impact_lcy   => HIGH
+    --      Une severite n'est jamais retrogradee.
+    -----------------------------------------------------------------
+    FUNCTION f_promote_severity(
+        p_severity   IN VARCHAR2,
+        p_impact_lcy IN NUMBER
+    ) RETURN VARCHAR2 IS
+        l_sev  VARCHAR2(10) := UPPER(NVL(p_severity,'INFO'));
+        l_rank PLS_INTEGER;
+        l_new  VARCHAR2(10);
+    BEGIN
+        l_rank := CASE l_sev
+                      WHEN 'CRITICAL' THEN 5
+                      WHEN 'HIGH'     THEN 4
+                      WHEN 'MEDIUM'   THEN 3
+                      WHEN 'LOW'      THEN 2
+                      WHEN 'INFO'     THEN 1
+                      ELSE 1
+                  END;
+        IF p_impact_lcy IS NOT NULL THEN
+            IF p_materiality_critical_lcy IS NOT NULL
+               AND p_impact_lcy >= p_materiality_critical_lcy THEN
+                l_new := 'CRITICAL';
+            ELSIF p_materiality_impact_lcy IS NOT NULL
+              AND p_impact_lcy >= p_materiality_impact_lcy THEN
+                l_new := 'HIGH';
+            END IF;
+            IF l_new = 'CRITICAL' AND l_rank < 5 THEN
+                RETURN 'CRITICAL';
+            ELSIF l_new = 'HIGH' AND l_rank < 4 THEN
+                RETURN 'HIGH';
+            END IF;
+        END IF;
+        RETURN l_sev;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN NVL(p_severity,'INFO');
+    END f_promote_severity;
+
+    -----------------------------------------------------------------
+    -- 2.11 print_finding : emet une ligne [FND] + met a jour les
+    --      compteurs globaux g_findings_* et g_total_exposure_lcy.
+    --      Aucune exception ne remonte.
+    -----------------------------------------------------------------
+    PROCEDURE print_finding(
+        p_section    IN VARCHAR2,
+        p_code       IN VARCHAR2,
+        p_severity   IN VARCHAR2,
+        p_message    IN VARCHAR2,
+        p_entity     IN VARCHAR2 DEFAULT NULL,
+        p_impact_lcy IN NUMBER   DEFAULT NULL,
+        p_evidence   IN VARCHAR2 DEFAULT NULL
+    ) IS
+        l_sev    VARCHAR2(10);
+        l_entity VARCHAR2(400);
+        l_impact VARCHAR2(40);
+    BEGIN
+        l_sev    := f_promote_severity(p_severity, p_impact_lcy);
+        l_entity := f_mask_pii(p_entity);
+        l_impact := f_fmt_lcy(p_impact_lcy);
+
+        DBMS_OUTPUT.PUT_LINE(
+            '[FND] SEC=' || NVL(p_section,'SXX')
+            || ' SEV=' || RPAD(l_sev, 8, ' ')
+            || ' CODE=' || RPAD(NVL(p_code,'---'), 14, ' ')
+            || ' IMPACT_LCY=' || l_impact
+            || ' ENT=' || NVL(l_entity,'-')
+            || ' | ' || NVL(p_message,'')
+            || CASE WHEN p_evidence IS NOT NULL
+                    THEN ' | EV=' || p_evidence
+                    ELSE NULL
+               END
+        );
+
+        g_findings_total := NVL(g_findings_total, 0) + 1;
+        CASE l_sev
+            WHEN 'CRITICAL' THEN g_findings_critical := NVL(g_findings_critical,0) + 1;
+            WHEN 'HIGH'     THEN g_findings_high     := NVL(g_findings_high,0)     + 1;
+            WHEN 'MEDIUM'   THEN g_findings_medium   := NVL(g_findings_medium,0)   + 1;
+            WHEN 'LOW'      THEN g_findings_low      := NVL(g_findings_low,0)      + 1;
+            WHEN 'INFO'     THEN g_findings_info     := NVL(g_findings_info,0)     + 1;
+            ELSE                  g_findings_info     := NVL(g_findings_info,0)     + 1;
+        END CASE;
+
+        IF p_impact_lcy IS NOT NULL THEN
+            g_total_exposure_lcy := NVL(g_total_exposure_lcy, 0) + p_impact_lcy;
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            BEGIN
+                DBMS_OUTPUT.PUT_LINE('[LOG][WARN ] print_finding failed for '
+                    || NVL(p_section,'SXX') || '/' || NVL(p_code,'---')
+                    || ' : ' || SUBSTR(SQLERRM, 1, 200));
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END print_finding;
+
+    -----------------------------------------------------------------
+    -- 2.12 safe_count : execute un SELECT COUNT scalaire en dynamique.
+    --      - Renvoie 0 si le SQL est vide.
+    --      - Renvoie NULL et journalise une erreur si l'execution echoue
+    --        (table absente, privileges, etc.). Ce contrat est utilise
+    --        par les sections d'audit pour ne jamais interrompre le
+    --        rapport face a une vue FCUBS non provisionnee.
+    -----------------------------------------------------------------
+    FUNCTION safe_count(
+        p_section IN VARCHAR2,
+        p_sql     IN VARCHAR2
+    ) RETURN NUMBER IS
+        l_n NUMBER;
+    BEGIN
+        IF p_sql IS NULL THEN
+            RETURN 0;
+        END IF;
+        EXECUTE IMMEDIATE p_sql INTO l_n;
+        RETURN NVL(l_n, 0);
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(p_section,
+                'safe_count failed: ' || SUBSTR(SQLERRM, 1, 200));
+            RETURN NULL;
+    END safe_count;
+
+    -----------------------------------------------------------------
+    -- 2.13 safe_scalar_varchar2 : idem safe_count mais rend VARCHAR2.
+    --      Utilise pour les metadonnees (version DB, business_date...).
+    -----------------------------------------------------------------
+    FUNCTION safe_scalar_varchar2(
+        p_section IN VARCHAR2,
+        p_sql     IN VARCHAR2
+    ) RETURN VARCHAR2 IS
+        l_v VARCHAR2(4000);
+    BEGIN
+        IF p_sql IS NULL THEN
+            RETURN NULL;
+        END IF;
+        EXECUTE IMMEDIATE p_sql INTO l_v;
+        RETURN l_v;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(p_section,
+                'safe_scalar_varchar2 failed: ' || SUBSTR(SQLERRM, 1, 200));
+            RETURN NULL;
+    END safe_scalar_varchar2;
+
+    -----------------------------------------------------------------
+    -- 2.14 safe_scalar_date : idem safe_count mais rend DATE.
+    -----------------------------------------------------------------
+    FUNCTION safe_scalar_date(
+        p_section IN VARCHAR2,
+        p_sql     IN VARCHAR2
+    ) RETURN DATE IS
+        l_d DATE;
+    BEGIN
+        IF p_sql IS NULL THEN
+            RETURN NULL;
+        END IF;
+        EXECUTE IMMEDIATE p_sql INTO l_d;
+        RETURN l_d;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(p_section,
+                'safe_scalar_date failed: ' || SUBSTR(SQLERRM, 1, 200));
+            RETURN NULL;
+    END safe_scalar_date;
+
+    -----------------------------------------------------------------
+    -- 2.15 f_section_enabled : filtre inclusion/exclusion de sections.
+    --      p_sections_exclude prime sur p_sections_include (BRD §6).
+    -----------------------------------------------------------------
+    FUNCTION f_section_enabled(p_code IN VARCHAR2) RETURN BOOLEAN IS
+        l_in_inc BOOLEAN := TRUE;
+        l_in_exc BOOLEAN := FALSE;
+    BEGIN
+        IF p_code IS NULL THEN
+            RETURN TRUE;
+        END IF;
+        IF p_sections_exclude IS NOT NULL AND p_sections_exclude.COUNT > 0 THEN
+            FOR i IN 1 .. p_sections_exclude.COUNT LOOP
+                IF UPPER(p_sections_exclude(i)) = UPPER(p_code) THEN
+                    l_in_exc := TRUE;
+                    EXIT;
+                END IF;
+            END LOOP;
+        END IF;
+        IF l_in_exc THEN
+            RETURN FALSE;
+        END IF;
+        IF p_sections_include IS NOT NULL AND p_sections_include.COUNT > 0 THEN
+            l_in_inc := FALSE;
+            FOR i IN 1 .. p_sections_include.COUNT LOOP
+                IF UPPER(p_sections_include(i)) = UPPER(p_code) THEN
+                    l_in_inc := TRUE;
+                    EXIT;
+                END IF;
+            END LOOP;
+        END IF;
+        RETURN l_in_inc;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN TRUE; -- En cas de doute, on execute la section.
+    END f_section_enabled;
+
 BEGIN
     -- Corps du rapport construit dans les sections suivantes du
     -- script. A ce stade, on imprime uniquement l'empreinte de

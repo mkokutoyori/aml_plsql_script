@@ -401,3 +401,113 @@ Pour livrer le rapport au client, prévoir un bloc `SPOOL` commenté qu'il suffi
 ```
 
 Documenter la convention de nommage du fichier de sortie (avec date d'exécution).
+
+---
+
+## 5. Vérification du dictionnaire de données
+
+### 5.1 Pourquoi c'est critique
+
+FCUBS hérite d'un schéma volumineux (plusieurs centaines de tables, plusieurs milliers de colonnes) souvent mal documenté. Plusieurs patterns observés induisent des erreurs fréquentes :
+
+- Même nom de colonne, type différent selon la table (ex. `FREQUENCY_UNIT` est NUMBER dans `LDTM_PRODUCT_DFLT_SCHEDULES` mais VARCHAR2 dans `CLTB_ACCOUNT_APPS_MASTER`).
+- Colonnes quasi-synonymes (`WAIVER` vs `WAIVE`, `WAIVER_FLAG` vs `DEFAULT_WAIVER`) qui n'existent pas dans les mêmes tables.
+- Tables au nom proche (`CLTB_LIQ` vs `CLTB_AMOUNT_LIQ`) dont une seule existe réellement.
+- Colonnes `PRODUCT` vs `PRODUCT_CODE` selon la table.
+
+Un script qui référence une colonne inexistante ou un mauvais type plante au compile (PLS-00904) ou au runtime (ORA-01722, ORA-00942). **Le seul antidote : vérifier systématiquement avant d'écrire.**
+
+### 5.2 Source de vérité : `fcubs.csv`
+
+Le fichier `/home/user/aml_plsql_script/fcubs.csv` à la racine du projet contient le dictionnaire de données extrait de la base cible, au format :
+
+```
+"TABLE_NAME","COLUMN_NAME","DATA_TYPE",NUM_ROWS
+"ACTB_HISTORY","AC_NO","VARCHAR2",5788417
+"ACTB_HISTORY","LCY_AMOUNT","NUMBER",5788417
+```
+
+Ce fichier est **la référence unique** avant d'écrire une requête. Si une colonne n'y figure pas, elle n'existe pas dans la base du client (ou elle appartient à une version FCUBS différente).
+
+### 5.3 Règle de vérification avant écriture
+
+Avant toute nouvelle requête dans un script d'audit, **vérifier** :
+
+1. **La table existe** dans `fcubs.csv` (recherche exacte `"NOM_TABLE"`).
+2. **Les colonnes référencées existent** dans cette table (recherche `"NOM_TABLE","NOM_COL"`).
+3. **Les types sont compatibles** avec les opérations prévues (SUM sur NUMBER, comparaison dates, etc.).
+4. **La cardinalité** (`NUM_ROWS`) est raisonnable : si une table a 50 millions de lignes, prévoir `ROWNUM <= p_top_n` ou un filtre agressif.
+
+Commandes type pour interroger le dictionnaire :
+
+```bash
+# Lister toutes les colonnes d'une table
+grep '"LDTB_CONTRACT_MASTER"' fcubs.csv
+
+# Vérifier qu'une colonne existe
+grep '"STTM_CUST_ACCOUNT","DEFAULT_WAIVER"' fcubs.csv
+
+# Trouver toutes les colonnes contenant "WAIV" dans un table
+grep '"CLTB_ACCOUNT_COMPONENTS"' fcubs.csv | grep -i WAIV
+```
+
+### 5.4 Mise à jour de fcubs.csv
+
+Si le client ajoute/modifie le schéma FCUBS, il doit régénérer `fcubs.csv`. Requête Oracle pour régénération :
+
+```sql
+SELECT '"' || OWNER || '.' || TABLE_NAME || '","' || COLUMN_NAME || '","' ||
+       DATA_TYPE || '",' || NUM_ROWS
+FROM ALL_TAB_COLUMNS c
+JOIN ALL_TABLES t USING (OWNER, TABLE_NAME)
+WHERE OWNER = 'FCUBS'
+ORDER BY TABLE_NAME, COLUMN_ID;
+```
+
+Après régénération, relancer tous les scripts d'audit pour valider la compatibilité.
+
+### 5.5 Annotation des requêtes
+
+Lorsqu'une requête croise plusieurs tables, commenter en tête la liste des colonnes utilisées :
+
+```sql
+-- Sources :
+--   LDTB_CONTRACT_MASTER (CONTRACT_REF_NO, PRODUCT, CONTRACT_STATUS)
+--   LDTM_PRODUCT_MASTER  (PRODUCT, BLOCK_PRODUCT)
+-- Test : contrats actifs adossés à des produits bloqués
+SELECT COUNT(DISTINCT c.CONTRACT_REF_NO) ...
+```
+
+Cela rend les dépendances schéma lisibles et facilite la maintenance après refonte FCUBS.
+
+### 5.6 Cas des colonnes absentes mais attendues
+
+Si la logique d'audit suppose une colonne qui n'existe pas dans `fcubs.csv`, deux options :
+
+1. **Rédiger un mini-script d'exploration** (cf. §6.3) demandant au client de confirmer la colonne/table.
+2. **Encapsuler la requête dans un BEGIN/EXCEPTION** et logger `N/A` si la colonne manque, pour ne pas bloquer l'audit.
+
+**Ne jamais** inventer le nom d'une colonne en espérant qu'elle existe. Les coûts de debug sont démesurés.
+
+### 5.7 Colonnes FCUBS récurrentes à connaître
+
+Quelques invariants qui reviennent partout :
+
+| Pattern | Sémantique |
+|---|---|
+| `BRANCH_CODE`, `AC_BRANCH` | Code agence (FBTM_BRANCH) |
+| `CUST_NO`, `CUSTOMER_NO`, `CUSTOMER` | CIF client (STTM_CUSTOMER) |
+| `CUST_AC_NO`, `ACCOUNT_NUMBER`, `AC_NO` | Compte client (STTM_CUST_ACCOUNT) |
+| `LCY_*` | Montant en devise locale (Local Currency) |
+| `FCY_*`, `ACY_*` | Montant en devise de l'opération (Foreign / Account Currency) |
+| `AUTH_STAT` (`A`/`U`) | Authorized / Unauthorized |
+| `RECORD_STAT` (`O`/`C`) | Open / Closed |
+| `MAKER_ID` / `CHECKER_ID` | Four-eyes principle (saisie / validation) |
+| `*_DT_STAMP` | Horodatage technique |
+| `TRN_DT`, `VALUE_DT` | Date de transaction / date valeur |
+| `CCY`, `CCY_CODE`, `AC_CCY` | Code devise ISO |
+| `EVENT`, `EVENT_SR_NO`, `EVENT_SEQ_NO` | Ordre chronologique des événements sur un contrat |
+| `PRODUCT`, `PRODUCT_CODE` | Code produit FCUBS (attention : pas toujours le même nom de colonne) |
+| `MODULE` | Module d'origine (`LD`, `CL`, `IC`, `CH`, `GL`, `MM`, `FX`, ...) |
+
+Ces patterns, bien maîtrisés, permettent d'anticiper les colonnes présentes sans avoir à systématiquement interroger `fcubs.csv`.

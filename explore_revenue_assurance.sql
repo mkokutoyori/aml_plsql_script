@@ -2708,10 +2708,10 @@ BEGIN
                    ROUND(NVL(g.sm,0),2) sm_gl,
                    ROUND(a.sm - NVL(g.sm,0),2) ecart
             FROM (
-                SELECT NVL(AC_GL_NO, AC_NO) gl,
+                SELECT AC_NO gl,
                        SUM(CASE WHEN DRCR_IND = 'C' THEN LCY_AMOUNT ELSE 0 END) sm
                 FROM ACTB_HISTORY
-                GROUP BY NVL(AC_GL_NO, AC_NO)
+                GROUP BY AC_NO
             ) a
             LEFT JOIN (
                 SELECT GL_CODE gl, SUM(CR_MOV_LCY) sm
@@ -3292,9 +3292,6 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [12.13 ACTB_ACCBAL_HISTORY (snapshot soldes EOD)]');
     safe_count('ACTB_ACCBAL_HISTORY', '  Total lignes');
-    SELECT MIN(BKG_DATE), MAX(BKG_DATE) INTO v_num, v_count FROM (
-        SELECT MIN(BKG_DATE) BKG_DATE FROM ACTB_ACCBAL_HISTORY
-        UNION ALL SELECT MAX(BKG_DATE) FROM ACTB_ACCBAL_HISTORY);
     FOR r IN (SELECT MIN(BKG_DATE) mn, MAX(BKG_DATE) mx,
                      COUNT(DISTINCT BKG_DATE) nb_j,
                      COUNT(DISTINCT ACCOUNT) nb_acc
@@ -3756,10 +3753,10 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('  [14.5 Waivers — synthèse RA]');
     SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT WHERE DEFAULT_WAIVER='Y';
     print_kv('  Comptes DEFAULT_WAIVER=Y', TO_CHAR(v_count));
-    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
-    print_kv('  Composants prêt WAIVER=Y', TO_CHAR(v_count));
-    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
-    print_kv('  Prêts distincts avec au moins un WAIVER', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVE='Y';
+    print_kv('  Composants prêt WAIVE=Y', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVE='Y';
+    print_kv('  Prêts distincts avec au moins un WAIVE', TO_CHAR(v_count));
 
     -- 14.6 Echéances prêts dues non payées — unbilled loss
     DBMS_OUTPUT.PUT_LINE('');
@@ -3774,11 +3771,11 @@ BEGIN
       AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
     print_kv('  Σ arriérés CL (AMT_DUE - AMT_SETTLED)', TO_CHAR(v_num));
 
-    -- 14.7 Liquidations sans paiement associé (CLTB_AMOUNT_LIQ orphelines)
+    -- 14.7 Liquidations sans paiement associé (CLTB_LIQ orphelines)
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [14.7 Cohérence liquidations / paiements CL]');
     BEGIN
-      SELECT COUNT(*) INTO v_count FROM CLTB_AMOUNT_LIQ l
+      SELECT COUNT(*) INTO v_count FROM CLTB_LIQ l
       WHERE NOT EXISTS (
         SELECT 1 FROM CLTB_AMOUNT_PAID p
         WHERE p.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER
@@ -3864,9 +3861,9 @@ BEGIN
       SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER a
       WHERE a.USER_DEFINED_STATUS NOT IN ('LIQD','CANC','CLOS')
         AND NOT EXISTS (
-          SELECT 1 FROM CLTB_AMOUNT_LIQ l
+          SELECT 1 FROM CLTB_LIQ l
           WHERE l.ACCOUNT_NUMBER = a.ACCOUNT_NUMBER
-            AND l.LIQ_DATE >= ADD_MONTHS(SYSDATE,-12)
+            AND l.VALUE_DATE >= ADD_MONTHS(SYSDATE,-12)
         );
       print_kv('  Prêts actifs sans liquidation 12m', TO_CHAR(v_count));
     EXCEPTION WHEN OTHERS THEN
@@ -3919,7 +3916,7 @@ BEGIN
       v_amt_sched_overdue  NUMBER := 0;
       v_amt_accrued        NUMBER := 0;
     BEGIN
-      BEGIN SELECT COUNT(*) INTO v_leak_waiver_cl FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVER='Y';
+      BEGIN SELECT COUNT(*) INTO v_leak_waiver_cl FROM CLTB_ACCOUNT_COMPONENTS WHERE WAIVE='Y';
       EXCEPTION WHEN OTHERS THEN NULL; END;
 
       BEGIN SELECT COUNT(*) INTO v_leak_waiver_acc FROM STTM_CUST_ACCOUNT WHERE DEFAULT_WAIVER='Y';
@@ -4601,7 +4598,7 @@ BEGIN
 
     BEGIN
       SELECT COUNT(DISTINCT c.PRODUCT) INTO v_count FROM LDTB_CONTRACT_MASTER c
-      JOIN LDTM_PRODUCT_MASTER p ON p.PRODUCT_CODE = c.PRODUCT
+      JOIN LDTM_PRODUCT_MASTER p ON p.PRODUCT = c.PRODUCT
       WHERE p.BLOCK_PRODUCT='Y'
         AND NVL(c.CONTRACT_STATUS,'A') NOT IN ('L','C');
       print_kv('  Contrats actifs sur produits bloqués', TO_CHAR(v_count));
@@ -4637,7 +4634,7 @@ BEGIN
     print_kv('  Produits avec schedule par défaut', TO_CHAR(v_count));
     SELECT COUNT(*) INTO v_count FROM LDTM_PRODUCT_MASTER m
     WHERE NOT EXISTS (SELECT 1 FROM LDTM_PRODUCT_DFLT_SCHEDULES d
-                      WHERE d.PRODUCT = m.PRODUCT_CODE);
+                      WHERE d.PRODUCT = m.PRODUCT);
     print_kv('  Produits LD SANS schedule par défaut', TO_CHAR(v_count));
 
     -- 17.4 LDTM_PRODUCT_LIQ_ORDER — ordre de liquidation (priorité)

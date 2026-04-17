@@ -2188,6 +2188,212 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S09 - LD CONTRACTS RATE AND SCHEDULE ANOMALIES
+    -- -----------------------------------------------------------------
+    -- [F-080] Echeance LD depassee (LDTB_SCHEDULES.SCHEDULE_DATE <
+    --         v_as_of_date) sur contrats actifs.
+    -- [F-081] Taux d'interet hors grille produit (< MIN ou > MAX de
+    --         LDTM_PRODUCT_MASTER).
+    -- [F-082] Contrats LD expires (MATURITY_DATE < v_as_of_date) mais
+    --         non clotures (AUTH_STAT = 'A', statut non terminal).
+    --
+    -- Severite : HIGH (taux anormal), MEDIUM (echeance manquee isolee),
+    -- HIGH si contrat expire > 30 jours.
+    -- =================================================================
+    DECLARE
+        l_cur      SYS_REFCURSOR;
+        l_ref      VARCHAR2(30);
+        l_prod     VARCHAR2(10);
+        l_ccy      VARCHAR2(3);
+        l_cpty     VARCHAR2(20);
+        l_amt      NUMBER;
+        l_rate     NUMBER;
+        l_min      NUMBER;
+        l_max      NUMBER;
+        l_due_dt   DATE;
+        l_mat_dt   DATE;
+        l_days     NUMBER;
+        l_n_080    PLS_INTEGER := 0;
+        l_n_081    PLS_INTEGER := 0;
+        l_n_082    PLS_INTEGER := 0;
+        l_sql      VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S09') THEN
+            log_info('Section S09 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S09',
+                'LD contracts - rate and schedule anomalies');
+
+            -- [F-080] Echeances LD depassees ------------------------
+            l_sql :=
+                'SELECT m.CONTRACT_REF_NO, m.PRODUCT, m.CCY, '
+             || '       m.COUNTERPARTY, s.SCHEDULE_DATE, '
+             || '       NVL(m.AMOUNT,0) AS NOTIONAL '
+             || '  FROM LDTB_CONTRACT_MASTER m '
+             || '  JOIN LDTB_SCHEDULES s '
+             || '    ON s.CONTRACT_REF_NO = m.CONTRACT_REF_NO '
+             || ' WHERE s.SCHEDULE_DATE < :asof '
+             || '   AND NVL(s.SCHEDULE_FLAG, ''N'') <> ''L'' '
+             || '   AND NVL(m.AUTH_STAT, ''?'') = ''A'' '
+             || '   AND (:p_ccy IS NULL OR m.CCY = :p_ccy) '
+             || ' ORDER BY s.SCHEDULE_DATE ASC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_as_of_date, p_ccy, p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_ccy, l_cpty, l_due_dt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_080 >= NVL(p_top_n, 50);
+
+                    l_days := GREATEST(0, v_as_of_date - l_due_dt);
+
+                    print_finding(
+                        p_section    => 'S09',
+                        p_code       => 'RA-S09-F080',
+                        p_severity   => CASE WHEN l_days > 30
+                                             THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'LD missed schedule: due='
+                                     || f_fmt_ts(l_due_dt)
+                                     || ' age=' || TO_CHAR(l_days) || 'd '
+                                     || ' notional=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_ref,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CCY=' || NVL(l_ccy,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                    );
+                    l_n_080 := l_n_080 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S09',
+                        'F-080 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-081] Taux hors grille produit ----------------------
+            l_sql :=
+                'SELECT m.CONTRACT_REF_NO, m.PRODUCT, m.CCY, '
+             || '       NVL(m.INT_RATE, m.FIXED_RATE) AS RATE, '
+             || '       p.MIN_INT_RATE, p.MAX_INT_RATE, '
+             || '       NVL(m.AMOUNT,0) AS NOTIONAL '
+             || '  FROM LDTB_CONTRACT_MASTER m '
+             || '  LEFT JOIN LDTM_PRODUCT_MASTER p '
+             || '    ON p.PRODUCT = m.PRODUCT '
+             || ' WHERE NVL(m.AUTH_STAT, ''?'') = ''A'' '
+             || '   AND NVL(m.INT_RATE, m.FIXED_RATE) IS NOT NULL '
+             || '   AND ( NVL(m.INT_RATE, m.FIXED_RATE) < NVL(p.MIN_INT_RATE, -1) '
+             || '      OR NVL(m.INT_RATE, m.FIXED_RATE) > NVL(p.MAX_INT_RATE, 1e9) ) '
+             || '   AND (:p_ccy IS NULL OR m.CCY = :p_ccy) '
+             || ' ORDER BY ABS(NVL(m.AMOUNT,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING p_ccy, p_ccy;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_ccy, l_rate, l_min, l_max, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_081 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S09',
+                        p_code       => 'RA-S09-F081',
+                        p_severity   => 'HIGH',
+                        p_message    => 'LD rate out of product range: rate='
+                                     || NVL(TO_CHAR(l_rate,'FM990.0000',
+                                          'NLS_NUMERIC_CHARACTERS=''.,'''),'?')
+                                     || ' min=' || NVL(TO_CHAR(l_min,'FM990.0000',
+                                          'NLS_NUMERIC_CHARACTERS=''.,'''),'?')
+                                     || ' max=' || NVL(TO_CHAR(l_max,'FM990.0000',
+                                          'NLS_NUMERIC_CHARACTERS=''.,'''),'?')
+                                     || ' notional=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_ref,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CCY=' || NVL(l_ccy,'?')
+                    );
+                    l_n_081 := l_n_081 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S09 F-081 unavailable: LDTM_PRODUCT_MASTER or '
+                        || 'rate bounds missing (' || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            -- [F-082] Contrats LD expires non clotures --------------
+            l_sql :=
+                'SELECT m.CONTRACT_REF_NO, m.PRODUCT, m.CCY, m.COUNTERPARTY, '
+             || '       m.MATURITY_DATE, NVL(m.AMOUNT,0) AS NOTIONAL '
+             || '  FROM LDTB_CONTRACT_MASTER m '
+             || ' WHERE m.MATURITY_DATE IS NOT NULL '
+             || '   AND m.MATURITY_DATE < :asof '
+             || '   AND NVL(m.AUTH_STAT, ''?'') = ''A'' '
+             || '   AND UPPER(NVL(m.CONTRACT_STATUS, ''ACTIVE'')) '
+             || '       NOT IN (''L'', ''LIQUIDATED'', ''CLOSED'', ''C'') '
+             || '   AND (:p_ccy IS NULL OR m.CCY = :p_ccy) '
+             || ' ORDER BY m.MATURITY_DATE ASC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_as_of_date, p_ccy, p_ccy;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_prod, l_ccy, l_cpty, l_mat_dt, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_082 >= NVL(p_top_n, 50);
+
+                    l_days := GREATEST(0, v_as_of_date - l_mat_dt);
+
+                    print_finding(
+                        p_section    => 'S09',
+                        p_code       => 'RA-S09-F082',
+                        p_severity   => CASE WHEN l_days > 30
+                                             THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'LD expired but still active: maturity='
+                                     || f_fmt_ts(l_mat_dt)
+                                     || ' age=' || TO_CHAR(l_days) || 'd'
+                                     || ' notional=' || f_fmt_lcy(l_amt),
+                        p_entity     => l_ref,
+                        p_impact_lcy => ABS(l_amt),
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                                     || ' CCY=' || NVL(l_ccy,'?')
+                                     || ' CPTY=' || NVL(f_mask_pii(l_cpty),'?')
+                    );
+                    l_n_082 := l_n_082 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S09',
+                        'F-082 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-080 findings (missed schedule)', TO_CHAR(l_n_080));
+            print_kv('F-081 findings (rate off range)',  TO_CHAR(l_n_081));
+            print_kv('F-082 findings (expired active)',  TO_CHAR(l_n_082));
+
+            print_section_footer('S09', l_n_080 + l_n_081 + l_n_082);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S09', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S09', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

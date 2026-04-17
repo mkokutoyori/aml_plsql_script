@@ -1572,3 +1572,153 @@ Après toute évolution (ajout de section, correction de bug, changement de seui
 - **Archivage** : répertoire `reports/` hors Git, rétention ≥ 24 mois recommandée.
 
 ---
+
+## 12. Gouvernance, planning et approbation
+
+### 12.1 Gouvernance
+
+| Rôle | Titulaire (à compléter) | Responsabilités |
+|---|---|---|
+| **Sponsor** | Direction Financière | Arbitrages stratégiques, priorisation, validation finale du livrable. |
+| **Product Owner** | Audit Interne | Porteur fonctionnel du BRD, validation des contrôles et des sévérités. |
+| **Tech Lead** | DSI / équipe FCUBS | Revue de code, performance, compatibilité, sécurité technique. |
+| **Business Analyst** | Contrôle de Gestion | Mapping PCEC, cohérence COBAC, seuils de matérialité. |
+| **Security Officer** | RSSI / Sécurité SI | Validation des sections SoD (S21–S23) et de la gestion PII. |
+| **Risk & Compliance** | Risk Manager | Validation recommandations, risque opérationnel, reporting réglementaire. |
+| **Développeur** | Équipe projet | Rédaction du script, exécution des tests, correction des anomalies. |
+| **Testeur / Recetteur** | Audit Interne + métiers concernés | Exécution des tests T1–T4, verdict Go/No-Go. |
+
+### 12.2 Comitologie
+
+| Instance | Fréquence | Objet |
+|---|---|---|
+| **Comité de pilotage (COPIL)** | Mensuel pendant le projet, trimestriel ensuite | Avancement, arbitrages, validation jalons. |
+| **Comité technique** | Hebdomadaire pendant la rédaction | Revue de code, anomalies, paramétrages. |
+| **Revue métier** | Ponctuelle à chaque section §7 finalisée | Validation fonctionnelle des contrôles. |
+| **Revue SoD dédiée** | Avant run officiel PROD | Validation S21–S23 avec Sécurité SI et RH. |
+
+### 12.3 Planning indicatif (jalons)
+
+> Les durées sont exprimées en semaines calendaires. Le planning est ajustable selon les disponibilités des parties prenantes.
+
+| Jalon | Livrable | Durée | Dépendance |
+|---|---|---|---|
+| **J0** | Validation du présent BRD | 1 sem | Revue par toutes parties |
+| **J1** | Squelette du script + en-tête + paramètres + helpers + logs | 1 sem | J0 |
+| **J2** | Sections S01–S05 (RA comptes & découverts) | 1 sem | J1 |
+| **J3** | Sections S06–S10 (crédits CL/LD) | 1 sem | J2 |
+| **J4** | Sections S11–S15 (SI, IC, charges, FX) | 1 sem | J3 + mini-scripts §7.Z |
+| **J5** | Sections S16–S20 (contrôle comptable + PCEC) | 1 sem | J4 + mini-scripts §7.Z |
+| **J6** | Sections S21–S23 (contrôles internes & SoD) | 0,5 sem | J5 |
+| **J7** | Agrégations, Executive Summary, KNOWN LIMITATIONS, FOOTER | 0,5 sem | J6 |
+| **J8** | Tests T1 + T2 en UAT | 1 sem | J7 |
+| **J9** | Tests T3 + T4 + recette | 1 sem | J8 |
+| **J10** | Run de référence PROD + approbation formelle | 0,5 sem | J9 |
+| **J11** | Mise en production récurrente (run mensuel planifié) | continu | J10 |
+
+Durée cumulée indicative : **~9 semaines**.
+
+### 12.4 Procédure de livraison
+
+1. Rédaction **section par section**, push unitaire (cf. `bonnes_pratiques.md` §8).
+2. Ouverture d'une **pull request** sur la branche `claude/continue-revenue-assurance-script-RIaih` (ou équivalente).
+3. Revue de code **obligatoire** par le Tech Lead et le Product Owner.
+4. Passage des **tests T1** (compilation, lecture seule, bornes d'exécution).
+5. Passage des **tests T2** fonctionnels en UAT.
+6. Validation COPIL du passage en PROD.
+7. Merge sur `main`, tag `v1.0.0`.
+8. Exécution **de référence** en PROD ; archivage du rapport dans `reports/` hors Git.
+9. Communication du rapport aux destinataires prévus.
+
+### 12.5 Gestion des évolutions (change management)
+
+- Toute évolution DOIT passer par un **ticket** (issue) référencé par son id dans le commit.
+- Une **version `MINOR`** est publiée pour l'ajout d'un contrôle.
+- Une **version `PATCH`** est publiée pour la correction d'un bug ou l'ajustement d'un seuil documenté.
+- Une **version `MAJOR`** est publiée en cas de rupture du format de rapport ou du contrat de paramétrage.
+- Chaque livraison s'accompagne de **release notes** succinctes (résumé des findings ajoutés, seuils modifiés, bugs corrigés).
+
+### 12.6 Indicateurs de suivi post-production
+
+| Indicateur | Cible | Fréquence |
+|---|---|---|
+| Nombre de findings `CRITICAL` par run | ↓ mois après mois | Mensuelle |
+| Impact LCY total | ↓ mois après mois | Mensuelle |
+| Durée d'exécution `FULL` | ≤ 15 min | Chaque run |
+| Nombre d'exceptions catch `[LOG]` | 0 en nominal | Chaque run |
+| Taux de couverture PCEC | ≥ 95 % | Chaque run |
+| Écarts non résolus > 60 jours | 0 pour `CRITICAL` | Trimestrielle |
+
+### 12.7 Maintenance et support
+
+- **Runbook** : documentation d'exploitation (comment lancer, où récupérer le rapport, qui contacter).
+- **Canal support** : référer les anomalies à la DSI / équipe FCUBS.
+- **Revue annuelle** : relecture du BRD une fois par an pour cadrer avec l'évolution de FCUBS, du PCEC et de la politique interne.
+
+### 12.8 Critères de retrait / remplacement
+
+Le script peut être **retiré** ou **remplacé** si :
+- la banque migre hors de FCUBS ;
+- le PCEC COBAC est remplacé par un nouveau référentiel ;
+- un outil RA standard (GRC) couvrant équivalemment les §7 est adopté ;
+- les besoins métier évoluent au-delà de la capacité du bloc PL/SQL monolithique (nécessitant une refonte en package ou en job ETL).
+
+Dans tous les cas, une **archive** du dernier run de référence DOIT être conservée.
+
+### 12.9 Approbation formelle
+
+Le présent BRD entre en vigueur après signature ou validation documentée des parties suivantes :
+
+| Rôle | Nom / Titulaire | Date | Visa |
+|---|---|---|---|
+| Sponsor (Direction Financière) | _à compléter_ |   |   |
+| Product Owner (Audit Interne) | _à compléter_ |   |   |
+| Tech Lead (DSI / FCUBS) | _à compléter_ |   |   |
+| Business Analyst (Contrôle de Gestion) | _à compléter_ |   |   |
+| RSSI / Sécurité SI | _à compléter_ |   |   |
+| Risk & Compliance | _à compléter_ |   |   |
+
+### 12.10 Historique des versions du BRD
+
+| Version | Date | Auteur(s) | Changements |
+|---|---|---|---|
+| 0.1 | 2026-04-17 | Claude (assistant) | Rédaction initiale section par section, alignée sur le rapport d'exploration et le PCEC COBAC R-98/01. |
+| 1.0 | _à venir_ | _après approbation_ | Version validée, figée avant démarrage de la rédaction du script. |
+
+---
+
+## Annexes
+
+### Annexe A — Références
+
+- **COBAC R-98/01** — Plan Comptable des Établissements de Crédit de la CEMAC (1998).
+- **COBAC R-2009/02** — Dispositif de contrôle interne.
+- **Oracle Flexcube Universal Banking** — Core Functional Guide, Data Model Reference.
+- **Oracle Database 11gR2** — PL/SQL Language Reference.
+- **ISO 20022** — Messaging standard (pour codes devises, pays).
+- Documents internes (politique de tarification, grille des frais, politique de dormance, circulaire de provisionnement) — à annexer.
+
+### Annexe B — Artefacts associés
+
+- `bonnes_pratiques.md` — Normes de rédaction du script.
+- `explore_revenue_assurance.sql` — Script d'exploration initial.
+- `revenue_assurance_exploration_report.txt` — Rapport d'exploration exécuté en base.
+- `plan_comptable_cobac.txt` — Référentiel PCEC utilisé.
+- `fcubs.csv` — Dictionnaire des tables/colonnes FCUBS (source de vérité).
+- `revenue_assurance_and_accounting_audit.sql` — Script final (à produire).
+
+### Annexe C — Glossaire des identifiants
+
+- `BR-NN` — Business Requirement (§3).
+- `FR-NN` — Functional Requirement (§4).
+- `NFR-NN` — Non-Functional Requirement (§5).
+- `SNN` — Section d'audit (§7, S01..S23).
+- `F-NNN` — Finding (constat individuel, numérotation séquentielle par section).
+- `R-NN` — Risque projet (§10).
+- `A-NN` — Hypothèse (§10).
+- `L-NN` — Limite connue (§10).
+- `T1-NN / T2-NN / T3-NN / T4-NN` — Tests (§11).
+
+---
+
+*Fin du document BRD.*

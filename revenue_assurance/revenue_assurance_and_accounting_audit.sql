@@ -2887,6 +2887,149 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S13 - CHARGES POSTED BUT UNLINKED / AT ZERO
+    -- -----------------------------------------------------------------
+    -- [F-120] Ecritures ACTB_HISTORY avec TRN_CODE de charge ne
+    --         pouvant etre rattachees a un contrat CHTB_* ou a une
+    --         ligne de liquidation ICTB_LIQ_DETAILS (ecart de
+    --         parametrage).
+    -- [F-121] Lignes ICTB_LIQ_DETAILS avec COMPONENT LIKE 'CHG%' et
+    --         AMOUNT = 0 -> commission parametree mais non perçue.
+    --
+    -- NB : la liste exacte des TRN_CODE de frais depend de la
+    -- configuration locale (cf. BRD §7.Z mini-scripts). En l'absence
+    -- de mapping, F-120 utilise un filtre heuristique TRN_CODE LIKE
+    -- '%CHG%' OR '%CHARGE%' et doit etre valide manuellement.
+    -- =================================================================
+    DECLARE
+        l_cur     SYS_REFCURSOR;
+        l_ref     VARCHAR2(30);
+        l_comp    VARCHAR2(30);
+        l_prod    VARCHAR2(10);
+        l_trn     VARCHAR2(10);
+        l_ac      VARCHAR2(30);
+        l_amt     NUMBER;
+        l_n       NUMBER;
+        l_n_120   PLS_INTEGER := 0;
+        l_n_121   PLS_INTEGER := 0;
+        l_sql     VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S13') THEN
+            log_info('Section S13 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S13',
+                'Charges posted but unlinked or at zero amount');
+
+            -- [F-120] Ecritures de frais sans contrat rattache ----
+            l_sql :=
+                'SELECT h.AC_NO, h.TRN_CODE, COUNT(*) AS N, '
+             || '       NVL(SUM(NVL(h.LCY_AMOUNT,0)),0) AS VOL_LCY '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE (UPPER(NVL(h.TRN_CODE,'' '')) LIKE ''%CHG%'' '
+             || '     OR UPPER(NVL(h.TRN_CODE,'' '')) LIKE ''%CHARGE%'' '
+             || '     OR UPPER(NVL(h.TRN_CODE,'' '')) LIKE ''%FEE%'') '
+             || '   AND h.TRN_DT BETWEEN :d1 AND :d2 '
+             || '   AND NOT EXISTS ( '
+             || '       SELECT 1 FROM ICTB_LIQ_DETAILS d '
+             || '        WHERE d.ACCOUNT = h.AC_NO '
+             || '          AND UPPER(NVL(d.COMPONENT,'' '')) LIKE ''CHG%'' '
+             || '          AND NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) = h.TRN_DT) '
+             || ' GROUP BY h.AC_NO, h.TRN_CODE '
+             || ' ORDER BY NVL(SUM(NVL(h.LCY_AMOUNT,0)),0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_ac, l_trn, l_n, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_120 >= NVL(p_top_n, 50);
+
+                    IF l_amt >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S13',
+                            p_code       => 'RA-S13-F120',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'Charge entries unlinked to liquidation: trn='
+                                         || NVL(l_trn,'?')
+                                         || ' n=' || TO_CHAR(l_n)
+                                         || ' vol=' || f_fmt_lcy(l_amt),
+                            p_entity     => l_ac,
+                            p_impact_lcy => l_amt,
+                            p_evidence   => 'period='
+                                         || f_fmt_ts(v_date_from) || '..'
+                                         || f_fmt_ts(v_date_to)
+                        );
+                        l_n_120 := l_n_120 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S13 F-120 unavailable (ACTB/ICTB join): '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-121] Commissions a zero ---------------------------
+            l_sql :=
+                'SELECT d.ACCOUNT, NVL(d.PRODUCT,''?'') AS PROD, '
+             || '       d.COMPONENT, COUNT(*) AS N '
+             || '  FROM ICTB_LIQ_DETAILS d '
+             || ' WHERE UPPER(NVL(d.COMPONENT,'' '')) LIKE ''CHG%'' '
+             || '   AND NVL(d.AMOUNT,0) = 0 '
+             || '   AND NVL(d.LIQUIDATION_DATE, d.VALUE_DATE) '
+             || '       BETWEEN :d1 AND :d2 '
+             || ' GROUP BY d.ACCOUNT, d.PRODUCT, d.COMPONENT '
+             || ' ORDER BY COUNT(*) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_ac, l_prod, l_comp, l_n;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_121 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S13',
+                        p_code       => 'RA-S13-F121',
+                        p_severity   => CASE WHEN l_n > 20
+                                             THEN 'HIGH' ELSE 'MEDIUM' END,
+                        p_message    => 'Zero-amount charge liquidation: comp='
+                                     || NVL(l_comp,'?') || ' n=' || TO_CHAR(l_n),
+                        p_entity     => l_ac,
+                        p_impact_lcy => NULL,
+                        p_evidence   => 'PROD=' || NVL(l_prod,'?')
+                    );
+                    l_n_121 := l_n_121 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S13 F-121 unavailable: ICTB_LIQ_DETAILS not '
+                        || 'queryable (' || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            print_kv('F-120 findings (unlinked)',    TO_CHAR(l_n_120));
+            print_kv('F-121 findings (zero amount)', TO_CHAR(l_n_121));
+
+            print_section_footer('S13', l_n_120 + l_n_121);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S13', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S13', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

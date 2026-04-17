@@ -1046,3 +1046,125 @@ END;
 ```
 
 Les sections > 60 s deviennent candidates au refactor ou au mode `DEEP` uniquement.
+
+---
+
+## 10. Traçabilité & reproductibilité
+
+### 10.1 Principe
+
+Un audit qui ne peut pas être rejoué à l'identique n'a pas de valeur probante. Le rapport livré aux régulateurs doit pouvoir être reconstitué intégralement à partir :
+
+1. De la version taguée du script.
+2. De la plage temporelle fixée par les paramètres.
+3. D'un état figé de la base (snapshot ou sauvegarde).
+
+### 10.2 Horodatage
+
+Chaque rapport imprime **deux horodatages** :
+
+- `Execution timestamp` — moment de lancement du script (`SYSTIMESTAMP` au démarrage).
+- `Data cut-off` — borne haute des données incluses (`p_date_to` ou `SYSDATE`).
+
+Les deux peuvent diverger si l'audit est lancé à t=J pour une période arrêtée au J-1. Les distinguer évite toute ambiguïté.
+
+### 10.3 Version du script dans le rapport
+
+En tête de chaque rapport, imprimer :
+
+```
+Script version  : revenue_assurance_and_accounting_audit.sql v1.3.2
+Git commit      : 7e50e58 (2026-04-17)
+Script checksum : SHA-256: <hash>
+```
+
+La version se met à jour manuellement dans une constante en tête du script (`C_SCRIPT_VERSION CONSTANT VARCHAR2(20) := '1.3.2';`). Le commit Git peut être imprimé si l'environnement le permet.
+
+### 10.4 Rappel systématique des paramètres
+
+Tout paramètre utilisé est **imprimé** dans la section `AUDIT PARAMETERS` (cf. §2.4). Aucune valeur par défaut masquée. Si un paramètre n'a pas été fourni, imprimer explicitement `(default) <valeur>`.
+
+### 10.5 Déterminisme
+
+Chaque requête doit produire **le même résultat** à données constantes. Vigilance sur :
+
+- **ORDER BY incomplets** : dans un top-N, deux lignes à égalité sur la colonne de tri peuvent permuter entre exécutions. Toujours ajouter une clé de départage stable (`ORDER BY sm DESC, CONTRACT_REF_NO`).
+- **SYSDATE** : si le script utilise `SYSDATE` dans plusieurs endroits, deux évaluations à quelques secondes d'intervalle peuvent produire des bornes légèrement différentes. Fixer une variable `v_run_ts := SYSDATE` au début et la réutiliser.
+- **ROWID** : jamais utiliser `ROWID` comme tri ou référence. Non stable entre réorganisations.
+- **Fonctions non déterministes** : éviter `DBMS_RANDOM`, `SYS_GUID()` dans un audit.
+
+### 10.6 Logs d'exécution séparés
+
+Outre le rapport d'audit principal (output fonctionnel), produire un **log technique** parallèle contenant :
+
+- Chaque erreur non-bloquante (`SQLERRM`).
+- Chaque table ignorée pour cause d'absence.
+- Chaque paramètre ajusté (ex. `p_materiality_lcy < 0 -> abs value applied`).
+- Chaque chronométrage par section.
+
+Ces deux flux peuvent partager le même fichier de sortie en les distinguant par préfixe :
+
+```
+[AUDIT ] Finding [F-042] ...
+[LOG   ] Table LDTM_XYZ ignored: ORA-00942
+[PERF  ] Section 12 duration: 4.2s
+```
+
+### 10.7 Archivage des rapports
+
+Chaque rapport d'exécution est archivé dans `revenue_assurance/reports/` sous la forme :
+
+```
+reports/audit_report_<env>_<YYYYMMDD>_<HHMM>.txt
+```
+
+Exemple : `reports/audit_report_PROD_20260417_1127.txt`.
+
+Ne pas écraser un rapport précédent : l'historique permet de tracer l'évolution des indicateurs dans le temps.
+
+### 10.8 Comparaison avec l'exécution précédente
+
+Si un rapport précédent existe dans `reports/`, le script peut en extraire les compteurs des findings clés et afficher l'évolution :
+
+```
+  [F-042] Accrued DR on dormant accounts
+    Current run  : 179 records / 6,392,829 XAF
+    Previous run : 203 records / 7,840,112 XAF  (-24 records, -18.5%)
+```
+
+Cela transforme un audit statique en outil de suivi dynamique. Comparaison mécanique sur les `[F-NNN]`.
+
+### 10.9 Documentation du schéma FCUBS utilisé
+
+Maintenir un fichier `doc/data_dictionary_ra.md` qui liste **toutes les tables et colonnes** effectivement utilisées par le script d'audit, avec :
+
+- Le nom de la table.
+- Les colonnes lues.
+- La sémantique métier de chaque colonne.
+- Le finding / la section qui l'utilise.
+
+Ce document est mis à jour à chaque ajout de section. Il sert d'annexe à la documentation d'audit et facilite la vérification de la portée par le client.
+
+### 10.10 Pas de mutation de la base
+
+**Interdit absolu** : `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`, `CREATE`, `ALTER`, `DROP`, `GRANT` sur les tables FCUBS.
+
+Exception : `CREATE GLOBAL TEMPORARY TABLE` pour des besoins internes (§9.8), et seulement dans un schéma d'audit dédié. Même dans ce cas, nettoyage systématique en fin de script.
+
+Le script d'audit est en **lecture seule**. Toute tentative d'écriture doit faire échouer le script en erreur explicite.
+
+### 10.11 Annonce de fin claire
+
+Le rapport se termine par une ligne sans ambiguïté :
+
+```
+>>> END OF AUDIT — no runtime errors
+```
+
+ou
+
+```
+>>> END OF AUDIT — with 2 non-blocking warnings (see [LOG] entries)
+```
+
+Le client doit savoir en un coup d'œil si l'audit s'est terminé normalement, même si des erreurs non-bloquantes sont survenues.

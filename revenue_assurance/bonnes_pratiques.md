@@ -752,3 +752,138 @@ END OF AUDIT RUN
 ```
 
 Les métriques d'exécution permettent au client de suivre la dérive de performance dans le temps et d'identifier les sections qui ralentissent.
+
+---
+
+## 8. Workflow Git & livraisons
+
+### 8.1 Branche de travail
+
+Tout le développement se fait sur **une branche dédiée** nommée selon le contexte de la tâche (exemple actuel : `claude/continue-revenue-assurance-script-RIaih`). Ne jamais pousser directement sur `main` ou `master`.
+
+### 8.2 Granularité des commits
+
+**Règle d'or** : un commit = une section logique terminée. Pas plusieurs sections dans un seul commit, pas une section coupée en plusieurs commits (sauf correctif de bug).
+
+Avantages :
+
+- Le reviewer lit le diff section par section.
+- `git revert` ou `git bisect` isole une régression à la section près.
+- Le `git log` devient un plan de livraison lisible.
+
+### 8.3 Message de commit
+
+Format imposé :
+
+```
+<livrable> <numéro de section>: <résumé impératif concis>
+```
+
+Exemples :
+
+- `bonnes_pratiques §5: Verification du dictionnaire de donnees`
+- `audit_script §12: Overdraft tacite sans TOD_LIMIT`
+- `explore_revenue_assurance.sql Section 15: LDTB ICCF detaille`
+- `Fix ORA-01722: EXITFLAG (NUMBER) needs TO_CHAR in NVL`
+
+Règles :
+
+- Pas d'accents ni caractères spéciaux dans le titre (portabilité terminal).
+- Mode impératif : « Fix », « Add », « Refactor », pas « Fixed » ni « Adding ».
+- Titre en 72 caractères maximum.
+- Si le commit mérite une explication, un corps de message suit le titre après une ligne blanche.
+
+### 8.4 Push après chaque commit
+
+Push **systématique après chaque commit** :
+
+```bash
+git push -u origin <branch>
+```
+
+Pas de batching local. Le client doit pouvoir consulter la progression sur GitHub en temps réel.
+
+### 8.5 Retry en cas d'échec réseau
+
+Si `git push` échoue pour cause réseau, retry jusqu'à 4 fois avec backoff exponentiel (2 s, 4 s, 8 s, 16 s). Si l'échec persiste, signaler au client, ne pas tenter de forcer le push.
+
+### 8.6 Ne jamais forcer le push
+
+**Interdits absolus** sauf demande explicite écrite du client :
+
+- `git push --force`
+- `git push --force-with-lease`
+- `git reset --hard` suivi d'un push
+- `git commit --amend` sur un commit déjà poussé
+
+Si un commit est erroné, créer un **nouveau commit** qui annule ou corrige. L'historique doit rester linéaire et traçable.
+
+### 8.7 Pull / fetch réguliers
+
+Avant toute nouvelle session de travail :
+
+```bash
+git fetch origin <branch>
+git pull origin <branch>
+```
+
+Pour récupérer les éventuels ajouts du client (rapports d'exécution, nouveaux scripts, données complémentaires). Cas typique : le client a exécuté le script d'exploration et poussé le rapport de sortie dans le repo.
+
+### 8.8 Structure du répertoire `revenue_assurance/`
+
+Convention de structure cible :
+
+```
+revenue_assurance/
+├── bonnes_pratiques.md               # Ce document
+├── BRD_revenue_assurance.md          # Business Requirements Document
+├── revenue_assurance_and_accounting_audit.sql   # Script d'audit principal
+├── plan_comptable_cobac.txt          # Référence PCEC
+├── explore_revenue_assurance.sql     # Script d'exploration (pré-audit)
+├── revenue_assurance_exploration_report.txt      # Sortie d'exploration
+├── exploration/                      # Mini-scripts d'exploration ad-hoc
+│   ├── explore_negotiated_rate.sql
+│   └── ...
+├── reports/                          # Sorties d'exécution de l'audit
+│   ├── audit_report_2026-04-17.txt
+│   └── ...
+└── doc/                              # Documentation annexe
+    ├── data_dictionary_ra.md
+    └── changelog.md
+```
+
+Ne pas polluer la racine du repo avec des fichiers transitoires.
+
+### 8.9 Jamais d'écriture hors du répertoire du projet
+
+Les scripts d'audit et la documentation restent confinés dans `revenue_assurance/`. Ne jamais créer de fichiers dans `/tmp`, `/home/user/`, ou tout autre chemin hors repo, sauf pour les sorties de spool explicitement documentées (dans ce cas le chemin est un paramètre du script).
+
+### 8.10 Secrets & données sensibles
+
+- **Jamais** de credentials dans les fichiers committés (pas de mot de passe Oracle, pas de token GitHub).
+- Pas de données personnelles client en clair dans les rapports d'exemple committés. Si un rapport réel est committé pour archive, anonymiser les CIF / numéros de compte.
+- Utiliser `.gitignore` pour exclure les fichiers de config local (`wallet/`, `.env`, `sqlnet.ora`).
+
+### 8.11 Pull requests & revues
+
+Une fois la branche prête pour livraison :
+
+- Créer une Pull Request vers `main` **uniquement sur demande explicite** du client.
+- La PR reprend dans sa description :
+  - Liste des livrables
+  - Sections principales ajoutées
+  - Instructions de test (comment lancer le script, paramètres conseillés)
+  - Références aux rapports d'exécution
+
+Le client procède à la revue section par section, et demande les ajustements via commentaires GitHub.
+
+### 8.12 Tag de version
+
+Après validation et merge, taguer la livraison :
+
+```
+git tag -a ra-v1.0 -m "Revenue Assurance audit — v1.0 production release"
+git push origin ra-v1.0
+```
+
+Ce tag fige une version reproductible du livrable pour archivage et audit.

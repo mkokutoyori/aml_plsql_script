@@ -887,3 +887,162 @@ git push origin ra-v1.0
 ```
 
 Ce tag fige une version reproductible du livrable pour archivage et audit.
+
+---
+
+## 9. Performance & scalabilité
+
+### 9.1 Hypothèses de volumétrie
+
+FCUBS en production contient typiquement :
+
+- `ACTB_HISTORY` : plusieurs millions de lignes (observé : 5,8 M).
+- `CLTB_ACCOUNT_SCHEDULES` : centaines de milliers de lignes.
+- `STTM_CUST_ACCOUNT` : dizaines de milliers.
+- `SMTB_SMS_LOG`, `SMTB_SMS_ACTION_LOG` : millions de lignes (observé : 1,8 M).
+
+Un script qui tombe en timeout à 30 minutes sur `ACTB_HISTORY` est inutilisable. La performance n'est pas un raffinement : c'est un **critère de mise en production**.
+
+### 9.2 Cibles de temps d'exécution
+
+| Mode | Cible | Si dépassé |
+|---|---|---|
+| `SUMMARY` | < 2 min | refactor obligatoire |
+| `FULL` | < 15 min | acceptable pour une exécution de nuit |
+| `DEEP` | < 60 min | toléré pour audit trimestriel |
+
+Mesurer systématiquement via `SET TIMING ON` et imprimer la durée de chaque section dans le rapport.
+
+### 9.3 Filtrage précoce
+
+Appliquer les paramètres de filtre (§2) **au plus tôt** dans la requête. Éviter :
+
+```sql
+-- MAUVAIS : agrège toute la table puis filtre
+SELECT * FROM (
+    SELECT BRANCH_CODE, SUM(LCY_AMOUNT) sm
+    FROM ACTB_HISTORY
+    GROUP BY BRANCH_CODE
+) WHERE BRANCH_CODE = p_branch_code;
+```
+
+Préférer :
+
+```sql
+-- BIEN : filtre avant le GROUP BY
+SELECT BRANCH_CODE, SUM(LCY_AMOUNT) sm
+FROM ACTB_HISTORY
+WHERE (p_branch_code IS NULL OR BRANCH_CODE = p_branch_code)
+  AND (p_date_from IS NULL OR TRN_DT >= p_date_from)
+GROUP BY BRANCH_CODE;
+```
+
+### 9.4 Index présumés
+
+FCUBS crée des index sur les clés métier standard (`TRN_REF_NO`, `BRANCH_CODE + TRN_DT`, `AC_NO`). Privilégier les filtres sur ces colonnes quand plusieurs options sont possibles.
+
+Ne pas présumer d'index sur des colonnes secondaires (`AML_EXCEPTION`, `DONT_SHOWIN_STMT`) : un filtre sur une seule de ces colonnes sans filtre temporel associé peut provoquer un full scan.
+
+### 9.5 Full scan volontaire — bannière d'avertissement
+
+Certains contrôles imposent un full scan (comptage global sur `ACTB_HISTORY` sans filtre temporel, par exemple). Dans ce cas :
+
+- Imprimer une bannière dans le rapport : `Note: Full table scan on ACTB_HISTORY (~5.8M rows), expect ~45s`.
+- Mettre ce contrôle en mode `DEEP` uniquement si possible.
+- Justifier en commentaire dans le code pourquoi le full scan est nécessaire.
+
+### 9.6 HINTs Oracle — à éviter par défaut
+
+Ne pas sprinkler de `/*+ INDEX(...) */` sans nécessité. L'optimiseur Oracle gère généralement bien les plans de requêtes. Un hint mal choisi fige un plan qui devient sous-optimal après évolution statistique des tables.
+
+Exceptions tolérées :
+
+- `/*+ PARALLEL(8) */` sur les agrégats lourds en mode `DEEP`.
+- `/*+ FIRST_ROWS(25) */` pour les top-N quand `ORDER BY` est sur une colonne indexée.
+
+Toujours commenter l'intention du hint.
+
+### 9.7 Sampling pour explorations visuelles
+
+Pour un aperçu (pas pour un audit complet), utiliser l'échantillonnage natif Oracle :
+
+```sql
+SELECT *
+FROM ACTB_HISTORY SAMPLE (0.1)    -- 0.1 % de l'échantillon
+WHERE LCY_AMOUNT > 1000000;
+```
+
+Plus rapide qu'un full scan et suffisant pour valider la forme des données. À **ne pas** utiliser pour les chiffres de reporting final : le sampling fausse les agrégats.
+
+### 9.8 Matérialisation intermédiaire
+
+Pour les audits complexes qui réutilisent un même sous-ensemble plusieurs fois, envisager une table temporaire de travail :
+
+```sql
+-- En tête du script (si droits disponibles)
+CREATE GLOBAL TEMPORARY TABLE t_ra_recent_movements ON COMMIT PRESERVE ROWS AS
+SELECT * FROM ACTB_HISTORY WHERE 1=0;
+
+-- Dans le script
+INSERT INTO t_ra_recent_movements
+SELECT * FROM ACTB_HISTORY
+WHERE TRN_DT BETWEEN p_date_from AND p_date_to
+  AND (p_branch_code IS NULL OR BRANCH_CODE = p_branch_code);
+```
+
+Les requêtes ultérieures tournent sur la temp table (quelques milliers de lignes au lieu de millions). Attention : les droits `CREATE TABLE` ne sont pas toujours accordés au schéma d'audit. Prévoir un fallback.
+
+### 9.9 Évitement des N+1
+
+**Interdit** : ouvrir un curseur sur une table, puis pour chaque ligne exécuter un `SELECT` sur une autre table.
+
+```sql
+-- TRÈS MAUVAIS
+FOR r IN (SELECT CONTRACT_REF_NO FROM LDTB_CONTRACT_MASTER WHERE ...) LOOP
+    SELECT SUM(AMOUNT) INTO v_sum
+    FROM LDTB_CONTRACT_LIQ
+    WHERE CONTRACT_REF_NO = r.CONTRACT_REF_NO;
+    print_kv('  Contract ' || r.CONTRACT_REF_NO, TO_CHAR(v_sum));
+END LOOP;
+```
+
+Remplacer par une seule jointure agrégée :
+
+```sql
+FOR r IN (
+    SELECT m.CONTRACT_REF_NO, NVL(SUM(l.AMOUNT), 0) sm
+    FROM LDTB_CONTRACT_MASTER m
+    LEFT JOIN LDTB_CONTRACT_LIQ l ON l.CONTRACT_REF_NO = m.CONTRACT_REF_NO
+    WHERE m.CONTRACT_STATUS = 'A'
+    GROUP BY m.CONTRACT_REF_NO
+) LOOP
+    print_kv('  Contract ' || r.CONTRACT_REF_NO, TO_CHAR(r.sm));
+END LOOP;
+```
+
+### 9.10 Limiter DBMS_OUTPUT
+
+Le buffer `DBMS_OUTPUT` est mémoire. Imprimer des millions de lignes est :
+
+1. Lent (chaque ligne transite par le buffer puis l'affichage).
+2. Illisible (rapport inexploitable).
+3. Potentiellement tronqué malgré `SIZE UNLIMITED`.
+
+**Règle** : les top-N se limitent à `p_top_n` (défaut 25, max 100). Ne jamais imprimer une liste non bornée. Pour les drill-downs massifs, prévoir un export CSV via `UTL_FILE`.
+
+### 9.11 Chronométrage par section
+
+Instrumenter chaque section avec un chronométrage :
+
+```sql
+DECLARE
+    v_t0 TIMESTAMP;
+BEGIN
+    v_t0 := SYSTIMESTAMP;
+    -- corps de la section
+    print_kv('  Section duration',
+             TO_CHAR(EXTRACT(SECOND FROM (SYSTIMESTAMP - v_t0))) || 's');
+END;
+```
+
+Les sections > 60 s deviennent candidates au refactor ou au mode `DEEP` uniquement.

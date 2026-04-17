@@ -3953,6 +3953,243 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- S18 -- Suspense accounts ageing (PCEC class 38)
+    -- =================================================================
+    -- [F-170] Suspense GL balances aged > 30/60/90/180 days.
+    -- [F-171] Suspense GLs with only one-sided movements
+    --         (DR without CR or CR without DR) over period.
+    -- [F-172] Suspense GLs with balance on unexpected side.
+    -- PCEC/38 (regularisation et attente).
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_sql       VARCHAR2(4000);
+        l_n_170     PLS_INTEGER := 0;
+        l_n_171     PLS_INTEGER := 0;
+        l_n_172     PLS_INTEGER := 0;
+        l_gl        VARCHAR2(30);
+        l_branch    VARCHAR2(10);
+        l_bal       NUMBER;
+        l_oldest    DATE;
+        l_age_d     NUMBER;
+        l_dr_cnt    NUMBER;
+        l_cr_cnt    NUMBER;
+        l_dr_amt    NUMBER;
+        l_cr_amt    NUMBER;
+        l_sev       VARCHAR2(10);
+    BEGIN
+        IF NOT f_section_enabled('S18') THEN
+            log_info('Section S18 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S18',
+                'Suspense accounts ageing (PCEC/38)');
+
+            -- Detection base: GL codes starting with ''38'' (COBAC PCEC)
+            -- ou libelle contenant SUSPENSE / ATTENTE.
+
+            -- [F-170] Suspense balances with ageing --------------------
+            l_sql :=
+                'SELECT b.GL_CODE, b.BRANCH_CODE, '
+             || '       NVL(b.CLOSING_BAL_LCY,0) AS BAL, '
+             || '       ( SELECT MIN(TRUNC(h.TRN_DT)) '
+             || '           FROM ACTB_HISTORY h '
+             || '          WHERE h.GL_CODE = b.GL_CODE '
+             || '            AND h.BRANCH_CODE = b.BRANCH_CODE '
+             || '            AND h.TRN_DT <= :d_to '
+             || '       ) AS OLDEST '
+             || '  FROM GLTB_GL_BAL b '
+             || ' WHERE SUBSTR(NVL(b.GL_CODE,''0''),1,2) = ''38'' '
+             || '   AND ABS(NVL(b.CLOSING_BAL_LCY,0)) > 0 '
+             || '   AND (:p_branch IS NULL '
+             || '        OR b.BRANCH_CODE = :p_branch) '
+             || ' ORDER BY ABS(NVL(b.CLOSING_BAL_LCY,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_to, p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur INTO l_gl, l_branch, l_bal, l_oldest;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_170 >= NVL(p_top_n, 50);
+
+                    IF l_oldest IS NULL THEN
+                        l_age_d := NULL;
+                    ELSE
+                        l_age_d := TRUNC(v_date_to) - TRUNC(l_oldest);
+                    END IF;
+
+                    IF ABS(NVL(l_bal, 0))
+                       < NVL(p_materiality_lcy, 0) THEN
+                        NULL;
+                    ELSE
+                        l_sev := 'MEDIUM';
+                        IF NVL(l_age_d, 0) > 180
+                           OR ABS(NVL(l_bal, 0))
+                              >= NVL(p_materiality_critical_lcy, 0) THEN
+                            l_sev := 'CRITICAL';
+                        ELSIF NVL(l_age_d, 0) > 90
+                           OR ABS(NVL(l_bal, 0))
+                              >= NVL(p_materiality_impact_lcy, 0) THEN
+                            l_sev := 'HIGH';
+                        ELSIF NVL(l_age_d, 0) > 60 THEN
+                            l_sev := 'HIGH';
+                        END IF;
+
+                        print_finding(
+                            p_section    => 'S18',
+                            p_code       => 'RA-S18-F170',
+                            p_severity   => l_sev,
+                            p_message    => 'Suspense balance aged: bal='
+                                         || f_fmt_lcy(l_bal)
+                                         || ' age_days='
+                                         || NVL(TO_CHAR(l_age_d), '?'),
+                            p_entity     => l_gl,
+                            p_impact_lcy => ABS(NVL(l_bal, 0)),
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                         || ' OLDEST='
+                                         || NVL(TO_CHAR(l_oldest,
+                                                'YYYY-MM-DD'), '?')
+                        );
+                        l_n_170 := l_n_170 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S18 F-170 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-171] One-sided movements on suspense GLs --------------
+            l_sql :=
+                'SELECT h.GL_CODE, h.BRANCH_CODE, '
+             || '       SUM(CASE WHEN h.DR_CR = ''D'' THEN 1 ELSE 0 END) '
+             || '                                    AS DR_CNT, '
+             || '       SUM(CASE WHEN h.DR_CR = ''C'' THEN 1 ELSE 0 END) '
+             || '                                    AS CR_CNT, '
+             || '       SUM(CASE WHEN h.DR_CR = ''D'' '
+             || '                THEN NVL(h.LCY_AMOUNT,0) ELSE 0 END) '
+             || '                                    AS DR_AMT, '
+             || '       SUM(CASE WHEN h.DR_CR = ''C'' '
+             || '                THEN NVL(h.LCY_AMOUNT,0) ELSE 0 END) '
+             || '                                    AS CR_AMT '
+             || '  FROM ACTB_HISTORY h '
+             || ' WHERE SUBSTR(NVL(h.GL_CODE,''0''),1,2) = ''38'' '
+             || '   AND TRUNC(h.TRN_DT) BETWEEN :d1 AND :d2 '
+             || '   AND (:p_branch IS NULL '
+             || '        OR h.BRANCH_CODE = :p_branch) '
+             || ' GROUP BY h.GL_CODE, h.BRANCH_CODE '
+             || 'HAVING (SUM(CASE WHEN h.DR_CR = ''D'' THEN 1 ELSE 0 END) = 0 '
+             || '     OR SUM(CASE WHEN h.DR_CR = ''C'' THEN 1 ELSE 0 END) = 0)'
+             || ' ORDER BY ABS(SUM(NVL(h.LCY_AMOUNT,0))) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING v_date_from, v_date_to,
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur
+                     INTO l_gl, l_branch, l_dr_cnt, l_cr_cnt,
+                          l_dr_amt, l_cr_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_171 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S18',
+                        p_code       => 'RA-S18-F171',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Suspense GL one-sided: DR_cnt='
+                                     || TO_CHAR(l_dr_cnt)
+                                     || ' CR_cnt=' || TO_CHAR(l_cr_cnt)
+                                     || ' DR_amt=' || f_fmt_lcy(l_dr_amt)
+                                     || ' CR_amt=' || f_fmt_lcy(l_cr_amt),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_dr_amt, 0)
+                                         - NVL(l_cr_amt, 0)),
+                        p_evidence   => 'BR=' || NVL(l_branch,'?')
+                    );
+                    l_n_171 := l_n_171 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S18 F-171 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            -- [F-172] Suspense GL with balance on unexpected side ------
+            -- Suspense accounts should normally carry a small balance.
+            -- Flag GLs with |closing| > p_materiality_impact_lcy as
+            -- unusual concentration that may indicate wrong side.
+            l_sql :=
+                'SELECT b.GL_CODE, b.BRANCH_CODE, '
+             || '       NVL(b.CLOSING_BAL_LCY,0) AS BAL '
+             || '  FROM GLTB_GL_BAL b '
+             || ' WHERE SUBSTR(NVL(b.GL_CODE,''0''),1,2) = ''38'' '
+             || '   AND ABS(NVL(b.CLOSING_BAL_LCY,0)) >= :mat '
+             || '   AND (:p_branch IS NULL '
+             || '        OR b.BRANCH_CODE = :p_branch) '
+             || ' ORDER BY ABS(NVL(b.CLOSING_BAL_LCY,0)) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql
+                USING NVL(p_materiality_impact_lcy, 1000000),
+                      p_branch_code, p_branch_code;
+                LOOP
+                    FETCH l_cur INTO l_gl, l_branch, l_bal;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_172 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S18',
+                        p_code       => 'RA-S18-F172',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Suspense GL material balance '
+                                     || '(side to review): bal='
+                                     || f_fmt_lcy(l_bal),
+                        p_entity     => l_gl,
+                        p_impact_lcy => ABS(NVL(l_bal, 0)),
+                        p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                     || ' SIDE='
+                                     || CASE WHEN l_bal >= 0
+                                             THEN 'DR' ELSE 'CR' END
+                    );
+                    l_n_172 := l_n_172 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S18 F-172 unavailable: '
+                        || SUBSTR(SQLERRM, 1, 120));
+            END;
+
+            print_kv('F-170 findings (aged)',       TO_CHAR(l_n_170));
+            print_kv('F-171 findings (one-sided)',  TO_CHAR(l_n_171));
+            print_kv('F-172 findings (material)',   TO_CHAR(l_n_172));
+
+            print_section_footer('S18',
+                l_n_170 + l_n_171 + l_n_172);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S18', 'Section aborted: '
+                || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S18', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

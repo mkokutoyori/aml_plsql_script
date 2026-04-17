@@ -564,15 +564,159 @@ DECLARE
     END f_section_enabled;
 
 BEGIN
-    -- Corps du rapport construit dans les sections suivantes du
-    -- script. A ce stade, on imprime uniquement l'empreinte de
-    -- version et on arrete proprement.
-    DBMS_OUTPUT.PUT_LINE('Revenue Assurance audit - ' || C_SCRIPT_NAME || ' v' || C_SCRIPT_VERSION);
-    DBMS_OUTPUT.PUT_LINE('Regulation: ' || C_REGULATION);
-    DBMS_OUTPUT.PUT_LINE('Report format version: ' || C_REPORT_FORMAT_VERSION);
-    DBMS_OUTPUT.PUT_LINE('Build stage: parameters declared (section 1).');
+    -- =================================================================
+    -- SECTION 3 - INITIALISATION DES VALEURS EFFECTIVES ET ECHO
+    -- -----------------------------------------------------------------
+    -- 3.1 Demarre le chrono global [PERF].
+    -- 3.2 Collecte les metadonnees d'environnement (user, instance,
+    --     run_id) via SYS_CONTEXT. Repli silencieux sur USER si l'acces
+    --     au contexte est refuse.
+    -- 3.3 Resolve la date metier FCUBS a partir de SMTB_BANK_PARAMETERS.
+    --     Repli sur TRUNC(SYSDATE) avec journal [WARN] si la table n'est
+    --     pas accessible.
+    -- 3.4 Calcule le perimetre temporel effectif :
+    --       v_date_to    = p_date_to    ou date metier
+    --       v_date_from  = p_date_from  ou 1er du mois precedent
+    --       v_as_of_date = p_as_of_date ou date metier
+    --     Journalise un [WARN] si les bornes sont inversees.
+    -- 3.5 Imprime la banniere du rapport (identite du script).
+    -- 3.6 Echo integral des parametres effectifs (BRD §6.3) - aucune
+    --     donnee sensible n'est imprimee en clair : p_customer_no et
+    --     p_account_no passent par f_mask_pii ; pour les collections
+    --     seule la cardinalite est publiee.
+    -- =================================================================
+
+    -- 3.1 Chrono global -------------------------------------------------
+    g_t_start := DBMS_UTILITY.GET_TIME;
+
+    -- 3.2 Metadonnees d'environnement -----------------------------------
+    BEGIN
+        SELECT SYS_CONTEXT('USERENV','SESSION_USER'),
+               SYS_CONTEXT('USERENV','INSTANCE_NAME')
+          INTO v_db_user, v_instance_name
+          FROM DUAL;
+    EXCEPTION
+        WHEN OTHERS THEN
+            v_db_user       := USER;
+            v_instance_name := NULL;
+    END;
+
+    v_run_id := TO_CHAR(SYSDATE, 'YYYYMMDD-HH24MISS')
+                || '-' || NVL(SYS_CONTEXT('USERENV','SESSIONID'), '0');
+
+    -- 3.3 Date metier FCUBS --------------------------------------------
+    v_business_date := safe_scalar_date(
+        'INIT',
+        'SELECT MIN(TODAY) FROM SMTB_BANK_PARAMETERS'
+    );
+    IF v_business_date IS NULL THEN
+        log_warn('FCUBS business date unavailable; fallback to TRUNC(SYSDATE).');
+        v_business_date := TRUNC(SYSDATE);
+    END IF;
+
+    -- 3.4 Perimetre temporel effectif ----------------------------------
+    v_as_of_date := NVL(p_as_of_date, v_business_date);
+    v_date_to    := NVL(p_date_to,    v_business_date);
+    v_date_from  := NVL(p_date_from,
+                        ADD_MONTHS(TRUNC(v_business_date, 'MM'), -1));
+
+    IF v_date_from > v_date_to THEN
+        log_warn('p_date_from > p_date_to : bornes inversees, rapport potentiellement vide.');
+    END IF;
+
+    -- 3.5 Banniere ------------------------------------------------------
+    DBMS_OUTPUT.PUT_LINE(RPAD('=', 78, '='));
+    DBMS_OUTPUT.PUT_LINE('REVENUE ASSURANCE & ACCOUNTING AUDIT');
+    DBMS_OUTPUT.PUT_LINE(RPAD('=', 78, '='));
+    print_kv('Script',          C_SCRIPT_NAME || ' v' || C_SCRIPT_VERSION);
+    print_kv('Report format',   C_REPORT_FORMAT_VERSION);
+    print_kv('Regulation',      C_REGULATION);
+    print_kv('Run id',          v_run_id);
+    print_kv('Run timestamp',   f_fmt_ts(SYSDATE));
+    print_kv('DB user',         NVL(v_db_user, '?'));
+    print_kv('DB instance',     NVL(v_instance_name, '?'));
+    print_kv('Business date',   f_fmt_ts(v_business_date));
+    DBMS_OUTPUT.PUT_LINE(RPAD('=', 78, '='));
+
+    -- 3.6 Echo des parametres effectifs (BRD §6.3) ---------------------
+    print_section_header('PARAMS', 'Effective parameters (echo)');
+
+    -- 3.6.a Perimetre temporel
+    print_kv('p_date_from',                 f_fmt_ts(v_date_from));
+    print_kv('p_date_to',                   f_fmt_ts(v_date_to));
+    print_kv('p_as_of_date',                f_fmt_ts(v_as_of_date));
+
+    -- 3.6.b Organisation / agence
+    print_kv('p_branch_code',               NVL(p_branch_code, '<ALL>'));
+    print_kv('p_branch_list.count',         TO_CHAR(
+        CASE WHEN p_branch_list IS NULL THEN 0 ELSE p_branch_list.COUNT END));
+    print_kv('p_department',                NVL(p_department, '<ALL>'));
+
+    -- 3.6.c Client / compte (PII masque)
+    print_kv('p_customer_no',               NVL(f_mask_pii(p_customer_no), '<ALL>'));
+    print_kv('p_customer_list.count',       TO_CHAR(
+        CASE WHEN p_customer_list IS NULL THEN 0 ELSE p_customer_list.COUNT END));
+    print_kv('p_account_no',                NVL(f_mask_pii(p_account_no), '<ALL>'));
+    print_kv('p_account_list.count',        TO_CHAR(
+        CASE WHEN p_account_list IS NULL THEN 0 ELSE p_account_list.COUNT END));
+    print_kv('p_customer_segment',          NVL(p_customer_segment, '<ALL>'));
+
+    -- 3.6.d Produits / modules
+    print_kv('p_module',                    NVL(p_module, '<ALL>'));
+    print_kv('p_product_list.count',        TO_CHAR(
+        CASE WHEN p_product_list IS NULL THEN 0 ELSE p_product_list.COUNT END));
+    print_kv('p_account_class_list.count',  TO_CHAR(
+        CASE WHEN p_account_class_list IS NULL THEN 0 ELSE p_account_class_list.COUNT END));
+
+    -- 3.6.e Devises
+    print_kv('p_ccy',                       NVL(p_ccy, '<ALL>'));
+    print_kv('p_ccy_list.count',            TO_CHAR(
+        CASE WHEN p_ccy_list IS NULL THEN 0 ELSE p_ccy_list.COUNT END));
+    print_kv('p_include_fcy_only',          p_include_fcy_only);
+
+    -- 3.6.f Seuils de materialite
+    print_kv('p_materiality_lcy',           f_fmt_lcy(p_materiality_lcy));
+    print_kv('p_materiality_impact_lcy',    f_fmt_lcy(p_materiality_impact_lcy));
+    print_kv('p_materiality_critical_lcy',  f_fmt_lcy(p_materiality_critical_lcy));
+    print_kv('p_min_days_overdue',          TO_CHAR(p_min_days_overdue));
+    print_kv('p_min_days_dormant',          TO_CHAR(p_min_days_dormant));
+
+    -- 3.6.g Mode et verbosite
+    print_kv('p_mode',                      p_mode);
+    print_kv('p_top_n',                     TO_CHAR(p_top_n));
+    print_kv('p_verbose',                   p_verbose);
+    print_kv('p_include_perf_log',          p_include_perf_log);
+    print_kv('p_mask_pii',                  p_mask_pii);
+    print_kv('p_language',                  p_language);
+
+    -- 3.6.h Filtrage de sections
+    print_kv('p_sections_include.count',    TO_CHAR(
+        CASE WHEN p_sections_include IS NULL THEN 0 ELSE p_sections_include.COUNT END));
+    print_kv('p_sections_exclude.count',    TO_CHAR(
+        CASE WHEN p_sections_exclude IS NULL THEN 0 ELSE p_sections_exclude.COUNT END));
+
+    -- 3.6.i Parametres anti-fraude (BRD §15.6)
+    print_kv('p_structuring_threshold_lcy', f_fmt_lcy(p_structuring_threshold_lcy));
+    print_kv('p_reversal_window_hours',     TO_CHAR(p_reversal_window_hours));
+    print_kv('p_business_hours_from',       p_business_hours_from);
+    print_kv('p_business_hours_to',         p_business_hours_to);
+    print_kv('p_weekend_days',              p_weekend_days);
+    print_kv('p_holiday_list.count',        TO_CHAR(
+        CASE WHEN p_holiday_list IS NULL THEN 0 ELSE p_holiday_list.COUNT END));
+    print_kv('p_tamper_window_hours',       TO_CHAR(p_tamper_window_hours));
+    print_kv('p_cycle_max_length',          TO_CHAR(p_cycle_max_length));
+    print_kv('p_tol_days_backdate',         TO_CHAR(p_tol_days_backdate));
+    print_kv('p_exclude_technical_users.count', TO_CHAR(
+        CASE WHEN p_exclude_technical_users IS NULL THEN 0
+             ELSE p_exclude_technical_users.COUNT END));
+
+    print_section_footer('PARAMS', 0);
+
+    log_info('Section 3 (init & echo) completed. run_id=' || v_run_id);
+
 EXCEPTION
     WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error during section-1 build: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error during init/echo (section 3): '
+            || SUBSTR(SQLERRM, 1, 400));
 END;
 /

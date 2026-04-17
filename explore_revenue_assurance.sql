@@ -3479,15 +3479,26 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('  [13.8 Montants SI]');
     SELECT NVL(SUM(SI_AMT),0) INTO v_num FROM SITB_CONTRACT_MASTER;
     print_kv('  Somme SI_AMT (brute, toutes devises)', TO_CHAR(v_num));
-    SELECT NVL(SUM(CALC_SI_AMT),0) INTO v_num FROM SITB_CONTRACT_MASTER;
-    print_kv('  Somme CALC_SI_AMT', TO_CHAR(v_num));
+    BEGIN
+      SELECT NVL(SUM(TO_NUMBER(REGEXP_SUBSTR(CALC_SI_AMT,'^-?[0-9]+(\.[0-9]+)?$'))),0)
+        INTO v_num FROM SITB_CONTRACT_MASTER
+       WHERE REGEXP_LIKE(CALC_SI_AMT,'^-?[0-9]+(\.[0-9]+)?$');
+      print_kv('  Somme CALC_SI_AMT (numériques uniquement)', TO_CHAR(v_num));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Somme CALC_SI_AMT', 'N/A (' || SQLERRM || ')');
+    END;
     SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
     WHERE SI_AMT IS NULL OR SI_AMT = 0;
     print_kv('  SI avec SI_AMT NULL ou 0', TO_CHAR(v_count));
-    SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
-    WHERE SI_AMT IS NOT NULL AND CALC_SI_AMT IS NOT NULL
-      AND ABS(SI_AMT - CALC_SI_AMT) > 0.01;
-    print_kv('  Ecart SI_AMT <> CALC_SI_AMT', TO_CHAR(v_count));
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
+      WHERE SI_AMT IS NOT NULL AND CALC_SI_AMT IS NOT NULL
+        AND REGEXP_LIKE(CALC_SI_AMT,'^-?[0-9]+(\.[0-9]+)?$')
+        AND ABS(SI_AMT - TO_NUMBER(CALC_SI_AMT)) > 0.01;
+      print_kv('  Ecart SI_AMT <> CALC_SI_AMT', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+      print_kv('  Ecart SI_AMT <> CALC_SI_AMT', 'N/A (' || SQLERRM || ')');
+    END;
 
     -- 13.8.b Répartition devise SI_AMT_CCY
     DBMS_OUTPUT.PUT_LINE('');

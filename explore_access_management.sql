@@ -3081,6 +3081,197 @@ BEGIN
     END;
 
     -- =========================================================
+    -- A-21. EMPREINTE COMPORTEMENTALE (USER BEHAVIOR ANALYTICS)
+    -- =========================================================
+    p_section('A-21. EMPREINTE COMPORTEMENTALE — patterns horaires, volumetrie, anomalies de session');
+
+    p_sub('A-21.1 Distribution des connexions SMTB_SMS_LOG par tranche horaire (0-23)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT TO_CHAR(OPERATION_DATE,''HH24''), COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+            GROUP BY TO_CHAR(OPERATION_DATE,''HH24'')
+            ORDER BY 1'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. v_maker_tab.COUNT LOOP
+            p_kv('  Heure ' || v_maker_tab(i) || 'h', TO_CHAR(v_count_tab(i)) || ' evenements');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  SMTB_SMS_LOG heures', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.2 Connexions hors heures ouvrees (avant 06h / apres 20h)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              AND (TO_NUMBER(TO_CHAR(OPERATION_DATE,''HH24'')) < 6
+                OR TO_NUMBER(TO_CHAR(OPERATION_DATE,''HH24'')) >= 20)' INTO v_count;
+        p_kv('  Connexions hors plage 06-20h (90j)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Hors plage', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.3 Connexions week-end (samedi + dimanche)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              AND TO_CHAR(OPERATION_DATE,''DY'',''NLS_DATE_LANGUAGE=ENGLISH'') IN (''SAT'',''SUN'')'
+        INTO v_count;
+        p_kv('  Connexions week-end (90j)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Week-end', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.4 Distribution par jour de la semaine (90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT TO_CHAR(OPERATION_DATE,''DY'',''NLS_DATE_LANGUAGE=ENGLISH''), COUNT(*) nb
+            FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+            GROUP BY TO_CHAR(OPERATION_DATE,''DY'',''NLS_DATE_LANGUAGE=ENGLISH'')
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. v_maker_tab.COUNT LOOP
+            p_kv('  Jour ' || v_maker_tab(i), TO_CHAR(v_count_tab(i)));
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Jour semaine', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.5 Top 15 utilisateurs — volume de connexions (90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+            GROUP BY USER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' evenements');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Top users SMS_LOG', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.6 Top 15 utilisateurs operant hors heures ouvrees');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              AND (TO_NUMBER(TO_CHAR(OPERATION_DATE,''HH24'')) < 6
+                OR TO_NUMBER(TO_CHAR(OPERATION_DATE,''HH24'')) >= 20)
+            GROUP BY USER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' evts nocturnes');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Users nocturnes', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.7 Sessions multiples simultanees (USERLOG_DETAILS — SESSIONS SIMULT.)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USERLOG_DETAILS
+            WHERE STATUS = ''A'' AND LOGOFF_TIME IS NULL' INTO v_count;
+        p_kv('  Sessions "actives" sans logoff', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  SMTB_USERLOG_DETAILS', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.8 Utilisateurs avec sessions concurrentes multiples (>=3)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_USERLOG_DETAILS
+            WHERE STATUS = ''A'' AND LOGOFF_TIME IS NULL
+            GROUP BY USER_ID HAVING COUNT(*) >= 3
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 20) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' sessions simult');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Sessions simult', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.9 Echecs authentification (USERLOG_DETAILS STATUS=F / INV_LOGINS)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USERLOG_DETAILS
+            WHERE STATUS = ''F''
+              AND LOGIN_TIME >= TRUNC(SYSDATE) - 30' INTO v_count;
+        p_kv('  Echecs de login (30j)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Echecs login', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.10 Top 15 utilisateurs par volume d''actions metier (SMS_ACTION_LOG 90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(*) nb FROM SMTB_SMS_ACTION_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+            GROUP BY USER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' actions metier');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Top users actions', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.11 Utilisateurs sans activite depuis 90 jours (dormance comportementale)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM SMTB_USER u
+            WHERE u.USER_STATUS IN (''E'',''A'')
+              AND NOT EXISTS (
+                SELECT 1 FROM SMTB_SMS_LOG l
+                WHERE l.USER_ID = u.USER_ID
+                  AND l.OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              )' INTO v_count;
+        p_kv('  Comptes actifs mais dormants (>90j)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Dormance comportementale', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.12 Utilisateurs avec multiples branches accedees (multi-location)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(DISTINCT BRANCH) nb FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              AND BRANCH IS NOT NULL
+            GROUP BY USER_ID HAVING COUNT(DISTINCT BRANCH) > 1
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' branches distinctes');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Multi-branche', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-21.13 Dispersion terminaux (TERMINAL distincts par user, 90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT USER_ID, COUNT(DISTINCT TERMINAL) nb FROM SMTB_SMS_LOG
+            WHERE OPERATION_DATE >= TRUNC(SYSDATE) - 90
+              AND TERMINAL IS NOT NULL
+            GROUP BY USER_ID HAVING COUNT(DISTINCT TERMINAL) > 2
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  USER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' terminaux');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Multi-terminal', 'inaccessible - ' || SQLERRM);
+    END;
+
+    -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
     p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');

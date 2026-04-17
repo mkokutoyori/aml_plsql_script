@@ -638,3 +638,105 @@ Tout nouveau paramètre ajouté en v1.x DOIT :
 4. Incrémenter `C_SCRIPT_VERSION` en `MINOR`.
 
 ---
+
+## 7. Catalogue détaillé des contrôles
+
+Chaque contrôle ci-dessous correspond à **une section** du script final. Un contrôle peut produire **plusieurs constats** (`[F-NNN]`), chacun avec sa sévérité et son impact. Cinq familles sont distinguées :
+
+- **A — Revenue Assurance : comptes & découverts** (§7.A, sections S01–S05)
+- **B — Revenue Assurance : crédits CL / LD** (§7.B, sections S06–S10)
+- **C — Revenue Assurance : SI, IC, commissions, frais** (§7.C, sections S11–S15)
+- **D — Contrôle comptable : GL, écritures manuelles, FX, suspense** (§7.D, sections S16–S20)
+- **E — Contrôle interne & SoD** (§7.E, sections S21–S23)
+
+### 7.0 Grille de description (applicable à chaque contrôle)
+
+Chaque contrôle est décrit par :
+- **ID** : identifiant de section (`S01`…`S23`) et identifiants de findings `[F-NNN]`.
+- **Titre** — libellé court en anglais (utilisé dans le rapport).
+- **Objectif** — ce que le contrôle détecte et pourquoi.
+- **Sources FCUBS** — tables et colonnes.
+- **Méthode** — logique métier et règle de qualification.
+- **Sévérité par défaut** — ajustable par montant via les seuils `p_materiality_*`.
+- **Impact monétaire estimé** — formule de chiffrage.
+- **Dimensions d'agrégation** — agence, produit, client, devise, ancienneté.
+- **Recommandation type** — action suggérée au management.
+- **Rattachement PCEC** — classe(s) et, si possible, comptes divisionnaires.
+- **Paramètres applicables** — liste des `p_*` qui influencent le contrôle.
+- **Fondement exploration** — renvoi au(x) constat(s) du rapport d'exploration qui motive(nt) le contrôle.
+
+### 7.A — Revenue Assurance : comptes et découverts
+
+#### S01 — Unauthorized overdrafts without TOD limit
+
+- **Findings** : `[F-001]` accounts with debit balance and no TOD limit ; `[F-002]` accounts in persistent overdraft beyond `p_min_days_overdue`.
+- **Objectif** — Identifier les comptes en **solde débiteur** sans autorisation de découvert paramétrée, et a fortiori ceux en overdraft **persistant**, source de fuite d'intérêts débiteurs et de risque de crédit non facturé.
+- **Sources** — `STTM_CUST_ACCOUNT` (`AC_STAT_DR_BAL`, `AC_STAT_CR_BAL`, `TOD_LIMIT`, `TOD_START_DATE`, `TOD_END_DATE`, `ACY_CURR_BALANCE`, `LCY_CURR_BALANCE`, `BRANCH_CODE`, `CUST_NO`, `CCY`), `GLTB_GL_BAL` pour contrôle de cohérence.
+- **Méthode** — `ACY_CURR_BALANCE < 0` AND (`TOD_LIMIT` IS NULL OR `TOD_LIMIT` = 0 OR `SYSDATE` NOT BETWEEN `TOD_START_DATE` AND `TOD_END_DATE`).
+- **Sévérité** — HIGH (par défaut) ; CRITICAL si nombre > 100 ou impact > `p_materiality_critical_lcy`.
+- **Impact LCY** — `SUM(ABS(LCY_CURR_BALANCE)) × taux_interet_OD_standard × (jours_overdraft/365)`. Le taux OD standard est un paramètre dérivé ou, à défaut, consigné en hypothèse.
+- **Dimensions** — agence, devise, segment client.
+- **Recommandation** — Régulariser le paramétrage TOD ou facturer le découvert non autorisé ; alerter Commercial.
+- **PCEC** — `PCEC/2` (Opérations avec la clientèle) — comptes 201/208 et correspondants produits d'intérêts en `PCEC/702`.
+- **Paramètres** — `p_date_to`, `p_branch_*`, `p_account_*`, `p_min_days_overdue`, `p_materiality_*`.
+- **Fondement exploration** — rapport d'exploration : **950 comptes** en overdraft sans TOD_LIMIT (section 14).
+
+#### S02 — TOD limits overrun / expired without renewal
+
+- **Findings** : `[F-010]` accounts where `ABS(debit balance) > TOD_LIMIT` ; `[F-011]` TOD expired (`TOD_END_DATE < SYSDATE`) while balance still debit.
+- **Objectif** — Détecter les **dépassements** de limite de découvert et les **TOD périmées** encore utilisées.
+- **Sources** — `STTM_CUST_ACCOUNT`.
+- **Méthode** — Comparaison `ABS(ACY_CURR_BALANCE)` vs `TOD_LIMIT`, avec filtre `TOD_END_DATE < SYSDATE` pour `[F-011]`.
+- **Sévérité** — HIGH, CRITICAL si dépassement > 200 % de la limite.
+- **Impact LCY** — Surintérêts : `(solde − TOD_LIMIT) × (taux_penal − taux_OD) × jours/365`.
+- **Dimensions** — agence, produit (account class), segment.
+- **Recommandation** — Renouveler, écrêter ou facturer au taux pénal.
+- **PCEC** — `PCEC/2` côté actif (`PCEC/201`), `PCEC/702` côté produits.
+- **Paramètres** — `p_date_to`, `p_branch_*`, `p_materiality_*`.
+- **Fondement exploration** — confirmé par volumétrie TOD_LIMIT de la section 8 du rapport.
+
+#### S03 — Accounts dormant with accrued balances or unexpected activity
+
+- **Findings** : `[F-020]` dormant accounts with non-zero accrued interest/charges ; `[F-021]` dormant accounts with movements on period.
+- **Objectif** — Mettre en évidence les comptes dormants (`AC_STAT_DORMANT = 'Y'` ou équivalent) pour lesquels des **accruals** subsistent ou des **mouvements** ont été observés sur la période.
+- **Sources** — `STTM_CUST_ACCOUNT` (`AC_STAT_DORMANT`, `DORMANT_SINCE` si présent), `ACTB_HISTORY` (mouvements période), `ICTB_ACCRUALS_TEMP` (accruals).
+- **Méthode** — Compte dormant + existence d'un accrual non nul ou d'au moins une écriture `ACTB_HISTORY` sur `[p_date_from, p_date_to]`.
+- **Sévérité** — MEDIUM par défaut, HIGH si mouvements clientèle sur compte dormant (suspicion AML/fraude — à référer au module dédié).
+- **Impact LCY** — Pour `[F-020]` : `SUM(accrual_amount_lcy)`. Pour `[F-021]` : indicateur de risque, impact non chiffré.
+- **Dimensions** — agence, type de mouvement, ancienneté dormance.
+- **Recommandation** — Apurer accruals, reclasser le compte, vérifier authenticité des mouvements.
+- **PCEC** — `PCEC/2` (clientèle), potentiellement `PCEC/38` (comptes de régularisation).
+- **Paramètres** — `p_min_days_dormant`, `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — **179 comptes dormants** avec accruals (section 14).
+
+#### S04 — Account charges waived beyond policy thresholds
+
+- **Findings** : `[F-030]` recurring waivers on charge components ; `[F-031]` waivers without documented approver; `[F-032]` waiver concentration by user.
+- **Objectif** — Quantifier l'impact des **remises** (waivers) appliquées aux frais de tenue de compte et commissions.
+- **Sources** — `ICTB_LIQ_DETAILS` (composante `CHG_*`, colonne `WAIVER_AMOUNT` ou équivalent), `CHTB_*` si activé, `SMTB_USER` pour identifier l'utilisateur.
+- **Méthode** — Somme des montants waivés par compte / utilisateur / période ; ratio `waived / (waived + collected)` ; top utilisateurs.
+- **Sévérité** — MEDIUM, HIGH si ratio > 30 % ou concentration utilisateur > 50 % des waivers.
+- **Impact LCY** — Somme waived LCY sur la période.
+- **Dimensions** — agence, utilisateur, composante, produit.
+- **Recommandation** — Revue SoD, revalidation politique de waivers, plafonds par grade.
+- **PCEC** — `PCEC/7` — produits non perçus (classes 702/706 selon composante).
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — à confirmer via mini-script d'exploration (cf. §7.Z hypothèse à valider) sur les tables de composantes et champs WAIVE réellement présents.
+
+#### S05 — Credit balances on accounts without interest accrual
+
+- **Findings** : `[F-040]` high-balance CASA accounts with no interest accrual generated over period.
+- **Objectif** — S'assurer que tout compte d'épargne / courant rémunéré génère effectivement ses accruals. Inversement, détecter des comptes non rémunérés qui devraient l'être selon le produit.
+- **Sources** — `STTM_CUST_ACCOUNT` (account class), `ICTB_ACCRUALS_TEMP` (existence d'accruals), paramétrage produit `ICTM_PRODUCT_DEFINITION` si nécessaire.
+- **Méthode** — Jointure `STTM_CUST_ACCOUNT LEFT JOIN ICTB_ACCRUALS_TEMP` sur période, filtre absence + solde créditeur > `p_materiality_lcy`.
+- **Sévérité** — MEDIUM.
+- **Impact LCY** — Estimatif, potentiel bénéfice client indûment non versé ou produit indûment reconnu.
+- **Dimensions** — agence, classe de compte, devise.
+- **Recommandation** — Vérifier mapping produit IC, lancer un run IC correctif si applicable.
+- **PCEC** — `PCEC/2` (clientèle), `PCEC/6` (charges d'intérêts) et/ou `PCEC/7`.
+- **Paramètres** — `p_date_from`, `p_date_to`, `p_materiality_lcy`.
+- **Fondement exploration** — à confirmer : sections IC du rapport indiquent la présence d'accruals mais pas leur complétude fonctionnelle.
+
+---
+
+> La suite du catalogue (§7.B à §7.E) est décrite ci-dessous.

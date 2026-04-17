@@ -1,0 +1,2769 @@
+================================================================================
+>>> EXPLORATION REVENUE ASSURANCE — DEMARRAGE
+>>> 17/04/2026 11:27:45
+================================================================================
+
+================================================================================
+>>> 1. VOLUMETRIE GENERALE DES TABLES REVENUE ASSURANCE
+================================================================================
+  [Référentiels revenue / charges]
+  CSTB_AMOUNT_TAG (tags montants)................... 53791 lignes
+  STTM_TRN_CODE (codes transaction)................. 817 lignes
+  CSTM_PRODUCT (produits Flexcube).................. 489 lignes
+  LDTM_PRODUCT_MASTER (produits LD)................. 54 lignes
+  STTM_ACCOUNT_CLASS (classes comptes).............. 110 lignes
+
+  [Comptabilité & GL]
+  ACTB_HISTORY (écritures comptables)............... 5848503 lignes
+  ACTB_ACCBAL_HISTORY (historique soldes)........... 548756 lignes
+  ACTB_VD_BAL (soldes date valeur).................. 590477 lignes
+  GLTB_GL_BAL (soldes GL)........................... 78195 lignes
+  STTB_ACCOUNT (comptes GL)......................... 30246 lignes
+  RVTB_ACC_REVAL (réévaluations FX)................. 9110 lignes
+
+  [Clientèle & comptes opérationnels]
+  STTM_CUSTOMER..................................... 29706 lignes
+  STTM_CUST_ACCOUNT................................. 25914 lignes
+  STTM_CUSTOMER_CAT................................. 83 lignes
+
+  [Prêts consumer (module CL)]
+  CLTB_ACCOUNT_APPS_MASTER (maître prêts)........... 1912 lignes
+  CLTB_ACCOUNT_COMPONENTS (composants prêt)......... 48595 lignes
+  CLTB_ACCOUNT_SCHEDULES (échéances)................ 159365 lignes
+  CLTB_AMOUNT_PAID (paiements)...................... 73694 lignes
+  CLTB_AMOUNT_RECD (réceptions)..................... 1912 lignes
+  CLTB_LIQ (liquidations prêts)..................... 16452 lignes
+  CLTM_PRODUCT_COMP_FRM_EXPR (formules prod)........ 715 lignes
+
+  [Contrats Loans/Deposits (module LD)]
+  LDTB_CONTRACT_MASTER.............................. 604 lignes
+  LDTB_CONTRACT_BALANCE............................. 597 lignes
+  LDTB_CONTRACT_PREFERENCE.......................... 604 lignes
+  LDTB_CONTRACT_SCHEDULES........................... 1208 lignes
+  LDTB_CONTRACT_ICCF_CALC........................... 1615 lignes
+  LDTB_CONTRACT_ICCF_DETAILS........................ 1194 lignes
+  LDTB_CONTRACT_ACCRUAL_HISTORY..................... 38972 lignes
+  LDTB_CONTRACT_LIQ................................. 1095 lignes
+  LDTB_CONTRACT_LIQ_SUMMARY......................... 590 lignes
+  LDTB_CONTRACT_ROLLOVER............................ 64 lignes
+  LDTB_CONTRACT_CONTROL............................. 13 lignes
+  LDTB_ACCRUAL_FOR_LIMITS........................... 8 lignes
+  LDTB_COMPUTATION_HANDOFF.......................... 597 lignes
+
+  [Interest & Charges (IC) — paramétrage taux]
+  ICTM_ACC_UDEVALS (taux par compte)................ 1582 lignes
+  ICTM_PR_INT_UDEVALS (taux par produit)............ 1102 lignes
+  ICTM_EXPR (expressions IC)........................ 86 lignes
+
+  [Autres — facilités, SI, MIS, Forex]
+  GETM_FACILITY (facilités)......................... 1062 lignes
+  SITB_CONTRACT_MASTER (SI)......................... 586 lignes
+  SITB_CYCLE_DETAIL (cycles SI)..................... 17233 lignes
+  MITB_CLASS_MAPPING (mapping MIS).................. 571714 lignes
+  CYTB_RATES_HISTORY (taux change).................. 209700 lignes
+  CYTB_DERIVED_RATES_HISTORY........................ 365392 lignes
+  CSTB_AMOUNT_TAG................................... 53791 lignes
+
+================================================================================
+>>> 2. REFERENTIELS REVENUE (tags, codes trn, produits)
+================================================================================
+  [2.1 CSTB_AMOUNT_TAG — Répartition par MODULE]
+    MODULE = CL..................................... 37390 tags / 37391 lignes
+    MODULE = MM..................................... 4009 tags / 4042 lignes
+    MODULE = LD..................................... 2873 tags / 2873 lignes
+    MODULE = LC..................................... 1515 tags / 1515 lignes
+    MODULE = BC..................................... 1252 tags / 1254 lignes
+    MODULE = IB..................................... 1200 tags / 1202 lignes
+    MODULE = LI..................................... 1066 tags / 1066 lignes
+    MODULE = FT..................................... 878 tags / 891 lignes
+    MODULE = SP..................................... 839 tags / 839 lignes
+    MODULE = MC..................................... 381 tags / 381 lignes
+    MODULE = MO..................................... 319 tags / 320 lignes
+    MODULE = DV..................................... 301 tags / 301 lignes
+    MODULE = SR..................................... 280 tags / 280 lignes
+    MODULE = SD..................................... 162 tags / 162 lignes
+    MODULE = FX..................................... 117 tags / 117 lignes
+    MODULE = PC..................................... 99 tags / 99 lignes
+    MODULE = SI..................................... 89 tags / 89 lignes
+    MODULE = CD..................................... 88 tags / 88 lignes
+    MODULE = OT..................................... 68 tags / 68 lignes
+    MODULE = ID..................................... 67 tags / 67 lignes
+    MODULE = DE..................................... 63 tags / 63 lignes
+    MODULE = IZ..................................... 29 tags / 58 lignes
+    MODULE = TA..................................... 54 tags / 54 lignes
+    MODULE = LS..................................... 51 tags / 51 lignes
+    MODULE = AM..................................... 43 tags / 43 lignes
+    MODULE = SS..................................... 39 tags / 39 lignes
+    MODULE = IC..................................... 39 tags / 39 lignes
+    MODULE = EP..................................... 34 tags / 34 lignes
+    MODULE = AD..................................... 30 tags / 30 lignes
+    MODULE = SZ..................................... 23 tags / 29 lignes
+    MODULE = FA..................................... 28 tags / 28 lignes
+    MODULE = IA..................................... 26 tags / 26 lignes
+    MODULE = RB..................................... 23 tags / 23 lignes
+    MODULE = PD..................................... 20 tags / 21 lignes
+    MODULE = LL..................................... 20 tags / 20 lignes
+    MODULE = LE..................................... 18 tags / 18 lignes
+    MODULE = XP..................................... 18 tags / 18 lignes
+    MODULE = IP..................................... 17 tags / 17 lignes
+    MODULE = MB..................................... 14 tags / 16 lignes
+    MODULE = ET..................................... 11 tags / 11 lignes
+    MODULE = FI..................................... 11 tags / 11 lignes
+    MODULE = RF..................................... 11 tags / 11 lignes
+    MODULE = CS..................................... 7 tags / 7 lignes
+    MODULE = BR..................................... 6 tags / 6 lignes
+    MODULE = BL..................................... 5 tags / 5 lignes
+    MODULE = CI..................................... 4 tags / 5 lignes
+    MODULE = IL..................................... 5 tags / 5 lignes
+    MODULE = LQ..................................... 3 tags / 4 lignes
+    MODULE = ST..................................... 4 tags / 4 lignes
+    MODULE = OD..................................... 3 tags / 3 lignes
+    MODULE = DL..................................... 3 tags / 3 lignes
+    MODULE = AC..................................... 3 tags / 3 lignes
+    MODULE = RE..................................... 3 tags / 3 lignes
+    MODULE = CG..................................... 3 tags / 3 lignes
+    MODULE = IN..................................... 2 tags / 2 lignes
+    MODULE = LN..................................... 2 tags / 2 lignes
+    MODULE = ES..................................... 2 tags / 2 lignes
+    MODULE = SE..................................... 2 tags / 2 lignes
+    MODULE = UP..................................... 2 tags / 2 lignes
+    MODULE = JJ..................................... 2 tags / 2 lignes
+    MODULE = RT..................................... 2 tags / 2 lignes
+    MODULE = MG..................................... 2 tags / 2 lignes
+    MODULE = SL..................................... 1 tags / 1 lignes
+    MODULE = LM..................................... 1 tags / 1 lignes
+    MODULE = RP..................................... 1 tags / 1 lignes
+    MODULE = EI..................................... 1 tags / 1 lignes
+    MODULE = MS..................................... 1 tags / 1 lignes
+    MODULE = SM..................................... 1 tags / 1 lignes
+    MODULE = AE..................................... 1 tags / 1 lignes
+    MODULE = DX..................................... 1 tags / 1 lignes
+    MODULE = CV..................................... 1 tags / 1 lignes
+    MODULE = CO..................................... 1 tags / 1 lignes
+    MODULE = SV..................................... 1 tags / 1 lignes
+    MODULE = CN..................................... 1 tags / 1 lignes
+    MODULE = CA..................................... 1 tags / 1 lignes
+    MODULE = IF..................................... 1 tags / 1 lignes
+    MODULE = MI..................................... 1 tags / 1 lignes
+    MODULE = GL..................................... 1 tags / 1 lignes
+    MODULE = IS..................................... 1 tags / 1 lignes
+    MODULE = CF..................................... 1 tags / 1 lignes
+    MODULE = CY..................................... 1 tags / 1 lignes
+
+  [2.1.b Tags autorisés pour CHARGE / COMMISSION / INTEREST / TAX]
+    Tags CHARGE_ALLOWED = Y......................... 1005
+    Tags COMMISSION_ALLOWED = Y..................... 444
+    Tags INTEREST_ALLOWED = Y....................... 1553
+    Tags TAX_ALLOWED = Y............................ 6287
+    Tags TRACK_RECEIVABLES = Y...................... 688
+    Tags UNREALISED = Y (produit non réalisé)....... 370
+
+  [2.1.c Répartition AMOUNT_TAG_TYPE]
+    AMOUNT_TAG_TYPE = H............................. 19999
+    AMOUNT_TAG_TYPE = I............................. 15558
+    AMOUNT_TAG_TYPE = N............................. 5685
+    AMOUNT_TAG_TYPE = O............................. 4778
+    AMOUNT_TAG_TYPE = P............................. 1949
+    AMOUNT_TAG_TYPE = C............................. 1586
+    AMOUNT_TAG_TYPE = .............................. 1360
+    AMOUNT_TAG_TYPE = T............................. 1001
+    AMOUNT_TAG_TYPE = M............................. 949
+    AMOUNT_TAG_TYPE = L............................. 677
+    AMOUNT_TAG_TYPE = S............................. 96
+    AMOUNT_TAG_TYPE = U............................. 73
+    AMOUNT_TAG_TYPE = B............................. 46
+    AMOUNT_TAG_TYPE = F............................. 18
+    AMOUNT_TAG_TYPE = R............................. 12
+    AMOUNT_TAG_TYPE = E............................. 4
+
+  [2.1.d Top 15 tags par module utilisés (distinct AMOUNT_TAG)]
+    AC / UDEFCHGBASIS............................... tag revenue
+    AE / UDEFCHGBASIS............................... tag revenue
+    AM / AMMT2_LIQD................................. tag revenue
+    AM / AMTAX_LIQD................................. tag revenue
+    AM / CORPUSAMT.................................. tag revenue
+    AM / CUST_PROFIT_PRJ............................ tag revenue
+    AM / CUST_PROFIT_SHARE.......................... tag revenue
+    AM / FUNDCAPITAL................................ tag revenue
+    AM / FUND_CHARGE................................ tag revenue
+    AM / FUND_SHARE................................. tag revenue
+    AM / FUND_SHARE_LIQD............................ tag revenue
+    AM / LOSS_RECOVERY.............................. tag revenue
+    AM / NAVAMT..................................... tag revenue
+    AM / NAV_ANNULZD_AMT............................ tag revenue
+    AM / PROFIT_RECOVERY............................ tag revenue
+
+  [2.2 STTM_TRN_CODE — Paramétrages IC / AVAIL / PENAL]
+    IC_TXN_COUNT = N................................ 554
+    IC_TXN_COUNT = Y................................ 263
+    IC_TOVER_INCLUSION = N.......................... 462
+    IC_TOVER_INCLUSION = Y.......................... 355
+    IC_BAL_INCLUSION = Y............................ 816
+    IC_BAL_INCLUSION = N............................ 1
+    IC_PENALTY = Y.................................. 505
+    IC_PENALTY = N.................................. 308
+    IC_PENALTY = ................................... 4
+    CONSIDER_FOR_ACTIVITY = Y....................... 636
+    CONSIDER_FOR_ACTIVITY = N....................... 181
+    EXEMPT_ADV_INTEREST = N......................... 800
+    EXEMPT_ADV_INTEREST = Y......................... 13
+    EXEMPT_ADV_INTEREST = .......................... 4
+
+  [2.2.b Statut enregistrement des TRN_CODE]
+    AUTH_STAT = A................................... 817
+    RECORD_STAT = O................................. 815
+    RECORD_STAT = C................................. 2
+
+  [2.2.c Répartition PRODUCT_CAT des TRN_CODE]
+    PRODUCT_CAT = .................................. 817
+
+  [2.3 CSTM_PRODUCT — Produits par MODULE]
+    MODULE = RT..................................... 175
+    MODULE = IC..................................... 89
+    MODULE = FT..................................... 44
+    MODULE = CL..................................... 40
+    MODULE = LC..................................... 39
+    MODULE = MM..................................... 34
+    MODULE = SI..................................... 23
+    MODULE = BC..................................... 22
+    MODULE = FX..................................... 11
+    MODULE = LD..................................... 9
+    MODULE = CG..................................... 2
+    MODULE = RE..................................... 1
+
+  [2.3.b Produits par PRODUCT_TYPE]
+    PRODUCT_TYPE = OT............................... 131
+    PRODUCT_TYPE = I................................ 96
+    PRODUCT_TYPE = ................................. 94
+    PRODUCT_TYPE = L................................ 73
+    PRODUCT_TYPE = IS............................... 27
+    PRODUCT_TYPE = G................................ 19
+    PRODUCT_TYPE = D................................ 16
+    PRODUCT_TYPE = IL............................... 15
+    PRODUCT_TYPE = O................................ 9
+    PRODUCT_TYPE = N................................ 2
+    PRODUCT_TYPE = AT............................... 2
+    PRODUCT_TYPE = E................................ 2
+    PRODUCT_TYPE = IC............................... 1
+    PRODUCT_TYPE = OC............................... 1
+    PRODUCT_TYPE = C................................ 1
+
+  [2.3.c Statut produits]
+    RECORD_STAT = O................................. 366
+    RECORD_STAT = C................................. 122
+    RECORD_STAT = .................................. 1
+    AUTH_STAT = A................................... 485
+    AUTH_STAT = U................................... 3
+    AUTH_STAT = .................................... 1
+
+  [2.3.d Produits EXPIRÉS (PRODUCT_END_DATE < SYSDATE)]
+    Produits expirés (fin passée)................... 0
+    Produits SANS date de fin....................... 487
+
+  [2.3.e Top 15 PRODUCT_GROUP]
+    PRODUCT_GROUP = BRANCH.......................... 117
+    PRODUCT_GROUP = FX-TRN.......................... 28
+    PRODUCT_GROUP = GTEES........................... 24
+    PRODUCT_GROUP = ATMGRP.......................... 21
+    PRODUCT_GROUP = TB.............................. 19
+    PRODUCT_GROUP = WEBGRP.......................... 17
+    PRODUCT_GROUP = IWDCOL.......................... 15
+    PRODUCT_GROUP = STNDIN.......................... 12
+    PRODUCT_GROUP = SWPINS.......................... 11
+    PRODUCT_GROUP = IB-TAK.......................... 9
+    PRODUCT_GROUP = POSGRP.......................... 9
+    PRODUCT_GROUP = IMLC............................ 7
+    PRODUCT_GROUP = IB-PLA.......................... 6
+    PRODUCT_GROUP = MOBILE.......................... 6
+    PRODUCT_GROUP = IWCCOL.......................... 6
+
+  [2.3.f Produits avec variance de taux autorisée]
+    Avec NORMAL_RATE_VARIANCE > 0................... 205
+    Avec MAXIMUM_RATE_VARIANCE > 0.................. 272
+    MAX NORMAL_RATE_VARIANCE........................ 5
+    MAX MAXIMUM_RATE_VARIANCE....................... 100
+    AVG NORMAL_RATE_VARIANCE........................ 1.9275
+
+  [2.4 LDTM_PRODUCT_MASTER — PRODUCT_TYPE / PAYMENT_METHOD]
+    PRODUCT_TYPE = L................................ 31
+    PRODUCT_TYPE = D................................ 23
+    PAYMENT_METHOD = B.............................. 37
+    PAYMENT_METHOD = D.............................. 17
+    ACCRUAL_FREQUENCY = D........................... 53
+    ACCRUAL_FREQUENCY = M........................... 1
+    CAPITALISE = ................................... 54
+    LIQUIDATION_MODE = A............................ 51
+    LIQUIDATION_MODE = M............................ 3
+
+  [2.4.b Produits LD avec fonctionnalités revenu]
+    TAX_APPLICABLE = Y.............................. 6
+    BROKERAGE_APPLICABLE = Y........................ 0
+    PREPAYMENT_PENALTY = Y.......................... 11
+    TRACK_ACCRUED_INTEREST = Y...................... 44
+    AUTO_PROV_REQUIRED = Y.......................... 0
+    BLOCK_PRODUCT = Y............................... 0
+    SUBSIDY_ALLOWED = Y............................. 0
+
+  [2.4.c Stats taux TRS (taux de transfert)]
+    TRS_RATE MIN.................................... NULL / NON RENSEIGNE
+    TRS_RATE MAX.................................... NULL / NON RENSEIGNE
+    TRS_RATE AVG.................................... NULL / NON RENSEIGNE
+    TRS applicable à 0 ou NULL...................... 0
+
+================================================================================
+>>> 3. ACTB_HISTORY — Revenus & charges comptabilisés
+================================================================================
+  [3.1 Plage temporelle des écritures]
+    Ecriture la plus ancienne (TRN_DT).............. 23/05/2022
+    Ecriture la plus récente (TRN_DT)............... 16/04/2026
+    VALUE_DT min.................................... 18/12/2015
+    VALUE_DT max.................................... 31/12/2026
+
+  [3.2 Volumétrie annuelle (écritures & total LCY)]
+    2022 — nb écritures............................. 79888
+    2022 — total LCY................................ 1727307067797.14
+    2023 — nb écritures............................. 391969
+    2023 — total LCY................................ 4454635705462.6
+    2024 — nb écritures............................. 1184021
+    2024 — total LCY................................ 10527844210962.36
+    2025 — nb écritures............................. 2925205
+    2025 — total LCY................................ 37330040690435.67
+    2026 — nb écritures............................. 1267420
+    2026 — total LCY................................ 35991478346344.86
+
+  [3.2.b Répartition MODULE (hors AML) — total LCY par module]
+    MODULE = DE..................................... nb=2218015 | sum LCY=64966284390935.07
+    MODULE = FT..................................... nb=1566924 | sum LCY=10246368443446.72
+    MODULE = MM..................................... nb=80820 | sum LCY=4680441919442.96
+    MODULE = RE..................................... nb=28376 | sum LCY=4433696193105.8
+    MODULE = RT..................................... nb=948892 | sum LCY=3329807547099.44
+    MODULE = IC..................................... nb=345155 | sum LCY=971409520280.3
+    MODULE = CL..................................... nb=636743 | sum LCY=789678769118.2
+    MODULE = GL..................................... nb=2848 | sum LCY=389073072666.1
+    MODULE = LC..................................... nb=1216 | sum LCY=170856158498.04
+    MODULE = SI..................................... nb=11208 | sum LCY=28249820732
+    MODULE = DD..................................... nb=8288 | sum LCY=25058668862
+    MODULE = AC..................................... nb=18 | sum LCY=381516816
+
+  [3.3 Top 25 AMOUNT_TAG par volume LCY (DR+CR)]
+    TAG TXN_AMT..................................... nb=2785902 | sum LCY=66764699344637.26
+    TAG AMT_EQUIV................................... nb=397768 | sum LCY=6459600988430.71
+    TAG ACREVALAMT.................................. nb=28376 | sum LCY=4433696193105.8
+    TAG TFR_AMT..................................... nb=146214 | sum LCY=3771322038203.85
+    TAG PRINCIPAL................................... nb=8649 | sum LCY=2792027672178
+    TAG PRINCIPAL_LIQD.............................. nb=45872 | sum LCY=2608763759139.1
+    TAG OFS_AMT..................................... nb=373082 | sum LCY=1556379484330.75
+    TAG TD-PRINC.................................... nb=360 | sum LCY=589566000004
+    TAG YEND........................................ nb=2848 | sum LCY=389073072666.1
+    TAG PMAT........................................ nb=232 | sum LCY=354526000000
+    TAG LIAB_OS_AMT................................. nb=286 | sum LCY=170395675555.08
+    TAG SI_AMT...................................... nb=10680 | sum LCY=28246672532
+    TAG INT_BT_ACCR................................. nb=78136 | sum LCY=23641462126.56
+    TAG MAIN_INT_LIQD............................... nb=48552 | sum LCY=15815363206.12
+    TAG ILIQ........................................ nb=133212 | sum LCY=15319950345.76
+    TAG IACR........................................ nb=120198 | sum LCY=11258525837.72
+    TAG INT_BT_LIQD................................. nb=226 | sum LCY=10419648732.4
+    TAG MAIN_INT_ACCR............................... nb=482808 | sum LCY=8880861779.62
+    TAG INT_BT_DADJ................................. nb=102 | sum LCY=6456715252
+    TAG CSTF_RBEAC.................................. nb=3236 | sum LCY=4593451651.94
+    TAG CSTF_HBEAC.................................. nb=9598 | sum LCY=4241484990.8
+    TAG TVA_MAININT_LIQD............................ nb=38914 | sum LCY=3098146811.96
+    TAG CSBU_HBEAC.................................. nb=4692 | sum LCY=2425132134.36
+    TAG CSBU_RBEAC.................................. nb=1886 | sum LCY=1313211431.96
+    TAG TDTVA5_AMT.................................. nb=9734 | sum LCY=816617122.76
+
+  [3.4 Revenus comptabilisés par type (jointure CSTB_AMOUNT_TAG)]
+    Ecritures INTEREST — nb......................... 1182
+    Ecritures INTEREST — sum LCY.................... 2319962046666
+    Ecritures CHARGE — nb........................... 3314938
+    Ecritures CHARGE — sum LCY...................... 76735523257167.86
+    Ecritures COMMISSION — nb....................... 100
+    Ecritures COMMISSION — sum LCY.................. 227120180.24
+    Ecritures TAX — nb.............................. 2938852
+    Ecritures TAX — sum LCY......................... 71131829211210.88
+    Ecritures UNREALISED — nb....................... 0
+    Ecritures UNREALISED — sum LCY.................. 0
+
+  [3.5 Revenus comptabilisés par année × MODULE]
+    2022 / DE....................................... nb=35452 | sum=1132783309623.4
+    2022 / RT....................................... nb=17246 | sum=131374096751.5
+    2022 / MM....................................... nb=232 | sum=130764000000
+    2022 / FT....................................... nb=1604 | sum=113326804916.13
+    2022 / LC....................................... nb=16 | sum=138018600.48
+    2022 / SI....................................... nb=28 | sum=11360000
+    2023 / DE....................................... nb=128836 | sum=1945385729271.44
+    2023 / MM....................................... nb=652 | sum=928773800000
+    2023 / RT....................................... nb=61688 | sum=422621612708
+    2023 / FT....................................... nb=9335 | sum=322278994034.75
+    2023 / SI....................................... nb=2522 | sum=2595285368
+    2023 / LC....................................... nb=36 | sum=38063479.76
+    2024 / DE....................................... nb=370015 | sum=4540494952226.68
+    2024 / MM....................................... nb=920 | sum=2246291920000
+    2024 / RT....................................... nb=225474 | sum=863333113228
+    2024 / FT....................................... nb=29005 | sum=808645402214.96
+    2024 / SI....................................... nb=4270 | sum=4100920570
+    2024 / LC....................................... nb=48 | sum=51038100
+    2025 / DE....................................... nb=1218466 | sum=28912246284472.13
+    2025 / FT....................................... nb=68808 | sum=1588531988762.01
+    2025 / RT....................................... nb=446942 | sum=1398863724086
+    2025 / MM....................................... nb=540 | sum=1334094373332
+    2025 / SI....................................... nb=2394 | sum=5847647410
+    2026 / DE....................................... nb=457217 | sum=28435321915022.92
+    2026 / FT....................................... nb=37462 | sum=938538848276
+    2026 / RT....................................... nb=194364 | sum=513605715709.94
+    2026 / SI....................................... nb=1466 | sum=15691459184
+
+  [3.6 Top 15 AGENCES par revenus (sum LCY tags revenue)]
+    AGENCE 099...................................... sum=66211744582043.13 | nb=1288241
+    AGENCE 001...................................... sum=7685116449410.44 | nb=1270607
+    AGENCE 004...................................... sum=1212210194377.46 | nb=334723
+    AGENCE 007...................................... sum=783955326844 | nb=24439
+    AGENCE 003...................................... sum=412780910326.97 | nb=235845
+    AGENCE 008...................................... sum=233355366060 | nb=22937
+    AGENCE 006...................................... sum=106327467142.66 | nb=89520
+    AGENCE 005...................................... sum=90260081143.44 | nb=48726
+
+  [3.7 Top 10 devises sur écritures revenue]
+    CCY XAF......................................... LCY=70051333806793.5 | FCY= | nb=3279351
+    CCY EUR......................................... LCY=4559824830057.4 | FCY=9608296326.24 | nb=23093
+    CCY USD......................................... LCY=2123195864175.2 | FCY=4088360444.35 | nb=12413
+    CCY GBP......................................... LCY=891343935 | FCY=1144448.39 | nb=56
+    CCY ZAR......................................... LCY=286817134 | FCY=8291088.71 | nb=55
+    CCY XOF......................................... LCY=217637764 | FCY=215802486.06 | nb=26
+    CCY CHF......................................... LCY=53771 | FCY=76.18 | nb=10
+    CCY CAD......................................... LCY=21627 | FCY=6.5 | nb=16
+    CCY JPY......................................... LCY=2016 | FCY=6.06 | nb=12
+    CCY SGD......................................... LCY=63 | FCY=.03 | nb=3
+
+  [3.8 Écritures potentiellement manuelles (MODULE=GL,MM,JE)]
+    MODULE = MM..................................... nb=80820 | sum=4680441919442.96
+    MODULE = GL..................................... nb=2848 | sum=389073072666.1
+
+  [3.9 Sens DR/CR des écritures revenue]
+    DRCR_IND = C.................................... nb=1748268 | sum=39097710384943.65
+    DRCR_IND = D.................................... nb=1566770 | sum=37638039992404.44
+
+  [3.10 Cohérence FCY / LCY / EXCH_RATE]
+    FCY=0 mais LCY <> 0............................. 79572
+    EXCH_RATE NULL / 0.............................. 5805323
+    Ecart FCY*EXCH_RATE vs LCY > 1 unité............ 611
+
+  [3.11 Top 15 TRN_CODE sur écritures revenue]
+    TRN_CODE NIP.................................... nb=469379 | sum=44811225353136.88
+    TRN_CODE ACT.................................... nb=720679 | sum=18215555045317.6
+    TRN_CODE TRF.................................... nb=146214 | sum=3771322038203.85
+    TRN_CODE ITC.................................... nb=1182 | sum=2319962046666
+    TRN_CODE PAL.................................... nb=1162 | sum=2319962046666
+    TRN_CODE CDP.................................... nb=303166 | sum=804347159774
+    TRN_CODE SCV.................................... nb=50900 | sum=693589741144
+    TRN_CODE IDC.................................... nb=299060 | sum=597366341579.99
+    TRN_CODE CNV.................................... nb=833 | sum=594146353880
+    TRN_CODE USD.................................... nb=364396 | sum=474581494661
+    TRN_CODE SCB.................................... nb=2010 | sum=468083888146
+    TRN_CODE BCV.................................... nb=52968 | sum=327390493742
+    TRN_CODE FDI.................................... nb=9044 | sum=272127521826
+    TRN_CODE SCW.................................... nb=75554 | sum=264579703382
+    TRN_CODE PRL.................................... nb=28354 | sum=166529196780.34
+
+  [3.12 Top 15 PRODUCT par revenus générés]
+    PRODUCT MNIP.................................... nb=469379 | sum=44811225353136.88
+    PRODUCT OTAP.................................... nb=1896 | sum=3892064093332
+    PRODUCT IN03.................................... nb=4944 | sum=995651637665.08
+    PRODUCT CSTF.................................... nb=7749 | sum=890364863992.95
+    PRODUCT RTGS.................................... nb=1880 | sum=878683510025
+    PRODUCT CHDP.................................... nb=303166 | sum=804347159774
+    PRODUCT 0004.................................... nb=13466 | sum=779061655166.74
+    PRODUCT TBTR.................................... nb=436 | sum=745700000000
+    PRODUCT CHTV.................................... nb=50900 | sum=693589741144
+    PRODUCT MJKL.................................... nb=688939 | sum=689394534224.34
+    PRODUCT 000u.................................... nb=15219 | sum=586666564351.36
+    PRODUCT 000g.................................... nb=11786 | sum=477036432123.88
+    PRODUCT SCCB.................................... nb=2010 | sum=468083888146
+    PRODUCT 000h.................................... nb=12380 | sum=451511689988.64
+    PRODUCT 0002.................................... nb=13799 | sum=450385379559.16
+
+  [3.13 Top 10 USER_ID sur écritures revenue]
+    USER CALYPSOUSR................................. nb=126240 | sum=43798868658854
+    USER ADMINUSER1................................. nb=202507 | sum=5690372882782.26
+    USER CHEICHEID059............................... nb=198191 | sum=5270268871081.86
+    USER BINEID00087................................ nb=46642 | sum=4273068310991
+    USER CHOHOS00066................................ nb=99567 | sum=2713261286514
+    USER NDJOCKOS0067............................... nb=140846 | sum=2316588922199
+    USER ELANGUEID060............................... nb=50396 | sum=1819966661795
+    USER HARRY000079................................ nb=21231 | sum=1592691295519
+    USER PRIMUSUSR.................................. nb=167707 | sum=864730936518.31
+    USER YANICKID0057............................... nb=27985 | sum=763659267731.33
+
+  [3.14 Écritures de reversal (impact revenue négatif)]
+    EVENT = REVL.................................... nb=18222 | sum=2219742796060.58
+    EVENT = REVR.................................... nb=7150 | sum=-139606869237.56
+    EVENT = REVC.................................... nb=382 | sum=-91433851725.88
+    EVENT = REVP.................................... nb=356 | sum=-8686649434
+
+  [3.15 Top 10 ORIG_PNL_GL — comptes résultat utilisés]
+
+================================================================================
+>>> 4. CLTB_ACCOUNT_COMPONENTS — composants de prêt & waivers
+================================================================================
+  [4.1 Volumétrie globale]
+    Total composants prêt........................... 48595
+    Comptes prêt distincts.......................... 1912
+    Branches distinctes............................. 1
+    COMPONENT_NAME distincts........................ 38
+    Devises distinctes.............................. 1
+
+  [4.2 Répartition par COMPONENT_TYPE]
+    COMPONENT_TYPE = H.............................. 28188
+    COMPONENT_TYPE = O.............................. 6542
+    COMPONENT_TYPE = P.............................. 5403
+    COMPONENT_TYPE = I.............................. 3458
+    COMPONENT_TYPE = M.............................. 3092
+    COMPONENT_TYPE = L.............................. 1912
+
+  [4.3 Top 20 COMPONENT_NAME (inclut MAIN_PNT, INTEREST, PENALTY, ...)]
+    COMPONENT_NAME = MAIN_INT....................... 1912
+    COMPONENT_NAME = PRINCIPAL...................... 1912
+    COMPONENT_NAME = PRE_PENALTY.................... 1546
+    COMPONENT_NAME = ADCH_CHG....................... 1546
+    COMPONENT_NAME = TVAPREPNLTY.................... 1546
+    COMPONENT_NAME = ODPR_PNLTY..................... 1546
+    COMPONENT_NAME = TVA_MAININT.................... 1546
+    COMPONENT_NAME = INT_ODU_PRI.................... 1545
+    COMPONENT_NAME = TVACOMPRROG.................... 1444
+    COMPONENT_NAME = COMAUTRE2...................... 1444
+    COMPONENT_NAME = TXN_COST....................... 1444
+    COMPONENT_NAME = TVAODUE_PRI.................... 1444
+    COMPONENT_NAME = TVACOMETUDO.................... 1444
+    COMPONENT_NAME = TVA_ODPRPNL.................... 1444
+    COMPONENT_NAME = PROV........................... 1444
+    COMPONENT_NAME = TVACOMRACHA.................... 1444
+    COMPONENT_NAME = TVACOMMISPL.................... 1444
+    COMPONENT_NAME = COMREMBANTI.................... 1444
+    COMPONENT_NAME = COMRACHATEX.................... 1444
+    COMPONENT_NAME = COMAUTRE1...................... 1444
+
+  [4.4 Répartition MAIN_COMPONENT]
+    MAIN_COMPONENT = N.............................. 46683
+    MAIN_COMPONENT = Y.............................. 1912
+
+  [4.5 WAIVE — flag de renonciation au composant]
+    WAIVE = (NULL).................................. 35731
+    WAIVE = N....................................... 12864
+
+  [4.5.b WAIVE='Y' par COMPONENT_TYPE]
+
+  [4.5.c Top 15 COMPONENT_NAME waivés (WAIVE='Y')]
+
+  [4.5.d Top 15 BRANCHES utilisant des waivers]
+    BRANCHE 099..................................... waivés=0 / total=48595 (0 %)
+
+  [4.5.e Top 15 comptes prêt avec composants waivés]
+
+  [4.6 CAPITALIZED — composants capitalisés]
+    CAPITALIZED = N................................. 48595
+
+  [4.7 LIQUIDATION_MODE des composants]
+    LIQUIDATION_MODE = (NULL)....................... 48571
+    LIQUIDATION_MODE = A............................ 24
+
+  [4.8 SPL_INTEREST — intérêts dérogatoires]
+    SPL_INTEREST = N................................ 48595
+    SPL_INTEREST_AMT — nb........................... 0
+    SPL_INTEREST_AMT — min.......................... NULL / NON RENSEIGNE
+    SPL_INTEREST_AMT — max.......................... NULL / NON RENSEIGNE
+    SPL_INTEREST_AMT — moy.......................... NULL / NON RENSEIGNE
+    SPL_INTEREST_AMT — sum.......................... NULL / NON RENSEIGNE
+
+  [4.9 Taux négociés CR (NEGOTIATED_RATE)]
+    Composants avec NEGOTIATED_RATE renseigné....... 0
+    Composants avec NEGOTIATION_REF_NO.............. 0
+    NEGOTIATED_RATE min............................. NULL / NON RENSEIGNE
+    NEGOTIATED_RATE max............................. NULL / NON RENSEIGNE
+    NEGOTIATED_RATE moy............................. NULL / NON RENSEIGNE
+
+  [4.9.b Dérogation FX : ORG_EXCH_RATE vs EXCHANGE_RATE]
+    Composants avec écart taux CR > 0,1 %........... 0
+    Composants avec écart taux DR > 0,1 %........... 0
+
+  [4.10 Day count convention (DAYS_MTH / DAYS_YEAR)]
+    MONTH/(NULL) YEAR/(NULL)........................ 48595
+
+  [4.11 IRR_APPLICABLE — entre dans le calcul TAEG]
+    IRR_APPLICABLE = N.............................. 34156
+    IRR_APPLICABLE = Y.............................. 14439
+
+  [4.12 PENAL_BASIS_COMP — composant servant d'assise aux pénalités]
+    PENAL_BASIS_COMP = (NULL)....................... 37820
+    PENAL_BASIS_COMP = MAIN_INT..................... 3468
+    PENAL_BASIS_COMP = PRINCIPAL.................... 3091
+    PENAL_BASIS_COMP = ODIN_PNLTY................... 1054
+    PENAL_BASIS_COMP = INT_ODUE_PRI................. 1054
+    PENAL_BASIS_COMP = ODPR_PNLTY................... 1054
+    PENAL_BASIS_COMP = INT_ODUE_INT................. 1054
+
+  [4.13 Recouvrement : USE_GUARANTOR / VERIFY_FUNDS]
+    USE_GUARANTOR = Y............................... 0
+    VERIFY_FUNDS = Y................................ 11423
+
+  [4.14 Canal de collecte CR_PAYMENT_MODE — top 10]
+    CR_PAYMENT_MODE = ACC........................... 48595
+
+  [4.14.b Canal DR_PAYMENT_MODE — top 10]
+    DR_PAYMENT_MODE = ACC........................... 48595
+
+  [4.15 Cumul de dérogations (WAIVE='Y' ET SPL_INTEREST='Y')]
+    Composants cumulant waiver + intérêt spécial.... 0
+    Composants waivés ET taux négocié............... 0
+
+================================================================================
+>>> 5. CLTB_ACCOUNT_SCHEDULES — échéances & overdue
+================================================================================
+  [5.1 Volumétrie globale des échéances]
+    Total lignes échéance........................... 159365
+    Comptes prêt distincts.......................... 1912
+    Composants distincts (COMPONENT_NAME)........... 30
+    Devises de règlement distinctes................. 1
+
+  [5.2 Plage temporelle des échéances]
+    SCHEDULE_ST_DATE min............................ 22/08/2022
+    SCHEDULE_ST_DATE max............................ 30/09/2034
+    SCHEDULE_DUE_DATE min........................... 22/08/2022
+    SCHEDULE_DUE_DATE max........................... 30/12/2034
+    LAST_PMNT_VALUE_DATE min........................ 08/09/2022
+    LAST_PMNT_VALUE_DATE max........................ 17/04/2026
+
+  [5.3 Répartition SCHEDULE_TYPE]
+    SCHEDULE_TYPE = P............................... 101487
+    SCHEDULE_TYPE = (NULL).......................... 57878
+
+  [5.3.b Répartition SCH_STATUS]
+    SCH_STATUS = NORM............................... 132698
+    SCH_STATUS = (NULL)............................. 25903
+    SCH_STATUS = WACH............................... 764
+
+  [5.3.c Répartition SCHEDULE_FLAG]
+    SCHEDULE_FLAG = N............................... 130344
+    SCHEDULE_FLAG = (NULL).......................... 29021
+
+  [5.3.d Répartition WAIVER_FLAG sur échéance]
+    WAIVER_FLAG = N................................. 130344
+    WAIVER_FLAG = (NULL)............................ 29021
+
+  [5.4 Agrégats financiers globaux (LCY_EQUIVALENT)]
+    SUM ORIG_AMOUNT_DUE............................. 581745288
+    SUM AMOUNT_DUE.................................. 2156795733372051190313947062488878479320000000000000000000000000000000000
+    SUM AMOUNT_SETTLED.............................. 1947753744698815392377931630579553500490000000000000000000000000000000000
+    SUM AMOUNT_OVERDUE.............................. NULL / NON RENSEIGNE
+    SUM AMOUNT_WAIVED............................... 0
+    SUM WRITEOFF_AMT................................ NULL / NON RENSEIGNE
+    SUM ACCRUED_AMOUNT.............................. 4714619124.55
+    SUM LCY_EQUIVALENT.............................. NULL / NON RENSEIGNE
+
+  [5.4.b Top 15 COMPONENT_NAME par AMOUNT_DUE]
+    MAINT_FEE....................................... due=2156795733372051190313947062488878479320000000000000000000000000000000000 | set=1947753744698815392377931630579553500490000000000000000000000000000000000 | over= | waiv=
+    PRINCIPAL....................................... due=118801572059 | set=58199052882 | over= | waiv=
+    MAIN_INT........................................ due=14528653356.55 | set=4016956364.55 | over= | waiv=
+    TVA_MAININT..................................... due=2248041185.5 | set=781688119.5 | over= | waiv=
+    INT_ODU_PRI..................................... due=186091068 | set=0 | over= | waiv=
+    ODIN_PNLTY...................................... due=1838514 | set=965274 | over= | waiv=
+    ODPR_PNLTY...................................... due=999905 | set=740012 | over= | waiv=
+    COMMISPLACE..................................... due=300001.02 | set=300001.02 | over= | waiv=
+    INT_TAX......................................... due=211250 | set=211250 | over= | waiv=
+    CREDLIF_INS..................................... due=175588 | set=175588 | over= | waiv=
+    PROCESS_FEE..................................... due=175588 | set=175588 | over= | waiv=
+    TVACOMMISPL..................................... due=57750.19 | set=57750.19 | over= | waiv=
+    PROCE_TAX....................................... due=33878 | set=33878 | over= | waiv=
+    CREDLIF_VAT..................................... due=33878 | set=33878 | over= | waiv=
+    COMAUTRE1....................................... due=0 | set=0 | over= | waiv=
+
+  [5.5 Echéances échues non soldées (AMOUNT_OVERDUE > 0)]
+    Nb échéances overdue............................ 0
+    SUM AMOUNT_OVERDUE.............................. 0
+    Comptes prêt concernés.......................... 0
+
+  [5.5.b Ageing des AMOUNT_OVERDUE vs SYSDATE]
+
+  [5.5.c Top 10 COMPONENT_NAME en overdue]
+
+  [5.6 Montants waivés (AMOUNT_WAIVED > 0)]
+    Nb échéances avec waiver........................ 0
+    SUM AMOUNT_WAIVED............................... 0
+    Comptes prêt concernés.......................... 0
+
+  [5.6.b Top 10 COMPONENT_NAME les plus waivés]
+
+  [5.6.c Top 15 BRANCHES par volume waivé]
+
+  [5.7 Writeoff — échéances passées en perte]
+    Nb échéances writeoff........................... 0
+    SUM WRITEOFF_AMT................................ 0
+    Comptes concernés............................... 0
+
+  [5.8 Suspense (intérêt constaté mais non réalisé)]
+    Nb lignes SUSP_AMT_DUE > 0...................... 37
+    SUM SUSP_AMT_DUE................................ 1891189
+    SUM SUSP_AMT_SETTLED............................ 0
+    SUM SUSP_AMT_LCY................................ 1891189
+
+  [5.9 MORA_INT (intérêts moratoires sur retard)]
+    Nb échéances avec MORA_INT > 0.................. 0
+    SUM MORA_INT.................................... 0
+
+  [5.10 EMI_AMOUNT — stats annuités]
+    EMI — nb........................................ 38593
+    EMI — min....................................... 2
+    EMI — max....................................... 5324804472
+    EMI — moy....................................... 2817032.98
+
+  [5.11 Cohérences montants dus / réglés / restants]
+    AMOUNT_SETTLED > ORIG_AMOUNT_DUE................ 0
+    Ecart ORIG_DUE vs (SET+OVER+WAIV+WO) > 1 unité.. 0
+    Echues non soldées / non overdue (anomalie)..... 0
+
+  [5.12 Volumétrie annuelle par SCHEDULE_DUE_DATE]
+    2022............................................ nb=172 | due=113202784.73 | over=
+    2023............................................ nb=4224 | due=4896539705.53 | over=
+    2024............................................ nb=15078 | due=2156795733372051190313947062488878479320000000000000000000000000000000000 | over=
+    2025............................................ nb=31951 | due=3892741139159105946516290638113 | over=
+    2026............................................ nb=28507 | due=46419727201 | over=
+    2027............................................ nb=19495 | due=14112244689 | over=
+    2028............................................ nb=17932 | due=12612916873 | over=
+    2029............................................ nb=15594 | due=11342887655 | over=
+    2030............................................ nb=12120 | due=10739953006 | over=
+    2031............................................ nb=8142 | due=5459466378 | over=
+    2032............................................ nb=3948 | due=1050165327 | over=
+    2033............................................ nb=1206 | due=747369411 | over=
+    2034............................................ nb=996 | due=722526277 | over=
+
+  [5.13 Top 15 comptes en overdue (concentration créance)]
+
+  [5.14 Alignement waiver composant vs waiver échéance]
+    Echéances waivées sans composant marqué WAIVE... 0
+
+================================================================================
+>>> 6. Paiements & liquidations — AMOUNT_PAID / AMOUNT_RECD / CLTB_LIQ
+================================================================================
+  [6.1 Volumétrie & plages temporelles]
+    CLTB_AMOUNT_RECD — nb lignes.................... 1912
+    CLTB_AMOUNT_PAID — nb lignes.................... 73694
+    CLTB_LIQ — nb lignes............................ 16452
+    RECD_DATE min................................... 22/08/2022
+    RECD_DATE max................................... 17/04/2026
+    PAID_DATE min................................... 08/09/2022
+    PAID_DATE max................................... 17/04/2026
+    LIQ VALUE_DATE min.............................. 08/09/2022
+    LIQ VALUE_DATE max.............................. 17/04/2026
+
+  [6.2 CLTB_AMOUNT_RECD — répartition par RECD_TYPE]
+    RECD_TYPE = D................................... nb=1912 | sum=152931582972
+
+  [6.2.b Top 15 COMPONENT_NAME perçus (AMOUNT_RECD)]
+    PRINCIPAL....................................... nb=1912 | sum=152931582972
+
+  [6.2.c Volumétrie annuelle des réceptions]
+    2022............................................ nb=24 | sum=7987781560
+    2023............................................ nb=194 | sum=13726882208
+    2024............................................ nb=634 | sum=12521859703
+    2025............................................ nb=820 | sum=98108695364
+    2026............................................ nb=240 | sum=20586364137
+
+  [6.3 CLTB_AMOUNT_PAID — répartition par PAID_STATUS]
+    PAID_STATUS = N................................. nb=67228 | paid=57407932683.57 | waiv=0 | cap=0
+    PAID_STATUS = P................................. nb=6463 | paid=21268920234.48 | waiv=0 | cap=0
+    PAID_STATUS = A................................. nb=3 | paid=20511488 | waiv=0 | cap=0
+
+  [6.3.b Top 15 COMPONENT_NAME payés]
+    PRINCIPAL....................................... nb=27323 | sum=73685313898
+    MAIN_INT........................................ nb=24488 | sum=4039394721.55
+    TVA_MAININT..................................... nb=19108 | sum=786007503.5
+    MAINT_FEE....................................... nb=2158 | sum=184942997
+    ODIN_PNLTY...................................... nb=542 | sum=965274
+    ODPR_PNLTY...................................... nb=6 | sum=740012
+    INT_ODU_PRI..................................... nb=69 | sum=0
+
+  [6.3.c Waivers & capitalisations — agrégats]
+    Lignes avec AMOUNT_WAIVED > 0................... 0
+    SUM AMOUNT_WAIVED............................... 0
+    Lignes avec AMOUNT_CAPITALIZED > 0.............. 0
+    SUM AMOUNT_CAPITALIZED.......................... 0
+
+  [6.3.d Retards de paiement (PAID_DATE - DUE_DATE)]
+    1-15 j de retard................................ nb=14047 | sum=31519133484.07
+    16-30 j......................................... nb=962 | sum=3727480732
+    31-60 j......................................... nb=2026 | sum=1097603894
+    61-90 j......................................... nb=459 | sum=321430581
+    91-180 j........................................ nb=450 | sum=455729999
+    > 180 j......................................... nb=297 | sum=358917251
+    à temps ou avance............................... nb=55453 | sum=41217068464.98
+
+  [6.4 CLTB_LIQ — répartition PAYMENT_STATUS]
+    PAYMENT_STATUS = P.............................. 16422
+    PAYMENT_STATUS = V.............................. 30
+    AUTH_STAT = A................................... 16452
+
+  [6.4.b Remises & excès — fuite / excédent à la liquidation]
+    CUST_INCENTIVE renseigné — nb................... 0
+    SUM CUST_INCENTIVE.............................. 0
+    UIDB_REBATE renseigné — nb...................... 0
+    SUM UIDB_REBATE................................. 0
+    AMOUNT_EXCESS renseigné — nb.................... 0
+    SUM AMOUNT_EXCESS............................... 0
+    EXCESS_PROFIT renseigné — nb.................... 0
+    SUM EXCESS_PROFIT............................... 0
+    BANKS_ADD_PROFIT renseigné — nb................. 0
+    SUM BANKS_ADD_PROFIT............................ 0
+    GROSS_PROFIT renseigné — nb..................... 0
+    SUM GROSS_PROFIT................................ 0
+
+  [6.4.c Pré-paiements (PREPMNT_RECOMP_*) — recomposition intérêt]
+    PREPMNT_RECOMP_BASIS = (NULL)................... 15890
+    PREPMNT_RECOMP_BASIS = E........................ 562
+    PREPMNT_RECOMP_BASIS_SIMPLE = (NULL)............ 16452
+
+  [6.4.d Types de liquidation]
+    INSTALLMENT_PAYMENT = Y......................... 1
+    CLOSE_RVLNG_LOAN = Y............................ 0
+    ASSET_CLOSURE = Y............................... 0
+    SIMULATED = Y (simulation non comptabilisée).... 0
+
+  [6.4.e Reversals de liquidation]
+    Reversals (REV_MAKER_ID renseigné).............. 30
+    Comptes prêt concernés.......................... 29
+
+  [6.4.f Top 10 MAKER_ID sur liquidations]
+    MAKER CLBATCH09914.............................. 1433
+    MAKER CLBATCH09924.............................. 894
+    MAKER CLBATCH09910.............................. 850
+    MAKER CLBATCH0997............................... 842
+    MAKER CLBATCH09913.............................. 792
+    MAKER CLBATCH0999............................... 780
+    MAKER CLBATCH09923.............................. 775
+    MAKER CLBATCH09915.............................. 775
+    MAKER CLBATCH09918.............................. 669
+    MAKER CLBATCH09911.............................. 653
+
+  [6.4.g Top 10 CHECKER_ID]
+    CHECKER CLBATCH09914............................ 1433
+    CHECKER CLBATCH09924............................ 894
+    CHECKER CLBATCH09910............................ 850
+    CHECKER CLBATCH0997............................. 842
+    CHECKER CLBATCH09913............................ 792
+    CHECKER CLBATCH0999............................. 780
+    CHECKER CLBATCH09923............................ 775
+    CHECKER CLBATCH09915............................ 775
+    CHECKER CLBATCH09918............................ 669
+    CHECKER CLBATCH09911............................ 653
+
+  [6.5 Cohérence AMOUNT_RECD vs AMOUNT_PAID — niveau compte]
+    SUM AMOUNT_RECD................................. 152931582972
+    SUM AMOUNT_PAID................................. 78697364406.05
+    Ecart RECD - PAID............................... 74234218565.95
+
+  [6.5.b Comptes avec réceptions sans imputation composant]
+    Comptes sans ligne AMOUNT_PAID associée......... 173
+
+================================================================================
+>>> 7. CLTB_ACCOUNT_APPS_MASTER — Prêts lifecycle
+================================================================================
+  [7.1 Volumétrie & plages temporelles]
+    Total comptes prêt (CL)......................... 1912
+    Clients distincts............................... 539
+    PRODUCT_CODE distincts.......................... 9
+    Branches distinctes............................. 1
+    BOOK_DATE min................................... 22/08/2022
+    BOOK_DATE max................................... 17/04/2026
+    VALUE_DATE min.................................. 22/08/2022
+    VALUE_DATE max.................................. 17/04/2026
+    MATURITY_DATE min............................... 29/09/2022
+    MATURITY_DATE max............................... 30/12/2034
+
+  [7.2 Octrois annuels (VALUE_DATE)]
+    2022............................................ nb=24 | financé=7987781560 | décaissé=7987781560
+    2023............................................ nb=194 | financé=13726882208 | décaissé=13726882208
+    2024............................................ nb=634 | financé=12522029703 | décaissé=12521859703
+    2025............................................ nb=820 | financé=98108695364 | décaissé=98108695364
+    2026............................................ nb=240 | financé=20586364137 | décaissé=20586364137
+
+  [7.3 Répartition ACCOUNT_STATUS]
+    ACCOUNT_STATUS = L.............................. 1115
+    ACCOUNT_STATUS = A.............................. 779
+    ACCOUNT_STATUS = V.............................. 16
+    ACCOUNT_STATUS = H.............................. 2
+
+  [7.3.b Répartition DERIVED_STATUS]
+    DERIVED_STATUS = (NULL)......................... 1912
+
+  [7.3.c Top 15 USER_DEFINED_STATUS (classification risque)]
+    NORM............................................ 1895
+    DOU1............................................ 15
+    SUBS............................................ 2
+
+  [7.3.d AUTH_STAT / DELINQUENCY_STATUS]
+    AUTH_STAT = A................................... 1910
+    AUTH_STAT = X................................... 2
+    DELINQUENCY_STATUS = (NULL)..................... 1912
+
+  [7.4 Flags revenue-sensibles]
+    STOP_ACCRUALS = Y (intérêts gelés).............. 0
+    STOP_DSBR = Y (décaissement bloqué)............. 0
+    HAS_PROBLEMS = Y (prêt à problème).............. 0
+    TAKEN_OVER = Y (prêt repris).................... 0
+    AMORTIZED = Y................................... 94
+    INSURANCE_FLAG = Y.............................. 0
+    STAFF_FINANCE = Y (prêt personnel banque)....... 0
+    UPFRONT_PROFIT_BOOKED = Y (profit anticipé)..... 0
+    OPEN_LINE_LOAN = Y.............................. 0
+    ROLLOVER_ALLOWED = Y............................ 0
+    PACKING_CREDIT = Y.............................. 0
+
+  [7.5 INTEREST_SUBSIDY / SUBSIDY_CUSTOMER_ID]
+    INTEREST_SUBSIDY_ALLOWED = Y.................... 0
+    SUBSIDY_CUSTOMER_ID renseigné................... 0
+    RESIDUAL_SUBSIDY_ALLOWED = Y.................... 0
+    SUM RESIDUAL_SUBSIDY_VALUE...................... 0
+
+  [7.6 Stats financements (AMOUNT_FINANCED)]
+    AMOUNT_FINANCED — nb............................ 1912
+    AMOUNT_FINANCED — sum........................... 152931752972
+    AMOUNT_FINANCED — moy........................... 79985226.45
+    AMOUNT_FINANCED — min........................... 100
+    AMOUNT_FINANCED — max........................... 23162995031
+    SUM AMOUNT_DISBURSED............................ 152931582972
+    SUM AMOUNT_UTILIZED............................. 0
+    SUM AMT_AVAILABLE............................... NULL / NON RENSEIGNE
+    SUM NET_PRINCIPAL............................... 152931752972
+    SUM TOTAL_AMOUNT................................ NULL / NON RENSEIGNE
+    SUM BALLOON_AMOUNT.............................. NULL / NON RENSEIGNE
+    SUM RESIDUAL_AMOUNT............................. NULL / NON RENSEIGNE
+
+  [7.6.b Cohérence AMOUNT_DISBURSED <= AMOUNT_FINANCED]
+    Décaissé > financé (anomalie)................... 0
+    Actif/Liquidé mais non décaissé................. 5
+
+  [7.7 Top 15 PRODUCT_CODE]
+    PRODUCT CCQA.................................... nb=650 | financé=59842018687
+    PRODUCT CTLN.................................... nb=267 | financé=53142681987
+    PRODUCT SYNE.................................... nb=1 | financé=23162995031
+    PRODUCT CTRD.................................... nb=97 | financé=7008225197
+    PRODUCT CSYN.................................... nb=4 | financé=5125000000
+    PRODUCT CBID.................................... nb=390 | financé=4176355268
+    PRODUCT CSSA.................................... nb=137 | financé=386511725
+    PRODUCT PDLD.................................... nb=361 | financé=87795077
+    PRODUCT PDLP.................................... nb=5 | financé=170000
+
+  [7.7.b Top 10 PRODUCT_CATEGORY]
+    PRODUCT_CATEGORY = CREDI_CAMEROON............... 1546
+    PRODUCT_CATEGORY = RETAIL....................... 366
+
+  [7.8 Fréquence EMI & Tenor]
+    EMI_FREQ_UNIT = (NULL).......................... 1912
+    MATURITY_TYPE = F............................... 1912
+    MATURITY_TENOR min.............................. NULL / NON RENSEIGNE
+    MATURITY_TENOR max.............................. NULL / NON RENSEIGNE
+    MATURITY_TENOR moy.............................. NULL / NON RENSEIGNE
+
+  [7.9 Prêts post-maturité non clôturés]
+    Maturité passée & statut non L/C................ 117
+    Clôture attendue passée & statut non L/C........ 0
+
+  [7.10 Downpayments]
+    Comptes avec DOWNPAYMENT_AMOUNT > 0............. 0
+    SUM DOWNPAYMENT_AMOUNT.......................... 0
+
+  [7.11 Top 15 emprunteurs (par AMOUNT_FINANCED cumulé)]
+    CUST 040730818.................................. nb=2 | sum=30000000000
+    CUST 040760408.................................. nb=2 | sum=26452015068
+    CUST 040789996.................................. nb=1 | sum=23162995031
+    CUST 040730721.................................. nb=85 | sum=10172572128
+    CUST 040729895.................................. nb=23 | sum=8957000000
+    CUST 040789661.................................. nb=13 | sum=6770000000
+    CUST 040735781.................................. nb=3 | sum=4500000000
+    CUST 040731675.................................. nb=33 | sum=3300000000
+    CUST 040792071.................................. nb=2 | sum=3000000000
+    CUST 040737887.................................. nb=25 | sum=2600000000
+    CUST 040731195.................................. nb=4 | sum=2500000000
+    CUST 040740936.................................. nb=24 | sum=2450000000
+    CUST 040789766.................................. nb=2 | sum=2125000000
+    CUST 040730718.................................. nb=1 | sum=2100000000
+    CUST 040780653.................................. nb=11 | sum=1650000000
+
+================================================================================
+>>> 8. LDTB — Contrats Loans/Deposits/MM & accruals
+================================================================================
+  [8.1 Volumétrie des contrats]
+    LDTB_CONTRACT_MASTER — total.................... 604
+    Produits distincts.............................. 5
+    Modules distincts............................... 2
+    Contreparties distinctes........................ 5
+    BOOKING_DATE min................................ 05/08/2022
+    BOOKING_DATE max................................ 12/06/2025
+    VALUE_DATE min.................................. 30/06/2022
+    VALUE_DATE max.................................. 12/06/2025
+    MATURITY_DATE min............................... 23/09/2022
+    MATURITY_DATE max............................... 29/05/2030
+
+  [8.2 Répartition MODULE]
+    MODULE = MM..................................... nb=603 | sum LCY=1191859023333
+    MODULE = LD..................................... nb=1 | sum LCY=100000000
+
+  [8.2.b PRODUCT_TYPE]
+    PRODUCT_TYPE = L................................ 603
+    PRODUCT_TYPE = D................................ 1
+
+  [8.2.c PAYMENT_METHOD]
+    PAYMENT_METHOD = B.............................. 489
+    PAYMENT_METHOD = D.............................. 115
+
+  [8.3 Statuts contrats]
+    CONTRACT_STATUS = L............................. 578
+    CONTRACT_STATUS = A............................. 19
+    CONTRACT_STATUS = V............................. 7
+    CONTRACT_DERIVED_STATUS = NORM.................. 604
+    USER_DEFINED_STATUS = NORM...................... 604
+    SETTLEMENT_STATUS = N........................... 604
+    ICCF_STATUS = N................................. 604
+    CHARGE_STATUS = N............................... 604
+    TAX_STATUS = N.................................. 604
+
+  [8.4 Stats financières des contrats]
+    SUM AMOUNT...................................... 1191959023333
+    SUM MAIN_COMP_AMOUNT............................ 152010835612.04
+    SUM LCY_AMOUNT.................................. 1191959023333
+    SUM ORIGINAL_FACE_VALUE......................... NULL / NON RENSEIGNE
+    SUM RISK_FREE_EXP_AMOUNT........................ NULL / NON RENSEIGNE
+    SUM MAX_DRAWDOWN_AMOUNT......................... 1191959023333
+
+  [8.5 Taux principal contrats]
+    MAIN_COMP_RATE min.............................. 1
+    MAIN_COMP_RATE max.............................. 54.3151
+    MAIN_COMP_RATE moy.............................. 5.9553
+    Contrats avec MAIN_COMP_RATE NULL / 0........... 0
+    Contrats avec SPREAD non nul.................... 0
+    Contrats avec CUST_MARGIN non nulle............. 0
+
+  [8.6 Subvention de taux (SUBSIDY_PERCENTAGE)]
+    Contrats subventionnés.......................... 0
+    SUBSIDY_PERCENTAGE min.......................... NULL / NON RENSEIGNE
+    SUBSIDY_PERCENTAGE max.......................... NULL / NON RENSEIGNE
+    SUBSIDY_PERCENTAGE moy.......................... NULL / NON RENSEIGNE
+
+  [8.7 Flags contrats — ALLOW_PREPAY / ROLLOVER / AUTO_PROV]
+    ALLOW_PREPAY = Y................................ 0
+    ROLLOVER_ALLOWED = Y............................ 64
+    ROLLOVER_COUNT > 0.............................. 0
+    AUTO_PROV_REQD = Y.............................. 0
+    RB_PENALTY_APPLICABLE = Y (pénalité remb. antici 0
+    ANNUITY_LOAN = Y................................ 0
+    ASSIGNED_CONTRACT = Y (cédé).................... 0
+
+  [8.8 ICCF — accruals & intérêts liquidés]
+    Total lignes ICCF_DETAILS....................... 1194
+    ICCF — nb....................................... 1194
+    SUM CURRENT_NET_ACCRUAL......................... 56911008.11
+    SUM TILL_DATE_ACCRUAL........................... 11878869105.65
+    SUM TOTAL_AMOUNT_LIQUIDATED..................... 1172020837940.94
+    Composants ACCRUAL_REQUIRED = Y................. 597
+    UPFRONT_PROFIT_BOOKED = Y....................... 0
+
+  [8.8.b Top 15 COMPONENT ICCF par accrual courant]
+    INT_BT.......................................... nb=595 | sum=56443238.16
+    INT_OB.......................................... nb=1 | sum=347222
+    MTDBINT......................................... nb=1 | sum=120547.95
+    PRINCIPAL....................................... nb=597 | sum=0
+
+  [8.9 Historique des accruals — ACCRUAL_HISTORY]
+    Total lignes accrual history.................... 38972
+    ACCRUAL_TO_DATE min............................. 05/08/2022
+    ACCRUAL_TO_DATE max............................. 16/06/2025
+    SUM NET_ACCRUAL................................. 11878869155.65
+    SUM TILL_DATE_ACCRUAL........................... 1351626510739.6
+    SUM OVERDUE_INTEREST............................ 0
+    SUM OUTSTANDING_ACCRUAL......................... 1054641786803.69
+    SUM AMOUNT_PREPAID.............................. NULL / NON RENSEIGNE
+
+  [8.9.b Répartition TYPE_OF_ACCRUAL]
+    TYPE_OF_ACCRUAL = P............................. 38462
+    TYPE_OF_ACCRUAL = N............................. 510
+
+  [8.9.c ACC_ENTRY_PASSED (accrual comptabilisé)]
+    ACC_ENTRY_PASSED = Y............................ 38972
+
+  [8.10 Liquidation contrats — LDTB_CONTRACT_LIQ]
+    Lignes LIQ...................................... 1095
+    SUM AMOUNT_DUE (LIQ)............................ 1166596920596.08
+    SUM AMOUNT_PAID (LIQ)........................... 1167379920596.08
+    SUM INT_PREPAY.................................. 0
+    SUM TAX_PAID.................................... 0
+
+  [8.10.b Écarts AMOUNT_DUE vs AMOUNT_PAID sur LIQ]
+    Lignes AMOUNT_DUE > AMOUNT_PAID................. 0
+    Lignes OVERDUE_DAYS > 0......................... 59
+
+  [8.10.c LIQ_SUMMARY — prépaiements & pénalités]
+    Lignes LIQ_SUMMARY.............................. 590
+    SUM TOTAL_PAID.................................. 1167379920596.08
+    SUM TOTAL_PREPAID............................... 0
+    SUM PREPAYMENT_PENALTY_AMOUNT................... NULL / NON RENSEIGNE
+    LIQ_SUMMARY PAYMENT_STATUS = A.................. 589
+    LIQ_SUMMARY PAYMENT_STATUS = V.................. 1
+
+  [8.11 Rollovers contrats]
+    Lignes ROLLOVER................................. 64
+    ROLLOVER_TYPE = M............................... 64
+    Rollover APPLY_CHARGE = Y....................... 64
+    Rollover APPLY_CHARGE = N (fuite de frais)...... 0
+    Rollover APPLY_TAX = Y.......................... 1
+    Rollover APPLY_TAX = N.......................... 63
+
+  [8.12 Preferences contrats — arrondis, TRS, verify funds]
+    Total lignes PREFERENCE......................... 604
+    TRS_APPLICABLE = Y.............................. 0
+    SUBSIDY_ALLOWED = Y............................. 0
+    TRACK_RECEIVABLE_ALIQ = Y....................... 0
+    TRACK_RECEIVABLE_MLIQ = Y....................... 0
+    VERIFY_FUNDS = Y................................ 1
+    ROUNDING_REQD = Y............................... 0
+    CCY_ROUND_RULE = (NULL)......................... 604
+
+  [8.13 Volumétrie annuelle BOOKING_DATE]
+    2022............................................ nb=90 | sum LCY=59035000000
+    2023............................................ nb=172 | sum LCY=264302250000
+    2024............................................ nb=234 | sum LCY=592814270000
+    2025............................................ nb=108 | sum LCY=275807503333
+
+  [8.13.b Top 10 contreparties par exposition]
+    CPARTY 040730818................................ nb=232 | sum=645587510000
+    CPARTY 040730820................................ nb=200 | sum=365704623333
+    CPARTY 040730819................................ nb=122 | sum=142113450000
+    CPARTY 040730821................................ nb=49 | sum=38453440000
+    CPARTY 040729883................................ nb=1 | sum=100000000
+
+================================================================================
+>>> 9. ICTM — Paramétrage des taux d'intérêt
+================================================================================
+  [9.1 Volumétrie]
+    ICTM_PR_INT_UDEVALS (taux produit/classe)....... 1102
+    ICTM_ACC_UDEVALS (taux compte).................. 1582
+    ICTM_EXPR (expressions de calcul)............... 86
+
+  [9.2 Taux catalogue — top 15 PRODUCT_CODE les plus paramétrés]
+    PRODUCT BCIN.................................... 172 lignes UDE
+    PRODUCT ODIN.................................... 138 lignes UDE
+    PRODUCT FRG1.................................... 90 lignes UDE
+    PRODUCT SVIE.................................... 85 lignes UDE
+    PRODUCT DINT.................................... 72 lignes UDE
+    PRODUCT CMDT.................................... 42 lignes UDE
+    PRODUCT CPHD.................................... 27 lignes UDE
+    PRODUCT SWDS.................................... 24 lignes UDE
+    PRODUCT PSCH.................................... 22 lignes UDE
+    PRODUCT PSC3.................................... 22 lignes UDE
+    PRODUCT PSC2.................................... 22 lignes UDE
+    PRODUCT MAMC.................................... 20 lignes UDE
+    PRODUCT FEES.................................... 18 lignes UDE
+    PRODUCT FRGE.................................... 16 lignes UDE
+    PRODUCT HNI1.................................... 14 lignes UDE
+
+  [9.2.b Top 15 UDE_ID (types de taux)]
+    UDE_ID = TAX_RATE............................... 281
+    UDE_ID = TAXRATE................................ 103
+    UDE_ID = MONTANT_FRAIS.......................... 103
+    UDE_ID = OD_PENAL_INT........................... 69
+    UDE_ID = OD_NORM_INT............................ 69
+    UDE_ID = CHARGE_AMOUNT.......................... 61
+    UDE_ID = TD_PENAL_INT........................... 45
+    UDE_ID = TD_INT................................. 45
+    UDE_ID = CRINTRATE1............................. 34
+    UDE_ID = TAX_RATE_PENAL......................... 28
+    UDE_ID = BD_RATE................................ 28
+    UDE_ID = BD_RATE_PENAL.......................... 28
+    UDE_ID = MAX_BAL_REQU........................... 20
+    UDE_ID = SV_INT_RATE............................ 20
+    UDE_ID = MIN_BAL_REQU........................... 20
+
+  [9.2.c Stats UDE_VALUE (taux) par UDE_ID]
+    TAX_RATE........................................ nb=281 | min=0 | max=19.25 | moy=16.9404
+    TAXRATE......................................... nb=103 | min=0 | max=19.25 | moy=7.6481
+    MONTANT_FRAIS................................... nb=103 | min=0 | max=75000 | moy=8597.0874
+    OD_PENAL_INT.................................... nb=69 | min=0 | max=17 | moy=4.4348
+    OD_NORM_INT..................................... nb=69 | min=0 | max=17 | moy=8.087
+    CHARGE_AMOUNT................................... nb=61 | min=0 | max=50000 | moy=12420.2459
+    TD_PENAL_INT.................................... nb=45 | min=0 | max=0 | moy=0
+    TD_INT.......................................... nb=45 | min=0 | max=0 | moy=0
+    CRINTRATE1...................................... nb=34 | min=0 | max=4 | moy=.2132
+    TAX_RATE_PENAL.................................. nb=28 | min=0 | max=0 | moy=0
+
+  [9.2.d Plage temporelle des taux catalogue]
+    UDE_EFF_DT min.................................. 16/02/2021
+    UDE_EFF_DT max.................................. 01/08/2025
+
+  [9.2.e Top 10 devises côté taux catalogue]
+    CCY XAF......................................... 534
+    CCY EUR......................................... 168
+    CCY USD......................................... 168
+    CCY NGN......................................... 155
+    CCY GNF......................................... 44
+    CCY GBP......................................... 33
+
+  [9.3 Taux compte — ICTM_ACC_UDEVALS]
+    Total taux compte............................... 1582
+    Comptes distincts............................... 338
+    Produits distincts.............................. 10
+
+  [9.3.b Statut d'enregistrement]
+    AUTH_STAT = A................................... 1578
+    AUTH_STAT = U................................... 4
+    RECORD_STAT = O................................. 1582
+
+  [9.3.c UDE_VARIANCE — variance de taux par compte]
+    Comptes avec variance non nulle................. 0
+    UDE_VARIANCE min................................ NULL / NON RENSEIGNE
+    UDE_VARIANCE max................................ NULL / NON RENSEIGNE
+    UDE_VARIANCE moy................................ NULL / NON RENSEIGNE
+    Variance NEGATIVE (taux en dessous catalogue)... 0
+    Variance POSITIVE (taux au dessus catalogue).... 0
+
+  [9.3.e Top 15 PROD avec plus de dérogations (variance <> 0)]
+
+  [9.3.f Top 15 comptes avec plus de taux dérogatoires]
+
+  [9.3.g Stats BASE_RATE / BASE_SPREAD sur comptes]
+    BASE_RATE nb / min / max / moy.................. 0 /  /  / 
+    BASE_SPREAD nb / min / max / moy................ 0 /  /  / 
+
+  [9.3.h Effectivité UDE_EFF_DT sur comptes]
+    Taux futurs (eff > SYSDATE)..................... 0
+    Taux actifs / passés............................ 1582
+
+  [9.4 ICTM_EXPR — expressions de calcul IC]
+    Nb RULE_ID distincts............................ 28
+    Nb FRM_NO distincts............................. 4
+    Lignes avec CONDITION........................... 86
+    Lignes avec RESULT.............................. 86
+
+  [9.4.b Top 15 RULE_ID par nb de lignes d'expression]
+    RULE_ID BCIN.................................... 4
+    RULE_ID TRIN.................................... 4
+    RULE_ID TDRC.................................... 4
+    RULE_ID TDIN.................................... 4
+    RULE_ID TDGN.................................... 4
+    RULE_ID TCIN.................................... 4
+    RULE_ID SVIE.................................... 4
+    RULE_ID FRGE.................................... 4
+    RULE_ID EMBF.................................... 4
+    RULE_ID DINT.................................... 4
+    RULE_ID CRIN.................................... 4
+    RULE_ID CMDT.................................... 4
+    RULE_ID CPHD.................................... 3
+    RULE_ID DRIN.................................... 3
+    RULE_ID DCIN.................................... 3
+
+  [9.5 Cohérence catalogue vs compte]
+    Taux compte sans UDE_ID catalogué pour le produi 11
+
+================================================================================
+>>> 10. GLTB_GL_BAL — Revenus & charges au grand livre
+================================================================================
+  [10.1 Volumétrie GLTB_GL_BAL]
+    Total lignes GL_BAL............................. 78195
+    GL_CODE distincts............................... 1184
+    Branches distinctes............................. 8
+    Devises distinctes.............................. 12
+    Années fiscales couvertes....................... 5
+    Périodes distinctes............................. 13
+
+  [10.2 Répartition CATEGORY (P/L vs Bilan)]
+    CATEGORY = 1.................................... 36702
+    CATEGORY = 4.................................... 23325
+    CATEGORY = 3.................................... 12883
+    CATEGORY = 2.................................... 2342
+    CATEGORY = 5.................................... 1982
+    CATEGORY = 8.................................... 574
+    CATEGORY = 9.................................... 387
+
+  [10.3 LEAF (feuille vs agrégat)]
+    LEAF = Y........................................ 44193
+    LEAF = N........................................ 34002
+
+  [10.4 Mouvements GL — revenus (INCOME) / charges (EXPENSE)]
+
+  [10.5 Mouvements par FIN_YEAR (tous GL)]
+    FY FY2022....................................... nb=4186 | CR=4070150668739.15 | DR=4106903775468.82
+    FY FY2023....................................... nb=12773 | CR=10746030630529.67 | DR=10829582151315.63
+    FY FY2024....................................... nb=19748 | CR=25612706257144.54 | DR=25656903806878.7
+    FY FY2025....................................... nb=28492 | CR=86609692074511.79 | DR=86672286650695.67
+    FY FY2026....................................... nb=12996 | CR=84788068354470.22 | DR=84988561038097.31
+
+  [10.6 Top 20 GL_CODE par CR_MOV_LCY (revenus)]
+    GL 4000000A1.................................... CR mov LCY=16287114979829.92
+    GL 5000000A1.................................... CR mov LCY=14280649185577.73
+    GL 9000000A1.................................... CR mov LCY=8324269267200.6
+    GL 5600000A2.................................... CR mov LCY=8281973720415.48
+    GL 5600000A3.................................... CR mov LCY=7990960907772.23
+    GL 4600000A2.................................... CR mov LCY=6502352895405.42
+    GL 4670000A3.................................... CR mov LCY=6420679136200.62
+    GL 5601000A4.................................... CR mov LCY=6304379396375.56
+    GL 560100100.................................... CR mov LCY=6304379396375.56
+    GL 4500000A2.................................... CR mov LCY=6178376431070.1
+    GL 4510000A3.................................... CR mov LCY=5950064576790.35
+    GL 4516000A4.................................... CR mov LCY=5950064576790.35
+    GL 452600001.................................... CR mov LCY=5938090185498.35
+    GL 467000188.................................... CR mov LCY=5253369928909
+    GL 3000000A1.................................... CR mov LCY=4507652480927.24
+    GL 9900000A2.................................... CR mov LCY=3638832547788.8
+    GL 4700000A2.................................... CR mov LCY=3514588584068.25
+    GL 952100100.................................... CR mov LCY=2996474045000
+    GL 9950000A3.................................... CR mov LCY=2996474045000
+    GL 995000100.................................... CR mov LCY=2996474045000
+
+  [10.7 Top 20 GL_CODE par DR_MOV_LCY (charges)]
+    GL 4000000A1.................................... DR mov LCY=16161423605548.57
+    GL 5000000A1.................................... DR mov LCY=14657962731476.55
+    GL 5600000A2.................................... DR mov LCY=8415949056182.98
+    GL 9000000A1.................................... DR mov LCY=8324269267200.6
+    GL 5600000A3.................................... DR mov LCY=8132413045877.73
+    GL 5601000A4.................................... DR mov LCY=6396077604819.06
+    GL 560100100.................................... DR mov LCY=6396077604819.06
+    GL 4600000A2.................................... DR mov LCY=6375370270517.92
+    GL 4670000A3.................................... DR mov LCY=6293791196674.62
+    GL 4500000A2.................................... DR mov LCY=6178377648546.1
+    GL 4510000A3.................................... DR mov LCY=5950032883465.35
+    GL 4516000A4.................................... DR mov LCY=5950032883465.35
+    GL 452600001.................................... DR mov LCY=5938057952969.35
+    GL 467000188.................................... DR mov LCY=5158383659205
+    GL 3000000A1.................................... DR mov LCY=4285613045388.69
+    GL 9900000A2.................................... DR mov LCY=3650425210509.8
+    GL 4700000A2.................................... DR mov LCY=3515391121879.25
+    GL 952100100.................................... DR mov LCY=2996474045000
+    GL 9950000A3.................................... DR mov LCY=2996474045000
+    GL 995000100.................................... DR mov LCY=2996474045000
+
+  [10.8 Top 15 BRANCH_CODE par CR_MOV_LCY total]
+    BRANCHE 099..................................... CR mov LCY=172235979160452.58
+    BRANCHE 001..................................... CR mov LCY=31116340816961.41
+    BRANCHE 004..................................... CR mov LCY=3382107123766.72
+    BRANCHE 007..................................... CR mov LCY=2869909668570
+    BRANCHE 003..................................... CR mov LCY=1142311801511.42
+    BRANCHE 008..................................... CR mov LCY=647310357903
+    BRANCHE 006..................................... CR mov LCY=239477884286.65
+    BRANCHE 005..................................... CR mov LCY=193211171943.6
+
+  [10.9 Top 10 devises (CR_MOV_LCY)]
+    CCY XAF......................................... CR LCY=187645568577512.63 | CR FCY=0
+    CCY EUR......................................... CR LCY=16799008331689.74 | CR FCY=17724189251.1
+    CCY USD......................................... CR LCY=7378399304119.01 | CR FCY=9434188773.06
+    CCY GBP......................................... CR LCY=2319232436 | CR FCY=2651409.76
+    CCY ZAR......................................... CR LCY=814664925 | CR FCY=19864961.43
+    CCY XOF......................................... CR LCY=537710925 | CR FCY=524273080.08
+    CCY CHF......................................... CR LCY=107689 | CR FCY=152.32
+    CCY CAD......................................... CR LCY=51507 | CR FCY=17.26
+    CCY JPY......................................... CR LCY=4181 | CR FCY=12.08
+    CCY SGD......................................... CR LCY=279 | CR FCY=.06
+
+  [10.10 UNCOLLECTED (fonds non collectés sur GL)]
+    Lignes avec UNCOLLECTED non nul................. 0
+    SUM UNCOLLECTED................................. 0
+
+  [10.11 Ecart CR_MOV_LCY vs CR_MOV_LCY_OLD]
+    Lignes avec CR_MOV_LCY <> CR_MOV_LCY_OLD........ 30546
+    Lignes avec DR_MOV_LCY <> DR_MOV_LCY_OLD........ 33680
+
+  [10.12 Turnovers intraday (ACY/LCY today)]
+    SUM ACY_TODAY_TOVER_CR.......................... 18054220005.26
+    SUM ACY_TODAY_TOVER_DR.......................... 17153537508.36
+    SUM LCY_TODAY_TOVER_CR.......................... 137800061197095.77
+    SUM LCY_TODAY_TOVER_DR.......................... 138400852018673
+
+  [10.13 Cohérence OPEN + MOV vs BAL (LCY)]
+    Ecart CR : OPEN+MOV vs BAL > 1.................. 30375
+    Ecart DR : OPEN+MOV vs BAL > 1.................. 33911
+
+  [10.14 Rapprochement ACTB vs GL (top 10 plus gros écarts sur agrégats)]
+    GL 099ACO00001.................................. ACTB=6211023849017.56 | GL=0 | ecart=6211023849017.56
+    GL 099ACO00013.................................. ACTB=581449760648.25 | GL=0 | ecart=581449760648.25
+    GL 723300100.................................... ACTB=556560977989.25 | GL=1112787048554.5 | ecart=-556226070565.25
+    GL 099ACO00024.................................. ACTB=464964103635 | GL=0 | ecart=464964103635
+    GL 00101300159.................................. ACTB=303166557988 | GL=0 | ecart=303166557988
+    GL 00110000006.................................. ACTB=231973041154 | GL=0 | ecart=231973041154
+    GL 099ACO00011.................................. ACTB=188389987829.59 | GL=0 | ecart=188389987829.59
+    GL 00101100389.................................. ACTB=181268663793.25 | GL=0 | ecart=181268663793.25
+    GL 00101100017.................................. ACTB=152117527522.48 | GL=0 | ecart=152117527522.48
+    GL 00101100301.................................. ACTB=104330739296.5 | GL=0 | ecart=104330739296.5
+
+================================================================================
+>>> 11. RVTB_ACC_REVAL — Réévaluation FX & P&L
+================================================================================
+  [11.1 Volumétrie RVTB_ACC_REVAL]
+    Total lignes réévaluation....................... 9110
+    Comptes réévalués distincts..................... 70
+    Devises réévaluées.............................. 10
+    Branches concernées............................. 4
+    REVAL_DATE min.................................. 13/06/2022
+    REVAL_DATE max.................................. 16/04/2026
+
+  [11.2 REVAL_IND (sens P&L)]
+    REVAL_IND = P................................... 4658
+    REVAL_IND = L................................... 4452
+
+  [11.2.b PL_SPLIT_FLAG & TRADING_PL_INDICATOR]
+    PL_SPLIT_FLAG = (NULL).......................... 9110
+    TRADING_PL_INDICATOR = (NULL)................... 9110
+    GLMIS_UPD_STATUS = (NULL)....................... 9110
+
+  [11.3 Agrégats P&L FX]
+    SUM OLD_LCY_EQUIVALENT.......................... -16301665744.6
+    SUM NEW_LCY_EQUIVALENT.......................... -19215877534.41
+    SUM P&L FX (NEW - OLD).......................... -2914211789.81
+    Trading — nb lignes............................. 0
+    Trading — SUM OLD LCY........................... NULL / NON RENSEIGNE
+    Trading — SUM NEW LCY........................... NULL / NON RENSEIGNE
+    Trading — SUM P&L FX............................ NULL / NON RENSEIGNE
+
+  [11.4 Top 10 devises par volume réévalué (|NEW-OLD|)]
+    CCY USD......................................... nb=7762 | P&L FX=-3447375846.7
+    CCY EUR......................................... nb=858 | P&L FX=550613321.89
+    CCY GBP......................................... nb=343 | P&L FX=-12973990
+    CCY ZAR......................................... nb=55 | P&L FX=-4476910
+    CCY XOF......................................... nb=4 | P&L FX=837
+    CCY CAD......................................... nb=64 | P&L FX=790
+    CCY CHF......................................... nb=4 | P&L FX=-28
+    CCY SGD......................................... nb=1 | P&L FX=17
+    CCY KWD......................................... nb=1 | P&L FX=12
+    CCY JPY......................................... nb=18 | P&L FX=7
+
+  [11.5 Réévaluation P&L FX par année]
+    2022............................................ nb=266 | P&L FX=-407950615.86
+    2023............................................ nb=1274 | P&L FX=-536019774.95
+    2024............................................ nb=1677 | P&L FX=-337901001
+    2025............................................ nb=2883 | P&L FX=-1286630677
+    2026............................................ nb=3010 | P&L FX=-345709721
+
+  [11.6 Top 15 comptes par |P&L FX|]
+    099/452600001/USD............................... P&L=17255545659
+    099/099ACB00006/USD............................. P&L=-16195509845
+    001/452600001/USD............................... P&L=-11731100228
+    001/00101400005/USD............................. P&L=6557388269
+    007/00701300302/USD............................. P&L=5613115754
+    007/452600001/USD............................... P&L=-5513071722
+    001/00101400003/USD............................. P&L=4860988883
+    099/099ACO00024/EUR............................. P&L=4093459676
+    099/099ACO00013/EUR............................. P&L=-4031132974.01
+    099/099ACO00023/USD............................. P&L=-2473112063
+    001/00101400009/USD............................. P&L=1343363115
+    001/00101400008/USD............................. P&L=-1245533994
+    099/099ACO00011/USD............................. P&L=-1064231241.93
+    001/00101400006/USD............................. P&L=730251439
+    001/00101400007/USD............................. P&L=-588348984
+
+  [11.7 Top 10 PNL_ACCOUNT utilisés]
+    PNL_ACCOUNT 723300100........................... 4587
+    PNL_ACCOUNT 623300100........................... 4385
+    PNL_ACCOUNT 979000100........................... 138
+
+  [11.7.b Top 10 REVAL_ACCOUNT]
+    REVAL_ACCOUNT 452600001......................... 1490
+    REVAL_ACCOUNT 099ACO00011....................... 913
+    REVAL_ACCOUNT 099ACO00005....................... 800
+    REVAL_ACCOUNT 099ACB00002....................... 796
+    REVAL_ACCOUNT 099ACO00008....................... 483
+    REVAL_ACCOUNT 099ACO00013....................... 359
+    REVAL_ACCOUNT 571000100......................... 254
+    REVAL_ACCOUNT 099ACB00001....................... 230
+    REVAL_ACCOUNT 383001100......................... 177
+    REVAL_ACCOUNT 099ACO00002....................... 162
+
+  [11.8 CYTB_RATES_HISTORY — cours de change historiques]
+    Total lignes taux............................... 209700
+    Couples CCY1/CCY2 distincts..................... 19
+    RATE_TYPE distincts............................. 4
+    RATE_DATE min................................... 23/05/2022
+    RATE_DATE max................................... 16/04/2026
+
+  [11.8.b Top 10 couples devises par nb de cotations]
+    CHF/XAF......................................... 16328
+    AED/XAF......................................... 16328
+    CNY/XAF......................................... 16324
+    ZAR/XAF......................................... 16312
+    SAR/XAF......................................... 16308
+    USD/XAF......................................... 16302
+    CAD/XAF......................................... 16300
+    MAD/XAF......................................... 16296
+    SEK/XAF......................................... 16292
+    GBP/XAF......................................... 16288
+
+  [11.8.c Répartition RATE_TYPE]
+    RATE_TYPE = CB.................................. 52426
+    RATE_TYPE = TC.................................. 52425
+    RATE_TYPE = STANDARD............................ 52425
+    RATE_TYPE = BOOK................................ 52424
+
+  [11.8.d Spread BUY vs SALE par RATE_TYPE]
+    CB.............................................. spread moy=18.540682 | max=145.488
+    STANDARD........................................ spread moy=16.781403 | max=145.488
+    BOOK............................................ spread moy=16.781332 | max=145.488
+    TC.............................................. spread moy=16.781078 | max=145.488
+    Anomalie SALE_RATE < BUY_RATE................... 0
+
+  [11.9 CYTB_DERIVED_RATES_HISTORY — taux dérivés]
+    Total taux dérivés.............................. 365392
+    RATE_FLAG = I................................... 182816
+    RATE_FLAG = D................................... 182576
+
+  [11.10 Contrôles cohérence NEW_RATE / ACCOUNT_BALANCE / NEW_LCY]
+    Ecart ACCOUNT_BALANCE*NEW_RATE vs NEW_LCY > 1... 0
+
+================================================================================
+>>> SECTION 12 — Comptes clients (turnovers / overdraft / dormance)
+================================================================================
+  [12.1 Volumétrie STTM_CUST_ACCOUNT]
+    Total comptes clients........................... 25915 lignes
+    Autorisés (A)................................... 25913
+    Non autorisés (U)............................... 2
+    Clôturés (RECORD_STAT=C)........................ 1113
+    Ouverts (RECORD_STAT=O)......................... 24802
+    Jamais autorisés (ONCE_AUTH=N).................. 2
+
+  [12.2 Top ACCOUNT_CLASS (volume de comptes)]
+    020021.......................................... 9597
+    020003.......................................... 5363
+    010009.......................................... 3695
+    010010.......................................... 1780
+    010036.......................................... 1133
+    020023.......................................... 745
+    010037.......................................... 550
+    010035.......................................... 389
+    020022.......................................... 301
+    010032.......................................... 223
+    010026.......................................... 216
+    010008.......................................... 206
+    020002.......................................... 166
+    200004.......................................... 144
+    010031.......................................... 140
+    010027.......................................... 129
+    010030.......................................... 124
+    030037.......................................... 117
+    010033.......................................... 115
+    030372.......................................... 94
+
+  [12.3 Répartition ACCOUNT_TYPE]
+    TYPE = S........................................ 16369
+    TYPE = U........................................ 9325
+    TYPE = Y........................................ 173
+    TYPE = N........................................ 48
+
+  [12.3.b Top 15 devises CCY]
+    CCY = XAF....................................... 25848
+    CCY = USD....................................... 34
+    CCY = EUR....................................... 18
+    CCY = GBP....................................... 6
+    CCY = ZAR....................................... 2
+    CCY = CNY....................................... 2
+    CCY = NGN....................................... 1
+    CCY = JPY....................................... 1
+    CCY = XOF....................................... 1
+    CCY = CNH....................................... 1
+    CCY = CAD....................................... 1
+
+  [12.4 Statuts RA-sensibles (flags Y)]
+    AC_STAT_DORMANT=Y............................... 3344
+    AC_STAT_FROZEN=Y................................ 2
+    AC_STAT_STOP_PAY=Y.............................. 304
+    AC_STAT_NO_CR=Y................................. 90
+    AC_STAT_NO_DR=Y................................. 4181
+    AC_STAT_BLOCK=Y................................. 91
+    AC_STAT_DE_POST=Y............................... 25838
+    ACCOUNT_AUTO_CLOSED=Y........................... 0
+    AC_SET_CLOSE=Y.................................. 0
+
+  [12.4.b ACCOUNT_DERIVED_STATUS (top 20)]
+    (NULL).......................................... 25915
+
+  [12.4.c ACC_STATUS (IC) top 20]
+    NORM............................................ 25913
+    DOU1............................................ 2
+
+  [12.5 Ouverture des comptes — AC_OPEN_DATE]
+    2026............................................ 1657
+    2025............................................ 6848
+    2024............................................ 7558
+    2023............................................ 7193
+    2022............................................ 2299
+    2021............................................ 11
+    2020............................................ 14
+    2019............................................ 11
+    2018............................................ 23
+    2017............................................ 13
+    2016............................................ 13
+    2015............................................ 14
+    2014............................................ 12
+    2013............................................ 28
+    2012............................................ 15
+    2011............................................ 19
+    2010............................................ 14
+    2009............................................ 10
+    2008............................................ 20
+    2007............................................ 12
+    2006............................................ 12
+    2005............................................ 8
+    2004............................................ 7
+    2003............................................ 9
+    2002............................................ 14
+    2001............................................ 11
+    2000............................................ 15
+    1999............................................ 11
+    1998............................................ 5
+    1997............................................ 36
+    1950............................................ 3
+    AC_OPEN_DATE IS NULL............................ 0
+    AC_OPEN_DATE > SYSDATE (anomalie)............... 0
+
+  [12.6 Dormance — DORMANT_PARAM / DORMANCY_DATE / DORMANCY_DAYS]
+    Comptes dormants................................ 3344
+    Dormants SANS DORMANCY_DATE (anomalie RA)....... 31
+    Non-dormants AVEC DORMANCY_DATE (anomalie RA)... 22383
+    DORMANT_PARAM = M............................... 25466
+    DORMANT_PARAM = B............................... 448
+    DORMANT_PARAM = D............................... 1
+
+  [12.6.b Tranches DORMANCY_DAYS]
+    2-5ans.......................................... 16418
+    181-365j........................................ 9265
+    (NULL).......................................... 173
+    91-180j......................................... 59
+
+  [12.7 Overdraft (TOD) — limites & dépassements]
+    Comptes avec TOD_LIMIT > 0...................... 0
+    Comptes en TOD (TOD_SINCE renseigné)............ 0
+    TOD_SINCE AVANT TOD_LIMIT_START_DATE (leak RA).. 0
+    TOD_LIMIT actif mais END_DATE passée............ 0
+    Somme TOD_LIMIT (toutes devises)................ 0
+    Débiteurs SANS TOD_LIMIT (overdraft non couvert) 1182
+    Débiteurs au-delà de TOD_LIMIT (dépassement).... 0
+    OVERDRAFT_SINCE renseigné....................... 1180
+    OVERLINE_OD_SINCE renseigné..................... 12
+
+  [12.8 Top 15 comptes débiteurs par |LCY_CURR_BALANCE|]
+    099/099ACB00006................................. CCY=USD | ACY=-84098554.36 | LCY=-46778895779 | TOD=(NULL)
+    099/099ACO00013................................. CCY=EUR | ACY=-67174586.28 | LCY=-44063640092 | TOD=(NULL)
+    099/099ACO00001................................. CCY=XAF | ACY=-28893232081.5 | LCY=-28893232081.5 | TOD=(NULL)
+    007/007ACB00038................................. CCY=XAF | ACY=-15943688291 | LCY=-15943688291 | TOD=(NULL)
+    007/007ACB00034................................. CCY=EUR | ACY=-15806652.46 | LCY=-10368484328 | TOD=(NULL)
+    001/00101100062................................. CCY=XAF | ACY=-7996429896 | LCY=-7996429896 | TOD=(NULL)
+    099/099ACO00011................................. CCY=USD | ACY=-7621139.48 | LCY=-4239175003 | TOD=(NULL)
+    099/099ACO00023................................. CCY=USD | ACY=-5936415.92 | LCY=-3302066055 | TOD=(NULL)
+    001/00101300217................................. CCY=XAF | ACY=-1444117145 | LCY=-1444117145 | TOD=(NULL)
+    099/099ACB00001................................. CCY=EUR | ACY=-1962925.97 | LCY=-1287595031 | TOD=(NULL)
+    003/00310000007................................. CCY=XAF | ACY=-716457940 | LCY=-716457940 | TOD=(NULL)
+    007/00701300388................................. CCY=XAF | ACY=-595466311 | LCY=-595466311 | TOD=(NULL)
+    004/00401300046................................. CCY=XAF | ACY=-504626031 | LCY=-504626031 | TOD=(NULL)
+    001/00101301010................................. CCY=XAF | ACY=-461058416 | LCY=-461058416 | TOD=(NULL)
+    007/00701300424................................. CCY=XAF | ACY=-439509228 | LCY=-439509228 | TOD=(NULL)
+
+  [12.9 Turnovers agrégés (STTM_CUST_ACCOUNT)]
+    Somme ACY_TODAY_TOVER_DR........................ 657394537
+    Somme ACY_TODAY_TOVER_CR........................ 519376007
+    Somme ACY_MTD_TOVER_DR.......................... 462236296699.84
+    Somme ACY_MTD_TOVER_CR.......................... 488882281406.44
+    Somme ACY_TOVER_CR (cumul)...................... 0
+    Somme LCY_MTD_TOVER_DR.......................... 578947234004.5
+    Somme LCY_MTD_TOVER_CR.......................... 586193060434.2
+    Comptes MTD unidirectionnels > 1M LCY........... 338
+
+  [12.9.c Top 15 comptes par LCY_MTD_TOVER_DR]
+    099/099ACO00001................................. CCY=XAF | DR=335439420341 | CR=354719600176 | LMT=(NULL)
+    099/099ACO00013................................. CCY=EUR | DR=42508602029 | CR=23183110876 | LMT=(NULL)
+    099/099ACB00006................................. CCY=USD | DR=22542023997 | CR=20470822971 | LMT=(NULL)
+    001/00101300159................................. CCY=XAF | DR=21481807273 | CR=22527519248 | LMT=(NULL)
+    001/00110000020................................. CCY=XAF | DR=14625889497 | CR=16177900988 | LMT=(NULL)
+    099/099ACO00024................................. CCY=EUR | DR=12449590049 | CR=11261349184 | LMT=(NULL)
+    099/099ACO00023................................. CCY=USD | DR=10487317741 | CR=4348645106 | LMT=(NULL)
+    099/099ACO00011................................. CCY=USD | DR=8805233684 | CR=6802103862 | LMT=(NULL)
+    001/00101400007................................. CCY=USD | DR=4839114052 | CR=205405988 | LMT=(NULL)
+    007/00756100087................................. CCY=XAF | DR=4710590880 | CR=1355399499 | LMT=(NULL)
+    007/00701300302................................. CCY=USD | DR=4115565583 | CR=52034311 | LMT=(NULL)
+    001/00101300374................................. CCY=XAF | DR=3500029813 | CR=485968206 | LMT=(NULL)
+    001/00101400003................................. CCY=USD | DR=3327723120 | CR=3074432638 | LMT=(NULL)
+    004/00401300449................................. CCY=XAF | DR=3300483919 | CR=2605440000 | LMT=(NULL)
+    001/00110000006................................. CCY=XAF | DR=2720935585 | CR=1593196932 | LMT=(NULL)
+
+  [12.9.d Répartition TRNOVER_LMT_CODE (top 15)]
+    (NULL).......................................... 25915
+
+  [12.10 Intérêts/charges accrus au niveau compte]
+    Somme ACY_ACCRUED_DR_IC (intérêts débit à factur 52916870
+    Somme ACY_ACCRUED_CR_IC (intérêts crédit à payer 647492505
+    Somme DR_INT_DUE................................ 16400821.5
+    Somme CHG_DUE (charges dues).................... 0
+    Somme RECEIVABLE_AMOUNT......................... 475743
+    Dormants AVEC CHG_DUE > 0 (leakage)............. 0
+    Dormants AVEC DR_INT_DUE > 0 (leakage).......... 164
+
+  [12.11 DEFAULT_WAIVER sur STTM_CUST_ACCOUNT]
+    DEFAULT_WAIVER = N.............................. 25742
+    DEFAULT_WAIVER = (NULL)......................... 173
+    Comptes default_waiver=Y (RA: vérifier justifica 0
+
+  [12.12 Dernier mouvement (DATE_LAST_CR / DATE_LAST_DR)]
+    Jamais mouvementés (LAST_CR & LAST_DR NULL)..... 11304
+    Inactifs >12 mois NON dormants (RA: reclasser).. 11663
+    Inactifs >24 mois NON dormants sans CHG_DUE..... 9816
+
+  [12.13 ACTB_ACCBAL_HISTORY (snapshot soldes EOD)]
+    Total lignes.................................... 548756 lignes
+    Plage BKG_DATE.................................. 2022-05-23 ? 2026-04-16
+    Nb jours distincts.............................. 996
+    Nb comptes distincts............................ 15712
+    ACY_DR_TUR 12m.................................. 32716282696004.235
+    ACY_CR_TUR 12m.................................. 32616302909833.335
+    LCY_DR_TUR 12m.................................. 36828121250004.415
+    LCY_CR_TUR 12m.................................. 36828101632809.415
+    Jours/comptes en solde débiteur EOD............. 72659
+    Comptes distincts avec EOD débiteur............. 2896
+
+  [12.13.d Contrôle continuité OPENING_J vs CLOSING_J-1]
+    Jours avec discontinuité open/close (3 derniers  1550
+
+  [12.14 ACTB_VD_BAL — soldes à date de valeur]
+    Total lignes.................................... 590477 lignes
+    Comptes distincts............................... 25913
+    Lignes HAS_TOV=Y (jour avec mouvement).......... 0
+    Lignes BAL < 0 (overdraft VD)................... 65783
+    Plage VAL_DT.................................... 1950-01-01 ? 2026-12-31
+    VAL_DT > SYSDATE+1an (forward extrême).......... 0
+
+  [12.15 Cohérence VD/STTM]
+    VD négatif actuel mais OVERDRAFT_SINCE vide..... 109
+
+  [12.16 ACCOUNT_CLASS : dormance paramétrée vs observée]
+
+================================================================================
+>>> SECTION 13 — SITB Standing Instructions & frais d'échec
+================================================================================
+  [13.1 Volumétrie SITB_CONTRACT_MASTER]
+    Total SI........................................ 586 lignes
+    Contrats SI distincts........................... 423
+
+  [13.2 Répartition EVENT_CODE]
+    EVENT = OPEN.................................... 423
+    EVENT = CLOS.................................... 122
+    EVENT = AMND.................................... 41
+
+  [13.3 TRANSFER_TYPE]
+    TYPE = 1........................................ 586
+
+  [13.4 CHARGE_WHOM]
+    CHARGE_WHOM = R................................. 586
+
+  [13.5 APPLY_CHG_* — leakage RA si tout = N]
+    APPLY_CHG_SUXS=Y................................ 526
+    APPLY_CHG_SUXS=N................................ 60
+    APPLY_CHG_REJT=Y................................ 534
+    APPLY_CHG_REJT=N................................ 52
+    APPLY_CHG_PEXC=Y................................ 525
+    APPLY_CHG_PEXC=N................................ 61
+    SI avec AUCUN APPLY_CHG_* (leakage potentiel)... 51
+    SI APPLY_CHG_SUXS=Y mais APPLY_CHG_REJT=N....... 1
+
+  [13.6 ACTION_CODE_AMT]
+    ACTION = F...................................... 558
+    ACTION = I...................................... 28
+
+  [13.7 SI_TANKED_STAT / SUBSYSTEM_STAT]
+    TANKED = N...................................... 531
+    TANKED = (NULL)................................. 55
+    SUBSYS = PRD_DFLT:U;ENRICH:U;MICTRMIS:D;ISCTRSTL 586
+
+  [13.8 Montants SI]
+    Somme SI_AMT (brute, toutes devises)............ 17340193256
+    Somme CALC_SI_AMT (numériques uniquement)....... 0
+    SI avec SI_AMT NULL ou 0........................ 14
+    Ecart SI_AMT <> CALC_SI_AMT..................... 0
+
+  [13.8.b Top 15 SI_AMT_CCY]
+    XAF............................................. nb=586 | sum=17340193256
+
+  [13.9 SI expirées — SI_EXPIRY_DATE]
+    SI_EXPIRY_DATE IS NULL.......................... 47
+    SI_EXPIRY_DATE < aujourd'hui.................... 281
+    Expirée depuis >1 an (purge à étudier).......... 257
+
+  [13.10 MAX_RETRY_COUNT / PRIORITY]
+    MAX_RETRY = 25.................................. 539
+    MAX_RETRY = 1................................... 28
+    MAX_RETRY = 3................................... 19
+    PRIORITY = 1.................................... 586
+
+  [13.11 Typologie DR/CR accounts]
+    DR & CR même branche............................ 530
+    DR & CR branches différentes.................... 56
+    SI cross-currency (DR_CCY <> CR_CCY)............ 0
+    SI DR=CR (auto-transfert absurde)............... 0
+
+  [13.12 SITB_CYCLE_DETAIL — volumétrie]
+    Total cycles.................................... 17233 lignes
+    SI distinctes exécutées......................... 408
+
+  [13.12.b EVENT_CODE cycles]
+    (NULL).......................................... 12774
+    SUXS............................................ 3460
+    REJT............................................ 999
+
+  [13.12.c Agrégats exécutions]
+    Somme AMT_DEBITED............................... 10757684004
+    Somme AMT_CREDITED.............................. 10757684004
+    Somme AMT_EXECUTED_LCY.......................... 10757684004
+    Somme SI_AMT_EXECUTED........................... 10757684004
+    Ecart DR/CR même devise (leakage)............... 0
+    Cycles AMT_DEBITED=0 & AMT_CREDITED=0........... 13773
+
+  [13.12.f RETRY_SEQ_NO distribution]
+    RETRY_SEQ_NO = 1................................ 4012
+    RETRY_SEQ_NO = 2................................ 997
+    RETRY_SEQ_NO = 3................................ 884
+    RETRY_SEQ_NO = 4................................ 678
+    RETRY_SEQ_NO = 5................................ 646
+    RETRY_SEQ_NO = 6................................ 626
+    RETRY_SEQ_NO = 7................................ 613
+    RETRY_SEQ_NO = 8................................ 605
+    RETRY_SEQ_NO = 9................................ 586
+    RETRY_SEQ_NO = 10............................... 576
+    RETRY_SEQ_NO = 11............................... 562
+    RETRY_SEQ_NO = 12............................... 558
+    RETRY_SEQ_NO = 13............................... 549
+    RETRY_SEQ_NO = 14............................... 536
+    RETRY_SEQ_NO = 15............................... 517
+
+  [13.12.g Retries & frais d'échec]
+    Echecs SI avec APPLY_CHG_REJT=N (leakage sûr)... 782
+    Echecs SI avec APPLY_CHG_REJT=Y (à vérifier: fra 12991
+    SI avec retries au-delà de MAX_RETRY_COUNT...... 0
+
+  [13.13 Cohérence cycles vs expiration SI]
+    Cycles RETRY_DATE APRES SI_EXPIRY_DATE.......... 28
+
+  [13.14 Top 10 SI par cumul AMT_EXECUTED_LCY]
+    007SWO1253390005................................ cycles=89 | sum_LCY=8037837327
+    008SWO1253390006................................ cycles=54 | sum_LCY=1230135692
+    001SIPI230460005................................ cycles=10 | sum_LCY=105820110
+    001SIP2240220019................................ cycles=11 | sum_LCY=78477256
+    001SIP2240220004................................ cycles=6 | sum_LCY=57505662
+    001SIPI230460010................................ cycles=10 | sum_LCY=53850110
+    001SIP2240820007................................ cycles=9 | sum_LCY=53527500
+    001SIP2240220001................................ cycles=11 | sum_LCY=34475298
+    001SIPI230460004................................ cycles=10 | sum_LCY=33000000
+    001SIP2240820001................................ cycles=9 | sum_LCY=31500000
+
+  [13.15 Intégrité référentielle]
+    Cycles sans SI master (orphelins)............... 0
+    SI master SANS aucun cycle...................... 17
+
+================================================================================
+>>> SECTION 14 — Cohérences globales & anomalies RA
+================================================================================
+  [14.1 Rapprochement ACTB_HISTORY <-> GLTB_GL_BAL]
+    GL 452600001.................................... hist_DR=267686562773.7 | hist_CR=267896398308.7 | mvts=71326
+    GL 571000100.................................... hist_DR=26824072536 | hist_CR=24976736431 | mvts=9623
+    GL 318000100.................................... hist_DR=150306981 | hist_CR=387725369 | mvts=5718
+    GL 712000100.................................... hist_DR=0 | hist_CR=149482218 | mvts=5651
+    GL 434000142.................................... hist_DR=192 | hist_CR=19277310 | mvts=4596
+
+  [14.2 Accruals intérêts — matière à facturer]
+    ? ACY_ACCRUED_DR_IC (intérêts clients à percevoi 52916870
+    ? ACY_ACCRUED_CR_IC (intérêts clients à payer).. 647492505
+    Net à percevoir (DR - CR)....................... -594575635
+
+  [14.3 Overdraft tacite — comptes en rouge sans TOD]
+    Actifs débiteurs sans TOD_LIMIT................. 950
+    ? débit LCY sur ces comptes..................... 169404388707.81
+
+  [14.4 Dormants avec matière imposable]
+    Dormants avec accrued/charges > 0............... 179
+    ? matière gelée (dormants)...................... 6392829.25
+
+  [14.5 Waivers — synthèse RA]
+    Comptes DEFAULT_WAIVER=Y........................ 0
+    Composants prêt WAIVE=Y......................... 0
+    Prêts distincts avec au moins un WAIVE.......... 0
+
+  [14.6 Echéances prêts en souffrance]
+    Ech. CL en retard (AMT_DUE > AMT_SETTLED)....... 1620
+    ? arriérés CL (AMT_DUE - AMT_SETTLED)........... 209041988673235797936015431909324978823600000000000000000000000000000000
+
+  [14.7 Cohérence liquidations / paiements CL]
+    Liquidations sans paiement associé.............. 0
+
+  [14.8 Prêts actifs sans composants ICCF]
+    Prêts ouverts sans aucun composant.............. 0
+
+  [14.9 Revaluation sur comptes fantômes]
+    Comptes RVTB inconnus en STTB/STTM.............. 0
+
+  [14.10 P&L FX par statut GLMIS_UPD_STATUS]
+    GLMIS (NULL).................................... P&L=-2914211789.81 | nb=9110
+
+  [14.11 ACTB_HISTORY flags sensibles]
+    AML_EXCEPTION=Y................................. 0
+    DONT_SHOWIN_STMT=Y (caché dans relevé).......... 3620
+    ? LCY sur DONT_SHOWIN_STMT=Y.................... 51673999994
+
+  [14.12 ACTB_HISTORY — taux de change anormaux]
+    Mouvements EXCH_RATE ? {0,1} mais LCY<>FCY (susp 0
+
+  [14.13 Prêts CL figés (pas de cycle récent)]
+    Prêts actifs sans liquidation 12m............... 662
+
+  [14.14 SI exécutées post-expiration]
+    Exécutions SI après SI_EXPIRY_DATE (> 0)........ 0
+
+  [14.15 Top 10 GL 'INCOME' par CR_MOV_LCY (FIN_YEAR courant)]
+
+  [14.16 Synthèse finale — indicateurs RA consolidés]
+  ----------------------------------------------------------------------------
+    [W1] Composants prêt avec WAIVER................ 0
+    [W2] Comptes DEFAULT_WAIVER=Y................... 0
+    [D1] Dormants avec CHG_DUE > 0.................. 0
+    [O1] Débiteurs sans TOD_LIMIT................... 1182
+    [S1] SI sans APPLY_CHG_*........................ 51
+    [S2] SI expirées................................ 281
+    [E1] Echéances CL en retard (#)................. 1620
+    [E2] ? arriérés CL (LCY ccy native)............. 209041988673235797936015431909324978823600000000000000000000000000000000
+    [A1] Net accrued intérêts clients (DR-CR)....... -594575635
+  ----------------------------------------------------------------------------
+  Synthèse RA enregistrée. Prioriser les indicateurs :
+   - [W*] waivers à justifier (revue contractuelle)
+   - [D*] dormance : CHG_DUE à extraire avant radiation
+   - [O*] overdraft tacite : application de taux OD/pénalités
+   - [S*] SI : paramétrage frais succès/échec & expirations
+   - [E*] échéances : recouvrement & pénalités de retard
+   - [A*] accruals : rapprocher avec le GL revenus
+
+================================================================================
+>>> SECTION 15 — LDTB ICCF détaillé : calculs, rollovers, accruals
+================================================================================
+  [15.1 Volumétrie ICCF_CALC]
+    Total lignes calcul ICCF........................ 1615 lignes
+    Contrats avec calcul ICCF....................... 597
+    Composants ICCF distincts....................... 3
+
+  [15.1.b Top 15 composants ICCF]
+    INT_BT.......................................... nb=1613 | ? calc=14914016887.59
+    INT_OB.......................................... nb=1 | ? calc=123611111
+    MTDBINT......................................... nb=1 | ? calc=4000000
+
+  [15.1.c Méthodes de calcul ICCF_CALC_METHOD]
+    METHOD = 9...................................... 1447
+    METHOD = 3...................................... 168
+
+  [15.2 RATE & CALCULATED_AMOUNT — anomalies]
+    RATE=0 mais CALCULATED_AMOUNT <> 0 (incohérent). 0
+    BASIS_AMOUNT > 0 mais CALC = 0 (leakage ICCF)... 0
+    NO_OF_DAYS < 0 (anomalie période)............... 0
+    START_DATE > END_DATE........................... 0
+    RATE > 100 % (extrême - à vérifier)............. 0
+    RATE négatif.................................... 0
+
+  [15.3 LDTB_CONTRACT_ICCF_DETAILS]
+    Total lignes details ICCF....................... 1194 lignes
+    ACCRUAL_REQUIRED = N............................ 597
+    ACCRUAL_REQUIRED = Y............................ 597
+    PAYMENT_METHOD = B.............................. 972
+    PAYMENT_METHOD = D.............................. 222
+    UPFRONT_PROFIT_BOOKED <> 0 & TOT_LIQUIDATED=0... 0
+    ? CURRENT_NET_ACCRUAL........................... 56911008.11
+    ? TILL_DATE_ACCRUAL............................. 11878869105.65
+    ? TOTAL_AMOUNT_LIQUIDATED....................... 1172020837940.94
+    Accrued > 0 mais dern. liq > 365j (leakage)..... 322
+
+  [15.4 LDTB_CONTRACT_LIQ — événements de liquidation]
+    Total liquidations LD........................... 1095 lignes
+    ? AMOUNT_DUE.................................... 1166596920596.08
+    ? AMOUNT_PAID................................... 1167379920596.08
+    ? TAX_PAID...................................... 0
+    Liquidations partielles (PAID < DUE)............ 0
+    ? impayé (DUE - PAID)........................... 0
+
+  [15.4.c Tranches OVERDUE_DAYS]
+    (NULL).......................................... nb=948 | impayé=0
+    à jour.......................................... nb=88 | impayé=0
+    1-30j........................................... nb=24 | impayé=0
+    31-90j.......................................... nb=20 | impayé=0
+    91-180j......................................... nb=13 | impayé=0
+    181-365j........................................ nb=2 | impayé=0
+
+  [15.5 LIQ_SUMMARY — pénalités prépayement]
+    Total summary................................... 590 lignes
+    ? PREPAYMENT_PENALTY_AMOUNT..................... 0
+    Prépayés SANS pénalité (leakage potentiel)...... 0
+    ? TOTAL_PAID.................................... 1167379920596.08
+    ? TOTAL_PREPAID................................. 0
+    STATUS = A...................................... 589
+    STATUS = V...................................... 1
+
+  [15.5.c Top REJ_REASON]
+
+  [15.6 ROLLOVERS — APPLY_CHARGE / APPLY_TAX]
+    Total rollovers................................. 64 lignes
+    APPLY_CHARGE = Y................................ 64
+    APPLY_TAX = N................................... 63
+    APPLY_TAX = Y................................... 1
+    Rollovers SANS charge & SANS tax (leakage)...... 0
+
+  [15.6.b ROLLOVER_TYPE]
+    TYPE = M........................................ 64
+    ROLL_INST_STATUS = I............................ 64
+
+  [15.7 Taux de rollover — RATE / SPREAD / MARGIN]
+    Total lignes.................................... 64 lignes
+    RATE, SPREAD & MARGIN tous nuls................. 0
+    Moyenne RATE (non NULL)......................... 5.9140625
+
+  [15.8 Historique accruals LDTB]
+    Total entrées................................... 38972 lignes
+    Plage TRANSACTION_DATE.......................... 2022-08-05 ? 2025-06-16
+    ACC_ENTRY_PASSED = Y............................ 38972
+    ? NET_ACCRUAL non encore comptabilisé........... 0
+
+  [15.8.c TYPE_OF_ACCRUAL]
+    P............................................... nb=38462 | ?=11634018581.26
+    N............................................... nb=510 | ?=244850574.39
+    ? OVERDUE_INTEREST (> 0)........................ 0
+
+  [15.8.e Top 10 contrats OUTSTANDING_ACCRUAL]
+    099OTAP232130001................................ ?_OUT=102474760022 | stat=NORM
+    099OTAP231170001................................ ?_OUT=86127916767 | stat=NORM
+    099OTAP233330002................................ ?_OUT=85797624657 | stat=NORM
+    099OTAP232650002................................ ?_OUT=81694890257 | stat=NORM
+    099OTAP233560001................................ ?_OUT=53340838587 | stat=NORM
+    099OTAP231800005................................ ?_OUT=50377380577 | stat=NORM
+    099OTAP233630002................................ ?_OUT=41580890442 | stat=NORM
+    099OTAP233040003................................ ?_OUT=41122246522 | stat=NORM
+    099OTAP232990005................................ ?_OUT=39590547663 | stat=NORM
+    099OTAP232990007................................ ?_OUT=38942003402 | stat=NORM
+
+  [15.9 LDTB_PERIODIC_ACCRUAL_DATE]
+    Total lignes.................................... 328 lignes
+    Plage PREVIOUS_ACCRUAL_TO_DATE.................. 2026-04-17 ? 2026-04-17
+    Produits sans accrual depuis >90j............... 0
+
+================================================================================
+>>> SECTION 16 — Clientèle & KYC
+================================================================================
+  [16.1 Volumétrie STTM_CUSTOMER]
+    Total clients................................... 29706 lignes
+    Autorisés (A)................................... 29695
+    Non autorisés (U)............................... 11
+    Fermés (RECORD_STAT=C).......................... 51
+    Ouverts (RECORD_STAT=O)......................... 29655
+
+  [16.2 CUSTOMER_TYPE]
+    TYPE = I........................................ 25730
+    TYPE = C........................................ 3856
+    TYPE = B........................................ 120
+
+  [16.2.b Top 15 CUSTOMER_CATEGORY]
+    CAT = INDV...................................... 22391
+    CAT = CORP...................................... 2767
+    CAT = ABWP...................................... 832
+    CAT = RSA1...................................... 802
+    CAT = PSE1...................................... 495
+    CAT = SME....................................... 485
+    CAT = OFI....................................... 349
+    CAT = STAF...................................... 335
+    CAT = MINORS.................................... 204
+    CAT = PSE2...................................... 178
+    CAT = PFBI...................................... 140
+    CAT = STUDENTS.................................. 121
+    CAT = BANK...................................... 107
+    CAT = PSC2...................................... 87
+    CAT = SAL....................................... 70
+
+  [16.3 CIF_STATUS]
+    CIF_STATUS = (NULL)............................. 23978
+    CIF_STATUS = A.................................. 3763
+    CIF_STATUS = I.................................. 1945
+    CIF_STATUS = D.................................. 20
+    DECEASED=Y...................................... 0
+    FROZEN=Y........................................ 1
+    WHEREABOUTS_UNKNOWN=Y........................... 0
+    AML_REQUIRED=Y.................................. 12
+    DECEASED avec comptes non gelés (anomalie RA)... 0
+    FROZEN avec balance <> 0........................ 0
+
+  [16.4 CIF_CREATION_DATE — cohortes d'ouverture]
+    2026............................................ 1627
+    2025............................................ 6261
+    2024............................................ 6737
+    2023............................................ 6816
+    2022............................................ 2537
+    CIF_CREATION_DATE NULL.......................... 5728
+    CIF_CREATION_DATE > SYSDATE (anomalie).......... 0
+
+  [16.5 CHARGE_GROUP / TAX_GROUP / WHT_PCT]
+    CHARGE_GROUP = (NULL)........................... 29415
+    CHARGE_GROUP = STAFFGROUP....................... 233
+    CHARGE_GROUP = HCCON18.......................... 28
+    CHARGE_GROUP = FTSPEC1.......................... 11
+    CHARGE_GROUP = CHEVRON.......................... 4
+    CHARGE_GROUP = FTSPEC8.......................... 3
+    CHARGE_GROUP = FTSPEC2.......................... 3
+    CHARGE_GROUP = FTSPEC7.......................... 2
+    CHARGE_GROUP = FTSPEC10......................... 1
+    CHARGE_GROUP = FTSPEC4.......................... 1
+    CHARGE_GROUP = FTSPEC5.......................... 1
+    CHARGE_GROUP = FTSPEC9.......................... 1
+    CHARGE_GROUP = CFAO............................. 1
+    CHARGE_GROUP = FTSPEC3.......................... 1
+    CHARGE_GROUP = LCSPEC2.......................... 1
+
+    TAX_GROUP = (NULL).............................. 29706
+
+  [16.5.b WHT_PCT (retenue à la source)]
+    WHT_PCT = (NULL)................................ 29706
+    Clients avec WHT_PCT > 0........................ 0
+    WHT_PCT hors [0..100] (anomalie)................ 0
+
+  [16.6 Profil de risque]
+    CREDIT_RATING = (NULL).......................... 23979
+    CREDIT_RATING = CCC............................. 5273
+    CREDIT_RATING = AAA............................. 262
+    CREDIT_RATING = D............................... 92
+    CREDIT_RATING = B............................... 47
+    CREDIT_RATING = BB.............................. 18
+    CREDIT_RATING = A............................... 16
+    CREDIT_RATING = BBB............................. 15
+    CREDIT_RATING = AA.............................. 4
+    RISK_CATEGORY = (NULL).......................... 29706
+    RISK_PROFILE = (NULL)........................... 29706
+
+  [16.7 Référentiel STTM_CUSTOMER_CAT]
+    Total catégories................................ 83 lignes
+    Catégories autorisées........................... 83
+    ABWP............................................ ACCESS BANK CAMEROON WELCOME PACKAGE
+    BANK............................................ BANKS
+    BDC............................................. BUREAU DE CHANGE (MSB)
+    CONSTRUCTN...................................... CONSTRUCTION COMPANIES (DNFI)
+    CONSULTANC...................................... CONSULTANTS, CONSULTING COMPANIES, CLEARING AND SETTLEMENTS 
+    CORP............................................ CORPORATE
+    CRYPTRADE....................................... CRYPTOCURRENCY TRADERS
+    CSE1............................................ CIVIL SERVANTS (LESS THAN XAF250,000)
+    CSE2............................................ CIVIL SERVANTS (ABOVE XAF250,000)
+    DISC............................................ DISCOUNT HOUSES
+    ECOMMERCE....................................... E-COMMERCE/INTERNET BASED BUSINESS
+    ESC............................................. COMMISSIONS MT940 E-Statement
+    FIN_INT......................................... FINANCIAL INSTITUTE
+    FOREIGN......................................... Foreign
+    FTZ............................................. FREE TRADE ZONE ACCOUNTS
+    GAMING.......................................... CASINOS, POOL BETTING & OTHER LOTTERY BUSINESSES (DNFI)
+    GATEKEEPER...................................... AUDIT FIRMS, TAX CONSULTANTS, NOTARIES, LAW & ACCOUNTING FIR
+    GOVT............................................ GOVERNMENT
+    GOVT INST....................................... GOVT INSTITUTIONS
+    H............................................... JOINT ACCOUNT
+    Catégories clients non référencées (FK cassée).. 0
+
+  [16.8 STTM_CUST_PERSONAL]
+    Total personnes................................. 29707 lignes
+    Mineurs......................................... 338
+    Âge > 110 ans (anomalie données)................ 54
+    DATE_OF_BIRTH future (anomalie)................. 0
+    DATE_OF_BIRTH NULL.............................. 3976
+    Mineurs SANS LEGAL_GUARDIAN..................... 1
+    Passeport expiré................................ 15
+
+  [16.9 STTM_KYC_MASTER — RISK_LEVEL]
+    Total KYC master................................ 29234 lignes
+    RISK_LEVEL = Level2............................. 21222
+    RISK_LEVEL = Level1............................. 7436
+    RISK_LEVEL = Level3............................. 576
+    KYC_CUST_TYPE = R............................... 26414
+    KYC_CUST_TYPE = C............................... 2774
+    KYC_CUST_TYPE = F............................... 46
+
+  [16.10 KYC RETAIL]
+    Total KYC retail................................ 29234 lignes
+    PEP=Y (politically exposed person).............. 442
+    KYC retail revue DUE (en retard)................ 14382
+    KYC retail revue DUE > 1 an..................... 6089
+
+  [16.11 KYC CORPORATE]
+    Total KYC corporate............................. 24843 lignes
+    KYC corporate revue DUE......................... 1185
+    COMPANY_TYPE = (NULL)........................... 22044
+    COMPANY_TYPE = LIMITED LIABILITY COMPANY........ 2032
+    COMPANY_TYPE = ENTERPRISE....................... 394
+    COMPANY_TYPE = SOLE PROPRIETORSHIP.............. 370
+    COMPANY_TYPE = CLUB OR SOCIETY.................. 3
+
+  [16.12 Cohérence clients/KYC]
+    AML_REQUIRED=Y et sans fiche KYC................ 9
+
+================================================================================
+>>> SECTION 17 — Produits & paramétrage RA
+================================================================================
+  [17.1 CSTM_PRODUCT — volumétrie]
+    Total produits.................................. 489 lignes
+    Autorisés....................................... 485
+
+  [17.1.b Produits par MODULE]
+    MODULE = RT..................................... 175
+    MODULE = IC..................................... 89
+    MODULE = FT..................................... 44
+    MODULE = CL..................................... 40
+    MODULE = LC..................................... 39
+    MODULE = MM..................................... 34
+    MODULE = SI..................................... 23
+    MODULE = BC..................................... 22
+    MODULE = FX..................................... 11
+    MODULE = LD..................................... 9
+    MODULE = CG..................................... 2
+    MODULE = RE..................................... 1
+    PRODUCT_END_DATE passée......................... 0
+    NORMAL_RATE_VARIANCE > MAXIMUM (incohérent)..... 0
+
+  [17.2 LDTM_PRODUCT_MASTER]
+    Total produits LD/MM............................ 54 lignes
+
+  [17.2.b ACCRUAL_FREQUENCY]
+    FREQ = D........................................ 53
+    FREQ = M........................................ 1
+    Produits BLOCK_PRODUCT=Y........................ 0
+    Contrats actifs sur produits bloqués............ 0
+    ALLOW_PREPAY_INT=Y.............................. 0
+    ALLOW_PREPAY_INT=N.............................. 9
+    AMEND_PAST_PAID_SCH=Y........................... 0
+    ALLOW_SCHED_AMEND_AFTER_SGEN=Y.................. 50
+    BOOK_UNEARNED_INTEREST=Y........................ 0
+    AUTO_PROV_REQUIRED=Y............................ 0
+    BROKERAGE_APPLICABLE=Y.......................... 0
+    ASSIGNMENT_ALLOWED=Y............................ 0
+
+  [17.3 LDTM_PRODUCT_DFLT_SCHEDULES]
+    Total lignes.................................... 107 lignes
+    FREQUENCY_UNIT = 1.............................. 107
+    Produits avec schedule par défaut............... 54
+    Produits LD SANS schedule par défaut............ 0
+
+  [17.4 LDTM_PRODUCT_LIQ_ORDER]
+    Total lignes.................................... 108 lignes
+    IBTB............................................ nb_comp=2 | order=[1..2]
+    IBTD............................................ nb_comp=2 | order=[1..2]
+    NIBS............................................ nb_comp=2 | order=[1..2]
+    IBPC............................................ nb_comp=2 | order=[1..2]
+    CBCN............................................ nb_comp=2 | order=[1..2]
+    CBCT............................................ nb_comp=2 | order=[1..2]
+    MAOB............................................ nb_comp=2 | order=[1..2]
+    MTPC............................................ nb_comp=2 | order=[1..2]
+    OTAT............................................ nb_comp=2 | order=[1..2]
+    OTAP............................................ nb_comp=2 | order=[1..2]
+    Doublons (PRODUCT, LIQ_ORDER)................... 0
+
+  [17.5 LDTM_PRODUCT_ROLLOVER]
+    Total lignes.................................... 46 lignes
+    APPLY_TAX = N................................... 34
+    APPLY_TAX = (NULL).............................. 9
+    APPLY_TAX = Y................................... 3
+    APPLY_BROKERAGE = (NULL)........................ 46
+    AUTO_MAN_ROLLOVER = M........................... 30
+    AUTO_MAN_ROLLOVER = (NULL)...................... 13
+    AUTO_MAN_ROLLOVER = A........................... 3
+    Rollover sans tax ni brokerage (leakage paramétr 43
+
+  [17.6 CSTB_AMOUNT_TAG — typologie]
+    Total tags...................................... 53791 lignes
+    CHARGE_ALLOWED=Y................................ 1335
+    COMMISSION_ALLOWED=Y............................ 713
+    INTEREST_ALLOWED=Y.............................. 1915
+    TAX_ALLOWED=Y................................... 7522
+    ISSR_TAX_ALLOWED=Y.............................. 46
+    TRAN_TAX_ALLOWED=Y.............................. 391
+    TRACK_RECEIVABLE=Y.............................. 52
+    TRACK_PAYABLE=Y................................. 0
+    UNREALISED=Y.................................... 482
+    USER_DEFINED=Y.................................. 91
+    Tags sans aucune autorisation (potentiellement m 43666
+
+  [17.7 CLTM_PRODUCT_COMP_FRM_EXPR]
+    Total formules/lignes........................... 715 lignes
+    Produits CL avec formule........................ 40
+    Composants CL distincts......................... 48
+    FORMULA_TYPE = B................................ 713
+    FORMULA_TYPE = M................................ 2
+    EXPR_TYPE = N................................... 715
+    Formules avec RESULT vide....................... 0
+
+  [17.8 LDTM_BRANCH_PARAMETERS]
+    Total branches paramétrées...................... 8 lignes
+    ACCRUAL_LEVEL = C............................... 8
+    CONS_BILLING = N................................ 8
+    TAX_COMPUTATION_BASIS = L....................... 8
+
+  [17.8.b PROCESS_TILL — avancement branche]
+    PROCESS_TILL = S................................ 8
+
+================================================================================
+>>> SECTION 18 — Sécurité & audit trail
+================================================================================
+  [18.1 SMTB_USER — volumétrie]
+    Total utilisateurs.............................. 551 lignes
+    USER_STATUS = D................................. 399
+    USER_STATUS = E................................. 152
+    AUTH_STAT = A................................... 550
+    AUTH_STAT = U................................... 1
+    AUTO_AUTH=Y (auto-authorizer, risque SoD)....... 234
+    END_DATE passée mais USER_STATUS=E (actif)...... 2
+    Utilisateurs jamais connectés................... 92
+    PWD non changé depuis > 12 mois................. 359
+
+  [18.2 SMTB_USERLOG_DETAILS]
+    Total utilisateurs avec log..................... 550 lignes
+    Inactifs > 6 mois............................... 315
+    Inactifs > 12 mois.............................. 302
+    MAX NO_SUCCESSIVE_LOGINS........................ .1132075471698113207547169811320754716981
+
+  [18.3 SMTB_ROLE_MASTER]
+    Total rôles..................................... 635 lignes
+    BRANCH_ROLE = N................................. 574
+    BRANCH_ROLE = Y................................. 39
+    BRANCH_ROLE = (NULL)............................ 22
+    ROLE_CAT = (NULL)............................... 406
+    ROLE_CAT = WB................................... 229
+    ROLE_LEVEL = (NULL)............................. 622
+    ROLE_LEVEL = 25................................. 6
+    ROLE_LEVEL = 40................................. 3
+    ROLE_LEVEL = 50................................. 3
+    ROLE_LEVEL = 1.................................. 1
+
+  [18.4 SMTB_USER_ROLE]
+    Total attributions.............................. 1941 lignes
+    Utilisateurs avec ?1 rôle....................... 543
+    Rôles réellement attribués...................... 73
+    Rôles définis mais jamais attribués............. 562
+
+  [18.4.c Top 10 utilisateurs par nb de rôles]
+    MBOGID000083.................................... 7 rôles
+    IHOYID000023.................................... 6 rôles
+    KADIATU188...................................... 6 rôles
+    YAMKAMID0043.................................... 5 rôles
+    CELESID0018..................................... 5 rôles
+    RENGID000024.................................... 5 rôles
+    NZOKID000244.................................... 5 rôles
+    DEBORAH090...................................... 5 rôles
+    MBATOHID0012.................................... 5 rôles
+    GHISID000239.................................... 4 rôles
+
+  [18.5 SMTB_ROLE_FUNC_LIMIT_DETAIL]
+    Total limites................................... 9 lignes
+
+  [18.5.b Top 15 limites d'input]
+    RTELLER_24MTHS/1401............................. XAF 3000000
+    RTELLER_24MTHS/1001............................. XAF 2000000
+    RTELLER_24MTHS/1013............................. XAF 2000000
+    RTELLER_7MTHS/1001.............................. XAF 0
+    RTELLER_7MTHS/1401.............................. XAF 0
+    RTELLER_3MTHS/1001.............................. XAF 0
+    RTELLER_3MTHS/1401.............................. XAF 0
+    RTELLER_6MTHS/1001.............................. XAF 0
+    RTELLER_6MTHS/1401.............................. XAF 0
+    Limites à 0 ou NULL............................. 6
+
+  [18.6 SMTB_SMS_LOG]
+    Total lignes logs............................... 2948512 lignes
+    Plage START_TIME................................ 2022-05-21 ? 2026-04-17
+    LOG_TYPE = E.................................... 2925171
+    LOG_TYPE = V.................................... 23341
+
+  [18.6.b Top 10 users — activité 30 derniers jours]
+    MBIHD000267..................................... 5981
+    GABAID000210.................................... 4222
+    DORAID000265.................................... 3758
+    NGWEOS00110..................................... 3542
+    NYUOID000082.................................... 3329
+    LECOMOS00087.................................... 3161
+    CAMAOS000001.................................... 3096
+    MUCHID000233.................................... 3050
+    SALIMOS00056.................................... 3006
+    TOTCHOS00128.................................... 2866
+
+  [18.6.c Top 10 FUNCTION_ID — activité 30j]
+    SMSTXNDB........................................ 20403
+    1401............................................ 10157
+    LOGIN........................................... 8696
+    CSDINSTQ........................................ 7299
+    STDCIF.......................................... 6400
+    1001............................................ 5484
+    STDSTCHN........................................ 4992
+    DEDJNLON........................................ 4845
+    STDCUSAC........................................ 4564
+    TVCL............................................ 3397
+    Connexions hors horaire (22h-06h) 90j........... 44
+    Connexions weekend (90j, approx.)............... 54268
+
+  [18.7 SMTB_SMS_ACTION_LOG]
+    Total lignes.................................... 1839773 lignes
+    ACTION = EXECUTEQUERY........................... 811118
+    ACTION = NEW.................................... 266503
+    ACTION = DEFAULT................................ 105443
+    ACTION = AUTH................................... 102430
+    ACTION = MODIFY................................. 90815
+    ACTION = COMPUTEAMT............................. 90394
+    ACTION = PRD_DFLT............................... 75037
+    ACTION = AMT_COMP............................... 48469
+    ACTION = PRDDFLT................................ 37661
+    ACTION = UDFPICKUP.............................. 37510
+    ACTION = ENRICH_NEW............................. 35271
+    ACTION = SUBSYSPKP_NEW.......................... 32530
+    ACTION = BUILD_SUBSTAT.......................... 17261
+    ACTION = MISPKP................................. 11402
+    ACTION = DEPOSIT_DETAILS........................ 9351
+    ACTION = PREEXIT................................ 9116
+    ACTION = CHGPKUP................................ 6209
+    ACTION = DELETE................................. 6167
+    ACTION = COPY................................... 5381
+    ACTION = ALWEUCOMM.............................. 4078
+    ACTION = CLOSE.................................. 3613
+    ACTION = SUBMIT................................. 3602
+    ACTION = SUBSYSPKP_MODIFY....................... 3054
+    ACTION = LOAN_DETAILS........................... 2972
+    ACTION = AUTHQUERY.............................. 2969
+    ACTION = POPULATE............................... 2968
+    ACTION = CUSTOM................................. 2673
+    ACTION = POPUP.................................. 2672
+    ACTION = LIMITS_DETAILS......................... 2573
+    ACTION = EXTRACTKEYINFO......................... 2039
+    ACTION = PREPROCESS............................. 1719
+    ACTION = HOLD................................... 1080
+    ACTION = COMPUTE................................ 583
+    ACTION = TRADE_DETAILS.......................... 539
+    ACTION = SUMUP.................................. 538
+    ACTION = ENRICH_MODIFY.......................... 511
+    ACTION = CHANGETENOR............................ 460
+    ACTION = CHANGEMATDT............................ 436
+    ACTION = REOPEN................................. 355
+    ACTION = CLOSEBATCH............................. 176
+    ACTION = TREASURY_DETAILS....................... 162
+    ACTION = REVERSE................................ 136
+    ACTION = UDF_DETAILS............................ 128
+    ACTION = EVENTS_DETAILS......................... 127
+    ACTION = DefaultUde2............................ 119
+    ACTION = MatDateEnrich.......................... 113
+    ACTION = DEFLTTEMP.............................. 99
+    ACTION = POPSUBSYSSTAT.......................... 97
+    ACTION = RUN_EXPORT............................. 94
+    ACTION = PREREVERSE............................. 88
+    ACTION = SCHEME_DETAILS......................... 85
+    ACTION = POP_LN................................. 77
+    ACTION = PAYMENT_DETAILS........................ 76
+    ACTION = ALLOCATE............................... 67
+    ACTION = ALERTS_DETAILS......................... 62
+    ACTION = ISDEPOSITS_DETAILS..................... 57
+    ACTION = POPULATELIMIT.......................... 51
+    ACTION = ISFINANCING_DETAILS.................... 48
+    ACTION = ISTRADE_DETAILS........................ 45
+    ACTION = DENOMPOP............................... 41
+    ACTION = DefaultUde3............................ 37
+    ACTION = DFLTSCHD............................... 37
+    ACTION = ISTREASURY_DETAILS..................... 35
+    ACTION = EXTPRD................................. 31
+    ACTION = CHARGESQUERY........................... 31
+    ACTION = TAKOVRDET.............................. 16
+    ACTION = SIDETAILS.............................. 13
+    ACTION = RERUNBATCHS............................ 10
+    ACTION = START.................................. 9
+    ACTION = SERVICE................................ 8
+    ACTION = LOCKER................................. 8
+    ACTION = LINKED_ENTITY.......................... 8
+    ACTION = VIEWMNTLOG............................. 7
+    ACTION = LC_OTHER............................... 7
+    ACTION = NEWW................................... 5
+    ACTION = ENRICH_ENRICH_NEW...................... 5
+    ACTION = PROFESSIONAL........................... 5
+    ACTION = DIRECTOR............................... 5
+    ACTION = OTHACCDETAILS.......................... 4
+    ACTION = SUBSYS_PKP............................. 4
+    ACTION = SUBSYSPKP_PRDDFLT...................... 3
+    ACTION = STOP................................... 3
+    ACTION = SUBSYSPKP_CLOSE........................ 3
+    ACTION = QRYAMTDT............................... 3
+    ACTION = LOANCOMP_OTHER......................... 3
+    ACTION = PIDETAILS.............................. 2
+    ACTION = SUBSYSPKP_ENRICH_NEW................... 2
+    ACTION = ENRICH_................................ 2
+    ACTION = DOMESTIC............................... 2
+    ACTION = DefaultUde1............................ 2
+    ACTION = CARD_DETAILS........................... 1
+    ACTION = ASYNC_STMT............................. 1
+    ACTION = SUBSYSPKP_PREREVERSE................... 1
+    ACTION = DEFLT_TENOR............................ 1
+    ACTION = RD_DETAILS............................. 1
+    ACTION = UNCLEARED_CHQS......................... 1
+    ACTION = ICPKP.................................. 1
+    ACTION = VALIDATE............................... 1
+    ACTION = CHEQUE_DETAILS......................... 1
+    ACTION = SCHDSDET............................... 1
+    ACTION = ROLLOVER............................... 1
+    ACTION = COLLECTION_OTHER....................... 1
+    ACTION = REDEM_DETAILS.......................... 1
+    ACTION = ADDBRANCHES............................ 1
+    Actions CURR_BRANCH <> HOME_BRANCH.............. 28042
+    EXITFLAG = 0.................................... 1028658
+    EXITFLAG = 1.................................... 811117
+
+  [18.8 SMTB_USER_DISABLE]
+    Désactivations totales.......................... 1623 lignes
+    Utilisateurs distincts désactivés............... 18
+
+  [18.9 SMTB_PARAMETERS — politique globale]
+    MIN_PWD_LENGTH.................................. 8
+    MAX_PWD_LENGTH.................................. 15
+    FREQ_PWD_CHG (jours)............................ 0
+    INVALID_LOGINS_CUM.............................. 40
+    INVALID_LOGINS_SUC.............................. 3
+    DORMANCY_DAYS (users)........................... 15
+    ARCHIVAL_PERIOD................................. 999
+
+  [18.10 SMTB_PASSWORD_HISTORY]
+    Total entrées................................... 857 lignes
+    Utilisateurs avec historique PWD................ 243
+
+  [18.11 SMTB_ACTION_CONTROLS]
+    Total contrôles................................. 16 lignes
+    ROLLOVER........................................ 1
+    GENERATE........................................ 1
+    PRINT........................................... 1
+    CONFIRM......................................... 1
+    DELETE.......................................... 1
+    AUTHORIZE....................................... 1
+    NEW............................................. 1
+    LIQUIDATE....................................... 1
+    CLOSE........................................... 1
+    UNLOCK.......................................... 1
+    HOLD............................................ 1
+    TEMPLATE........................................ 1
+    REOPEN.......................................... 1
+    VIEW............................................ 1
+    COPY............................................ 1
+
+================================================================================
+>>> SECTION 19 — Branches, facilités, codes & chéquiers
+================================================================================
+  [19.1 FBTM_BRANCH]
+    Total branches.................................. 8 lignes
+    Branches END_OF_INPUT=Y (journée clôturée)...... 0
+
+  [19.2 FBTM_BRANCH_INFO]
+    Total infos branches............................ 8 lignes
+    Plage CURRENTPOSTINGDATE........................ 2026-04-17 ? 2026-04-17
+    CURRENTPOSTINGDATE en retard >3j (batch figé ?). 0
+    BRANCH_LCY = XAF................................ 8
+
+  [19.3 FBTB_USER]
+    Total users FCC................................. 392 lignes
+    USER_STATUS = E................................. 255
+    USER_STATUS = D................................. 135
+    USER_STATUS = L................................. 2
+    LOGINSTATUS = (NULL)............................ 392
+    Users avec MAXTXNAMT défini..................... 8
+    ADMINUSER2...................................... XAF MAXAUTH=1000000 MAXTXN=1000000
+    KOBINA1234...................................... SLL MAXAUTH=150000 MAXTXN=150000
+    ALPHA1234....................................... SLL MAXAUTH=150000 MAXTXN=150000
+    KADIATU1234..................................... SLL MAXAUTH=150000 MAXTXN=150000
+    MOHAM1234....................................... SLL MAXAUTH=150000 MAXTXN=150000
+    MORLINA1234..................................... SLL MAXAUTH=150000 MAXTXN=150000
+    RHODA265........................................ SLL MAXAUTH=100000 MAXTXN=100000
+    JENEBA198....................................... SLL MAXAUTH=100000 MAXTXN=100000
+
+  [19.4 GETM_FACILITY — facilités]
+    Total facilités................................. 1062 lignes
+    Autorisées...................................... 1061
+    CATEGORY = (NULL)............................... 1062
+
+  [19.4.c Agrégats GETM_FACILITY]
+    ? APPROVED_AMT.................................. 233278507909.62
+    ? AVAILABLE_AMOUNT.............................. 143234322448.62
+    ? AMOUNT_UTILISED_TODAY......................... 480654868
+    ? BLOCK_AMOUNT.................................. 0
+    Taux d'utilisation moyen (%).................... 43173876.71 (sur 1018 lignes)
+    Lignes expirées avec AVAILABLE > 0 (leak RA).... 119
+    Lignes dépassées (util > approuvé).............. 2
+    Lignes avec OD dans les 90 derniers jours....... 0
+
+  [19.4.h Top 10 facilités par APPROVED_AMT]
+    ACBS_LINE....................................... appr=23162995031 avail=0 expiry=2031-09-25
+    CTLN60408....................................... appr=17004417268 avail=0 expiry=2026-01-22
+    CCQA30818....................................... appr=15000000000 avail=15000000000 expiry=2030-09-18
+    CCQA30818....................................... appr=15000000000 avail=0 expiry=2030-10-29
+    TRDLINE......................................... appr=12262422000 avail=12262422000 expiry=2049-12-31
+    CTLN60408....................................... appr=9447597800 avail=0 expiry=2026-03-02
+    IFF35781........................................ appr=5890950000 avail=5890950000 expiry=2026-05-20
+    TRDLINE......................................... appr=5636969000 avail=5636969000 expiry=2026-11-03
+    IFF32504........................................ appr=4700000000 avail=4200000000 expiry=2024-06-07
+    EBBS_LINE....................................... appr=4500000000 avail=4500000000 expiry=2026-11-02
+
+  [19.5 STTM_TRN_CODE]
+    Total codes tran................................ 817 lignes
+    COMPONENT_TYPE = P.............................. 817
+    IC_BAL_INCLUSION=Y.............................. 816
+    IC_BAL_INCLUSION=N.............................. 1
+    IC_TOVER_INCLUSION=Y............................ 355
+    IC_TOVER_INCLUSION=N............................ 462
+    IC_PENALTY=Y.................................... 505
+    EXEMPT_ADV_INTEREST=Y........................... 13
+    AML_MONITORING=Y................................ 0
+    Codes tran exemptés intérêt (autorisés)......... 13
+
+  [19.6 CATM_CHECK_BOOK]
+    Total chéquiers................................. 3244 lignes
+    Autorisés....................................... 3238
+    ? CHECK_LEAVES émises........................... 134666
+    (NULL).......................................... nb=3244 | leaves=134666
+    DELIVERED = (NULL).............................. 3244
+    Non livrés > 60j depuis commande................ 3063
+
+  [19.6.e Chéquiers émis par année]
+    2026............................................ 35
+    2025............................................ 31
+    2024............................................ 14
+    2023............................................ 1
+    2022............................................ 5
+
+  [19.7 STTM_ACCOUNT_CLASS]
+    Total classes................................... 110 lignes
+    Autorisées...................................... 110
+    AC_CLASS_TYPE = U............................... 73
+    AC_CLASS_TYPE = S............................... 25
+    AC_CLASS_TYPE = Y............................... 8
+    AC_CLASS_TYPE = N............................... 4
+    Classes END_DATE passée utilisées par cptes ouve 0
+
+================================================================================
+>>> SECTION 20 — Automatic Process, EOD jobs & MIS
+================================================================================
+  [20.1 LDTB_AUTOMATIC_PROCESS_MASTER]
+    Total processes définis......................... 72 lignes
+    MODULE = LD..................................... 21
+    MODULE = LS..................................... 19
+    MODULE = MC..................................... 11
+    MODULE = MM..................................... 11
+    MODULE = SR..................................... 10
+    INVOKE_DURING_EOD=Y............................. 59
+    INVOKE_DURING_BOD=Y............................. 66
+
+  [20.2 LDTB_AUTOMATIC_PROCESS_QUEUE]
+    Total entrées queue............................. 528 lignes
+    PROCESS_STATUS = U.............................. 328
+    PROCESS_STATUS = P.............................. 200
+    Plage PROCESSING_DATE........................... 2026-04-16 ? 2026-04-17
+    Jobs en statut erreur/halt...................... 0
+    Jobs > 6h de durée.............................. 0
+    Jobs ouverts (START sans END)................... 0
+
+  [20.2.f Top 10 jobs par durée moyenne (sec)]
+    TRACKLQD........................................ nb=8 | avg=0s | max=0s
+    AUTOLIQD........................................ nb=16 | avg=0s | max=0s
+    DISBURSE........................................ nb=8 | avg=0s | max=0s
+    FWDINIT......................................... nb=16 | avg=0s | max=0s
+    PAYNOTC......................................... nb=16 | avg=0s | max=0s
+    PENALDET........................................ nb=16 | avg=0s | max=0s
+    PROC_TRS........................................ nb=8 | avg=0s | max=0s
+    STATCON......................................... nb=16 | avg=0s | max=0s
+    CMT_REDN........................................ nb=8 | avg=0s | max=0s
+    FWDVAMI......................................... nb=16 | avg=0s | max=0s
+
+  [20.3 LDTB_AUTO_FUNCTION_SETUP — parallélisme]
+    Total setups.................................... 7 lignes
+    AM.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    IA.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    LD.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    LS.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    MC.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    MM.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+    SR.............................................. par=N | max_proc=0 | max_halt=0 | wait=0
+
+  [20.4 LDTB_AUTO_FUNCTION_DETAILS]
+    Total lignes.................................... 16 lignes
+    Branches accrual en retard >30j................. 0
+    Branches WORK_IN_PROGRESS=Y (verrouillées)...... 0
+    005............................................. prev=2026-04-17 curr= proc=
+    005............................................. prev=2026-04-17 curr= proc=
+    006............................................. prev=2026-04-17 curr= proc=
+    006............................................. prev=2026-04-17 curr= proc=
+    003............................................. prev=2026-04-17 curr= proc=
+    003............................................. prev=2026-04-17 curr= proc=
+    007............................................. prev=2026-04-17 curr= proc=
+    007............................................. prev=2026-04-17 curr= proc=
+    008............................................. prev=2026-04-17 curr= proc=
+    008............................................. prev=2026-04-17 curr= proc=
+
+  [20.5 LDTB_COMPUTATION_HANDOFF]
+    Total lignes pending............................ 597 lignes
+    Contrats en handoff............................. 597
+    ? AMOUNT en handoff............................. 0
+    Plage EFFECTIVE_DATE handoff.................... 2022-06-30 ? 2025-06-12
+    Handoffs > 7j non traités (leak RA)............. 597
+
+  [20.6 LDTB_ACCRUAL_FOR_LIMITS]
+    Total lignes.................................... 8 lignes
+    ? TOTAL_CURRENT_NET_ACCRUAL (limites exposition) 21188356.17
+
+  [20.7 LDTB_CONTRACT_BALANCE]
+    Total lignes.................................... 597 lignes
+    ? CURRENT_FACE_VALUE............................ -4680000000
+    ? PRINCIPAL_OUTSTANDING_BAL..................... 9900000000
+    FACE_VALUE < 0.................................. 6
+    PRINCIPAL_OUTSTANDING > FACE_VALUE (anomalie)... 6
+
+  [20.8 LDTB_CONTRACT_CONTROL]
+    Total lignes.................................... 13 lignes
+    PROCESS_CODE = LDINIT........................... 13
+
+  [20.8.b Top 10 utilisateurs - saisies contrat]
+    FADILAID0005.................................... 13
+
+  [20.9 LDTB_HOLIDAY_CURRENCIES]
+    Total lignes.................................... 528 lignes
+    Contrats avec devises holiday................... 524
+    Devises holiday distinctes...................... 1
+
+  [20.10 MITB_CLASS_MAPPING — ventilation analytique]
+    Total mappings MIS.............................. 571746 lignes
+    Clients couverts................................ 19680
+    CALC_METHOD = (NULL)............................ 564097
+    CALC_METHOD = 1................................. 7648
+    CALC_METHOD = 2................................. 1
+    Clients autorisés sans MIS mapping.............. 10026
+
+  [20.10.c Top 5 devises MIS]
+    XAF............................................. 399303
+    (NULL).......................................... 172171
+    EUR............................................. 199
+    USD............................................. 66
+    GBP............................................. 5
+
+================================================================================
+>>> FIN DE L'EXPLORATION REVENUE ASSURANCE (20 SECTIONS)
+================================================================================
+  Sections couvertes :
+   0.  En-tête / volumétrie générale
+   1.  Volumétrie RA
+   2.  Référentiels revenue
+   3.  ACTB_HISTORY
+   4.  CLTB_ACCOUNT_COMPONENTS & waivers prêts
+   5.  CLTB_ACCOUNT_SCHEDULES — échéances & overdue
+   6.  CLTB_AMOUNT_PAID/RECD/LIQ
+   7.  CLTB_ACCOUNT_APPS_MASTER lifecycle
+   8.  LDTB contrats & accruals
+   9.  ICTM paramétrage taux
+   10. GLTB_GL_BAL revenus GL
+   11. RVTB_ACC_REVAL réévaluation FX
+   12. Comptes clients — turnovers/overdraft/dormance
+   13. SITB Standing Instructions & frais
+   14. Cohérences globales & anomalies RA
+   15. LDTB ICCF détaillé — calculs/rollovers/accruals
+   16. Clientèle & KYC
+   17. Produits & paramétrage
+   18. Sécurité & audit trail
+   19. Branches, facilités, codes & chéquiers
+   20. Automatic Process / EOD jobs & MIS
+================================================================================
+
+
+PL/SQL procedure successfully completed.
+

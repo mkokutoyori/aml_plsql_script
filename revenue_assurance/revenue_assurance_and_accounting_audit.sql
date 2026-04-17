@@ -2047,6 +2047,147 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S08 - LOAN COMPONENTS PENDING LIQUIDATION
+    -- -----------------------------------------------------------------
+    -- [F-070] Composantes CL avec montant du > 0 mais aucune
+    --         liquidation (CLTB_LIQ) enregistree sur la periode.
+    -- [F-071] Liquidations rejetees / non autorisees (AUTH_STAT <> 'A'
+    --         ou LIQ_STATUS = 'R') avec montant residuel.
+    --
+    -- Sources : CLTB_ACCOUNT_COMPONENTS, CLTB_LIQ.
+    -- Severite : MEDIUM, HIGH si impact >= p_materiality_impact_lcy.
+    -- =================================================================
+    DECLARE
+        l_cur     SYS_REFCURSOR;
+        l_ref     VARCHAR2(30);
+        l_comp    VARCHAR2(30);
+        l_amt     NUMBER;
+        l_status  VARCHAR2(10);
+        l_auth    VARCHAR2(10);
+        l_n_070   PLS_INTEGER := 0;
+        l_n_071   PLS_INTEGER := 0;
+        l_sql     VARCHAR2(4000);
+    BEGIN
+        IF NOT f_section_enabled('S08') THEN
+            log_info('Section S08 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S08',
+                'Loan components pending liquidation');
+
+            -- [F-070] Composantes dues sans liquidation -------------
+            l_sql :=
+                'SELECT c.CONTRACT_REF_NO, c.COMPONENT, '
+             || '       NVL(c.AMOUNT_DUE,0) AS AMT '
+             || '  FROM CLTB_ACCOUNT_COMPONENTS c '
+             || ' WHERE NVL(c.AMOUNT_DUE,0) > 0 '
+             || '   AND NOT EXISTS ( '
+             || '       SELECT 1 FROM CLTB_LIQ l '
+             || '        WHERE l.CONTRACT_REF_NO = c.CONTRACT_REF_NO '
+             || '          AND l.COMPONENT = c.COMPONENT '
+             || '          AND l.VALUE_DATE BETWEEN :d1 AND :d2 '
+             || '       ) '
+             || ' ORDER BY NVL(c.AMOUNT_DUE,0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_comp, l_amt;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_070 >= NVL(p_top_n, 50);
+
+                    IF l_amt >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S08',
+                            p_code       => 'RA-S08-F070',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'Component due without liquidation: comp='
+                                         || NVL(l_comp,'?')
+                                         || ' amt=' || f_fmt_lcy(l_amt),
+                            p_entity     => l_ref,
+                            p_impact_lcy => l_amt,
+                            p_evidence   => 'period='
+                                         || f_fmt_ts(v_date_from) || '..'
+                                         || f_fmt_ts(v_date_to)
+                        );
+                        l_n_070 := l_n_070 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S08',
+                        'F-070 query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            -- [F-071] Liquidations rejetees / non autorisees --------
+            l_sql :=
+                'SELECT l.CONTRACT_REF_NO, l.COMPONENT, '
+             || '       NVL(l.LIQ_AMOUNT, l.AMOUNT_SETTLED) AS AMT, '
+             || '       NVL(l.LIQ_STATUS, ''?'') AS ST, '
+             || '       NVL(l.AUTH_STAT,  ''?'') AS AUTH '
+             || '  FROM CLTB_LIQ l '
+             || ' WHERE NVL(l.VALUE_DATE, l.EVENT_DATE) BETWEEN :d1 AND :d2 '
+             || '   AND ( UPPER(NVL(l.LIQ_STATUS,'' '')) IN (''R'',''REJECTED'') '
+             || '         OR UPPER(NVL(l.AUTH_STAT,'' '')) = ''U'' ) '
+             || '   AND NVL(l.LIQ_AMOUNT, l.AMOUNT_SETTLED) > 0 '
+             || ' ORDER BY NVL(l.LIQ_AMOUNT, l.AMOUNT_SETTLED) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING v_date_from, v_date_to;
+                LOOP
+                    FETCH l_cur INTO l_ref, l_comp, l_amt, l_status, l_auth;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_071 >= NVL(p_top_n, 50);
+
+                    IF l_amt >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S08',
+                            p_code       => 'RA-S08-F071',
+                            p_severity   => 'HIGH',
+                            p_message    => 'Rejected/unauthorized liquidation: comp='
+                                         || NVL(l_comp,'?')
+                                         || ' amt=' || f_fmt_lcy(l_amt)
+                                         || ' status=' || l_status
+                                         || ' auth=' || l_auth,
+                            p_entity     => l_ref,
+                            p_impact_lcy => l_amt,
+                            p_evidence   => 'period='
+                                         || f_fmt_ts(v_date_from) || '..'
+                                         || f_fmt_ts(v_date_to)
+                        );
+                        l_n_071 := l_n_071 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S08 F-071 unavailable: CLTB_LIQ or '
+                        || 'LIQ_STATUS/AUTH_STAT column missing ('
+                        || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            print_kv('F-070 findings (no liquidation)', TO_CHAR(l_n_070));
+            print_kv('F-071 findings (rejected)',       TO_CHAR(l_n_071));
+
+            print_section_footer('S08', l_n_070 + l_n_071);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S08', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S08', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

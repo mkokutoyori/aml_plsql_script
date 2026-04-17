@@ -2887,6 +2887,200 @@ BEGIN
     END;
 
     -- =========================================================
+    -- A-20. TRACABILITE MAKER/CHECKER SUR LES TABLES METIER
+    -- =========================================================
+    p_section('A-20. TRACABILITE MAKER/CHECKER — double signature sur operations metier');
+
+    p_sub('A-20.1 STTM_CUSTOMER — repartition AUTH_STATUS (A=Authorise, U=Unauth)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT NVL(AUTH_STATUS,''?''), COUNT(*) nb
+            FROM STTM_CUSTOMER
+            GROUP BY AUTH_STATUS
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. v_maker_tab.COUNT LOOP
+            p_kv('  STTM_CUSTOMER AUTH_STATUS=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)));
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_CUSTOMER AUTH_STATUS', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.2 STTM_CUSTOMER — CIF en statut unauthorized (risque non-authorise)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTM_CUSTOMER
+            WHERE NVL(AUTH_STATUS,''U'') <> ''A''' INTO v_count;
+        p_kv('  CIF non authorises', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  CIF non authorises', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.3 STTM_CUSTOMER — violations SoD (MAKER_ID = CHECKER_ID)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTM_CUSTOMER
+            WHERE MAKER_ID IS NOT NULL
+              AND CHECKER_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(CHECKER_ID)' INTO v_count;
+        p_kv('  CIF auto-authorises (MAKER=CHECKER)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_CUSTOMER SoD', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.4 STTB_ACCOUNT — repartition AUTH_STATUS');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT NVL(AUTH_STATUS,''?''), COUNT(*) nb
+            FROM STTB_ACCOUNT
+            GROUP BY AUTH_STATUS
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. v_maker_tab.COUNT LOOP
+            p_kv('  STTB_ACCOUNT AUTH_STATUS=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)));
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTB_ACCOUNT AUTH_STATUS', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.5 STTB_ACCOUNT — violations SoD (MAKER=CHECKER sur compte)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTB_ACCOUNT
+            WHERE MAKER_ID IS NOT NULL
+              AND CHECKER_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(CHECKER_ID)' INTO v_count;
+        p_kv('  Comptes auto-authorises', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTB_ACCOUNT SoD', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.6 STTM_KYC_MASTER — repartition AUTH_STATUS');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT NVL(AUTH_STATUS,''?''), COUNT(*) nb
+            FROM STTM_KYC_MASTER
+            GROUP BY AUTH_STATUS
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. v_maker_tab.COUNT LOOP
+            p_kv('  STTM_KYC_MASTER AUTH_STATUS=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)));
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_KYC_MASTER AUTH_STATUS', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.7 STTM_KYC_MASTER — violations SoD');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM STTM_KYC_MASTER
+            WHERE MAKER_ID IS NOT NULL
+              AND CHECKER_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(CHECKER_ID)' INTO v_count;
+        p_kv('  KYC auto-authorises', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  STTM_KYC_MASTER SoD', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.8 ACTB_HISTORY — violations SoD sur ecritures comptables (MAKER_ID=AUTH_ID)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(*) FROM ACTB_HISTORY
+            WHERE MAKER_ID IS NOT NULL
+              AND AUTH_ID IS NOT NULL
+              AND UPPER(MAKER_ID) = UPPER(AUTH_ID)' INTO v_count;
+        p_kv('  Ecritures auto-authorisees', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  ACTB_HISTORY SoD', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.9 ACTB_HISTORY — Top 15 makers ecritures (365 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAKER_ID, COUNT(*) nb FROM ACTB_HISTORY
+            WHERE MAKER_ID IS NOT NULL
+              AND TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -12)
+            GROUP BY MAKER_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  MAKER=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' ecritures 12m');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  ACTB_HISTORY top makers', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.10 ACTB_HISTORY — Top 15 authorizers ecritures (365 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT AUTH_ID, COUNT(*) nb FROM ACTB_HISTORY
+            WHERE AUTH_ID IS NOT NULL
+              AND TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -12)
+            GROUP BY AUTH_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 15) LOOP
+            p_kv('  AUTH=' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' autorisations 12m');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  ACTB_HISTORY top auths', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.11 ACTB_HISTORY — paires MAKER-AUTH les plus frequentes (Top 10, 90 j)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT MAKER_ID || '' >> '' || AUTH_ID paire, COUNT(*) nb
+            FROM ACTB_HISTORY
+            WHERE MAKER_ID IS NOT NULL AND AUTH_ID IS NOT NULL
+              AND TRN_DT >= TRUNC(SYSDATE) - 90
+            GROUP BY MAKER_ID || '' >> '' || AUTH_ID
+            ORDER BY nb DESC'
+        BULK COLLECT INTO v_maker_tab, v_count_tab;
+        FOR i IN 1 .. LEAST(v_maker_tab.COUNT, 10) LOOP
+            p_kv('  ' || v_maker_tab(i), TO_CHAR(v_count_tab(i)) || ' operations 90j');
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  ACTB_HISTORY paires', 'inaccessible - ' || SQLERRM);
+    END;
+
+    p_sub('A-20.12 Orphelins maker/checker (identifiants absents de SMTB_USER)');
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT MAKER_ID)
+            FROM STTM_CUSTOMER c
+            WHERE c.MAKER_ID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SMTB_USER u WHERE u.USER_ID = c.MAKER_ID)'
+        INTO v_count;
+        p_kv('  Makers CIF absents du referentiel', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Makers CIF orphelins', 'inaccessible - ' || SQLERRM);
+    END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT MAKER_ID)
+            FROM STTB_ACCOUNT a
+            WHERE a.MAKER_ID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SMTB_USER u WHERE u.USER_ID = a.MAKER_ID)'
+        INTO v_count;
+        p_kv('  Makers comptes absents du referentiel', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Makers comptes orphelins', 'inaccessible - ' || SQLERRM);
+    END;
+
+    BEGIN
+        EXECUTE IMMEDIATE '
+            SELECT COUNT(DISTINCT MAKER_ID)
+            FROM ACTB_HISTORY h
+            WHERE h.MAKER_ID IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM SMTB_USER u WHERE u.USER_ID = h.MAKER_ID)'
+        INTO v_count;
+        p_kv('  Makers ecritures absents du referentiel', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        p_kv('  Makers ecritures orphelins', 'inaccessible - ' || SQLERRM);
+    END;
+
+    -- =========================================================
     -- A-16. SYNTHESE FINALE & REFERENCES
     -- =========================================================
     p_section('A-16. SYNTHESE FINALE — perimetre couvert par ce script');

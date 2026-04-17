@@ -1291,6 +1291,171 @@ BEGIN
             END;
     END;
 
+    -- =================================================================
+    -- SECTION S03 - DORMANT ACCOUNTS WITH ACCRUALS OR ACTIVITY
+    -- -----------------------------------------------------------------
+    -- [F-020] Comptes dormants avec interets/charges accrues non nulles
+    --         -> risque de revenu/charge non apure (PCEC 2 / 38).
+    -- [F-021] Comptes dormants avec mouvements sur la periode
+    --         -> suspicion AML/fraude (a referer au module dedie).
+    --
+    -- Sources :
+    --   - STTM_CUST_ACCOUNT : AC_STAT_DORMANT ('Y' = dormant)
+    --   - ACTB_HISTORY       : mouvements sur [v_date_from; v_date_to]
+    --   - ICTB_ACCRUALS_TEMP : accruals (optionnel, peut etre absent)
+    --
+    -- En l'absence de ICTB_ACCRUALS_TEMP, [F-020] est journalise comme
+    -- limitation et la detection se restreint a [F-021].
+    -- =================================================================
+    DECLARE
+        l_cur       SYS_REFCURSOR;
+        l_ac_no     VARCHAR2(30);
+        l_cust_no   VARCHAR2(20);
+        l_branch    VARCHAR2(10);
+        l_ccy       VARCHAR2(3);
+        l_val_n     NUMBER;
+        l_val_lcy   NUMBER;
+        l_n_020     PLS_INTEGER := 0;
+        l_n_021     PLS_INTEGER := 0;
+        l_sql       VARCHAR2(4000);
+        l_days      NUMBER;
+    BEGIN
+        IF NOT f_section_enabled('S03') THEN
+            log_info('Section S03 skipped (p_sections_include/exclude).');
+        ELSE
+            print_section_header('S03',
+                'Dormant accounts with accruals or unexpected activity');
+
+            l_days := GREATEST(1, (v_date_to - v_date_from) + 1);
+
+            -- [F-020] Dormants + accruals non nuls ------------------
+            l_sql :=
+                'SELECT a.CUST_AC_NO, a.CUST_NO, a.BRANCH_CODE, a.CCY, '
+             || '       NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) AS ACCR_LCY '
+             || '  FROM STTM_CUST_ACCOUNT a '
+             || '  JOIN ICTB_ACCRUALS_TEMP i '
+             || '    ON i.ACCOUNT = a.CUST_AC_NO '
+             || ' WHERE NVL(a.AC_STAT_DORMANT,''N'') = ''Y'' '
+             || '   AND (:p_branch IS NULL OR a.BRANCH_CODE = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR a.CUST_NO     = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR a.CUST_AC_NO  = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR a.CCY         = :p_ccy) '
+             || ' GROUP BY a.CUST_AC_NO, a.CUST_NO, a.BRANCH_CODE, a.CCY '
+             || ' HAVING NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) > 0 '
+             || ' ORDER BY NVL(SUM(NVL(i.ACCR_AMOUNT_LCY,0)),0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_cust_no, l_branch, l_ccy, l_val_lcy;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_020 >= NVL(p_top_n, 50);
+
+                    IF l_val_lcy >= NVL(p_materiality_lcy, 0) THEN
+                        print_finding(
+                            p_section    => 'S03',
+                            p_code       => 'RA-S03-F020',
+                            p_severity   => 'MEDIUM',
+                            p_message    => 'Dormant account with non-zero accrual sum='
+                                         || f_fmt_lcy(l_val_lcy),
+                            p_entity     => l_ac_no,
+                            p_impact_lcy => l_val_lcy,
+                            p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                         || ' CUST=' || NVL(f_mask_pii(l_cust_no),'?')
+                                         || ' CCY=' || NVL(l_ccy,'?')
+                        );
+                        l_n_020 := l_n_020 + 1;
+                    END IF;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_warn('S03 F-020 unavailable: ICTB_ACCRUALS_TEMP '
+                        || 'not queryable (' || SUBSTR(SQLERRM, 1, 120) || ').');
+            END;
+
+            -- [F-021] Dormants + mouvements sur periode -------------
+            l_sql :=
+                'SELECT a.CUST_AC_NO, a.CUST_NO, a.BRANCH_CODE, a.CCY, '
+             || '       COUNT(*) AS N_MOV, '
+             || '       NVL(SUM(ABS(NVL(h.LCY_AMOUNT,0))),0) AS VOL_LCY '
+             || '  FROM STTM_CUST_ACCOUNT a '
+             || '  JOIN ACTB_HISTORY h '
+             || '    ON h.AC_NO = a.CUST_AC_NO '
+             || ' WHERE NVL(a.AC_STAT_DORMANT,''N'') = ''Y'' '
+             || '   AND h.TRN_DT BETWEEN :d1 AND :d2 '
+             || '   AND (:p_branch IS NULL OR a.BRANCH_CODE = :p_branch) '
+             || '   AND (:p_cust   IS NULL OR a.CUST_NO     = :p_cust) '
+             || '   AND (:p_acc    IS NULL OR a.CUST_AC_NO  = :p_acc) '
+             || '   AND (:p_ccy    IS NULL OR a.CCY         = :p_ccy) '
+             || ' GROUP BY a.CUST_AC_NO, a.CUST_NO, a.BRANCH_CODE, a.CCY '
+             || ' ORDER BY NVL(SUM(ABS(NVL(h.LCY_AMOUNT,0))),0) DESC';
+
+            BEGIN
+                OPEN l_cur FOR l_sql USING
+                    v_date_from, v_date_to,
+                    p_branch_code, p_branch_code,
+                    p_customer_no, p_customer_no,
+                    p_account_no,  p_account_no,
+                    p_ccy,         p_ccy;
+
+                LOOP
+                    FETCH l_cur INTO
+                        l_ac_no, l_cust_no, l_branch, l_ccy, l_val_n, l_val_lcy;
+                    EXIT WHEN l_cur%NOTFOUND
+                           OR l_n_021 >= NVL(p_top_n, 50);
+
+                    print_finding(
+                        p_section    => 'S03',
+                        p_code       => 'RA-S03-F021',
+                        p_severity   => 'HIGH',
+                        p_message    => 'Dormant account with activity on period : '
+                                     || TO_CHAR(l_val_n) || ' moves, vol='
+                                     || f_fmt_lcy(l_val_lcy)
+                                     || ' (refer AML module)',
+                        p_entity     => l_ac_no,
+                        p_impact_lcy => l_val_lcy,
+                        p_evidence   => 'BR=' || NVL(l_branch,'?')
+                                     || ' CUST=' || NVL(f_mask_pii(l_cust_no),'?')
+                                     || ' CCY=' || NVL(l_ccy,'?')
+                                     || ' DAYS=' || TO_CHAR(l_days)
+                    );
+                    l_n_021 := l_n_021 + 1;
+                END LOOP;
+                CLOSE l_cur;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    IF l_cur%ISOPEN THEN
+                        CLOSE l_cur;
+                    END IF;
+                    log_error('S03',
+                        'Movements query failed: ' || SUBSTR(SQLERRM, 1, 200));
+            END;
+
+            print_kv('F-020 findings (accruals)',  TO_CHAR(l_n_020));
+            print_kv('F-021 findings (activity)',  TO_CHAR(l_n_021));
+
+            print_section_footer('S03', l_n_020 + l_n_021);
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error('S03', 'Section aborted: ' || SUBSTR(SQLERRM, 1, 300));
+            BEGIN
+                print_section_footer('S03', 0);
+            EXCEPTION
+                WHEN OTHERS THEN NULL;
+            END;
+    END;
+
 EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('[FATAL] Unexpected error in main BEGIN: '

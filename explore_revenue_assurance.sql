@@ -2145,5 +2145,210 @@ BEGIN
         print_kv('  CP=' || NVL(r.COUNTERPARTY,'<NULL>'),
                  'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 9. ICTM — PARAMETRAGE TAUX & ELEMENTS DEFINIS UTILISATEUR (UDE)
+    --    Enjeux RA :
+    --      - Référentiel taux par produit (ICTM_PR_INT_UDEVALS),
+    --      - Overrides par compte (ICTM_ACC_UDEVALS) — vecteur majeur
+    --        de revenue leakage si mauvaise dérogation,
+    --      - UDE_VARIANCE : écart cible vs spread (dérogation tarif),
+    --      - Règles IC (ICTM_EXPR) : conditions de calcul/exonération.
+    -- =========================================================
+    print_section('9. ICTM — Paramétrage taux & éléments UDE');
+
+    -- 9.1 ICTM_PR_INT_UDEVALS — UDE au niveau produit
+    DBMS_OUTPUT.PUT_LINE('  [9.1 ICTM_PR_INT_UDEVALS — UDE niveau produit]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_PR_INT_UDEVALS;
+    print_kv('  Nb UDE produit', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT PRODUCT_CODE) INTO v_count FROM ICTM_PR_INT_UDEVALS;
+    print_kv('  PRODUCT_CODE distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT UDE_ID) INTO v_count FROM ICTM_PR_INT_UDEVALS;
+    print_kv('  UDE_ID distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY_CODE) INTO v_count FROM ICTM_PR_INT_UDEVALS;
+    print_kv('  Devises couvertes', TO_CHAR(v_count));
+
+    -- 9.2 Répartition par UDE_ID (type de taux)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.2 Répartition par UDE_ID (type d''élément tarifaire)]');
+    FOR r IN (
+        SELECT UDE_ID, COUNT(*) nb,
+               ROUND(MIN(UDE_VALUE),6) mn,
+               ROUND(MAX(UDE_VALUE),6) mx,
+               ROUND(AVG(UDE_VALUE),6) av
+        FROM ICTM_PR_INT_UDEVALS
+        GROUP BY UDE_ID
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  UDE=' || NVL(r.UDE_ID,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | min=' || TO_CHAR(r.mn) ||
+                 ' / max=' || TO_CHAR(r.mx) || ' / avg=' || TO_CHAR(r.av));
+    END LOOP;
+
+    -- 9.3 Nb versions d'UDE par produit (révisions de taux)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.3 Top 15 produits avec le plus de versions d''UDE (révisions)]');
+    FOR r IN (
+        SELECT PRODUCT_CODE, nb FROM (
+            SELECT PRODUCT_CODE, COUNT(*) nb
+            FROM ICTM_PR_INT_UDEVALS
+            GROUP BY PRODUCT_CODE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PRODUCT=' || r.PRODUCT_CODE, 'nb versions UDE=' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.4 Plage temporelle UDE_EFF_DT (dates d'effet)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.4 Plage UDE_EFF_DT]');
+    FOR r IN (SELECT MIN(UDE_EFF_DT) dmin, MAX(UDE_EFF_DT) dmax FROM ICTM_PR_INT_UDEVALS) LOOP
+        print_kv('  min / max', TO_CHAR(r.dmin,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.dmax,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 9.5 UDE avec valeur nulle ou zero
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.5 ** ALERTE RA ** — UDE produit à 0 ou NULL]');
+    SELECT COUNT(*) INTO v_count
+    FROM ICTM_PR_INT_UDEVALS
+    WHERE NVL(UDE_VALUE,0) = 0;
+    print_kv('  UDE produit à 0 ou NULL', TO_CHAR(v_count));
+
+    -- 9.6 ICTM_ACC_UDEVALS — UDE au niveau compte (overrides)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.6 ICTM_ACC_UDEVALS — overrides au compte]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Nb overrides compte', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ACC) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Comptes avec override taux', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT PROD) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  Produits avec override compte', TO_CHAR(v_count));
+
+    -- 9.7 Répartition overrides par UDE_ID
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.7 Overrides par UDE_ID]');
+    FOR r IN (
+        SELECT UDE_ID, COUNT(*) nb,
+               ROUND(MIN(UDE_VALUE),6) mn,
+               ROUND(MAX(UDE_VALUE),6) mx,
+               ROUND(AVG(UDE_VALUE),6) av
+        FROM ICTM_ACC_UDEVALS
+        GROUP BY UDE_ID
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  UDE=' || NVL(r.UDE_ID,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | min=' || TO_CHAR(r.mn) ||
+                 ' / max=' || TO_CHAR(r.mx) || ' / avg=' || TO_CHAR(r.av));
+    END LOOP;
+
+    -- 9.8 ** ALERTE RA ** — UDE_VARIANCE (dérogations tarifaires chiffrées)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.8 ** ALERTE RA ** — UDE_VARIANCE (dérogations tarif)]');
+    FOR r IN (SELECT COUNT(*) nb,
+                     ROUND(MIN(UDE_VARIANCE),6) mn,
+                     ROUND(MAX(UDE_VARIANCE),6) mx,
+                     ROUND(AVG(UDE_VARIANCE),6) av
+              FROM ICTM_ACC_UDEVALS
+              WHERE NVL(UDE_VARIANCE,0) <> 0) LOOP
+        print_kv('  Overrides avec variance non nulle', TO_CHAR(r.nb));
+        print_kv('  Variance min / max / moy', TO_CHAR(r.mn) || ' / ' || TO_CHAR(r.mx) || ' / ' || TO_CHAR(r.av));
+    END LOOP;
+
+    -- 9.8.b Top 15 comptes avec variance négative (favorables au client)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.8.b Top 15 comptes avec UDE_VARIANCE négative (clients favorisés)]');
+    FOR r IN (
+        SELECT ACC, BRN, PROD, variance, UDE_ID FROM (
+            SELECT ACC, BRN, PROD, UDE_ID,
+                   ROUND(MIN(UDE_VARIANCE),6) variance
+            FROM ICTM_ACC_UDEVALS
+            WHERE UDE_VARIANCE < 0
+            GROUP BY ACC, BRN, PROD, UDE_ID
+            ORDER BY variance ASC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  Cpt=' || r.ACC || ' / BRN=' || r.BRN || ' / PROD=' || r.PROD || ' / UDE=' || r.UDE_ID,
+                 'variance=' || TO_CHAR(r.variance));
+    END LOOP;
+
+    -- 9.9 BASE_RATE vs BASE_SPREAD (override structure)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.9 BASE_RATE / BASE_SPREAD distribution overrides]');
+    FOR r IN (SELECT ROUND(MIN(BASE_RATE),6) bmn, ROUND(MAX(BASE_RATE),6) bmx,
+                     ROUND(AVG(BASE_RATE),6) bav,
+                     ROUND(MIN(BASE_SPREAD),6) smn, ROUND(MAX(BASE_SPREAD),6) smx,
+                     ROUND(AVG(BASE_SPREAD),6) sav
+              FROM ICTM_ACC_UDEVALS
+              WHERE BASE_RATE IS NOT NULL OR BASE_SPREAD IS NOT NULL) LOOP
+        print_kv('  BASE_RATE min/max/avg', TO_CHAR(r.bmn) || ' / ' || TO_CHAR(r.bmx) || ' / ' || TO_CHAR(r.bav));
+        print_kv('  BASE_SPREAD min/max/avg', TO_CHAR(r.smn) || ' / ' || TO_CHAR(r.smx) || ' / ' || TO_CHAR(r.sav));
+    END LOOP;
+
+    -- 9.10 AUTH_STAT / RECORD_STAT des overrides
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.10 AUTH_STAT & RECORD_STAT des overrides taux]');
+    FOR r IN (
+        SELECT NVL(AUTH_STAT,'<NULL>') au, NVL(RECORD_STAT,'<NULL>') rs, COUNT(*) nb
+        FROM ICTM_ACC_UDEVALS
+        GROUP BY NVL(AUTH_STAT,'<NULL>'), NVL(RECORD_STAT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  AUTH=' || r.au || ' / REC=' || r.rs, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.11 ** ALERTE RA ** — overrides avec UDE_VALUE < taux produit correspondant
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.11 ** ALERTE RA ** — override < taux produit (dérogation à la baisse)]');
+    SELECT COUNT(*) INTO v_count
+    FROM ICTM_ACC_UDEVALS a
+    WHERE EXISTS (
+        SELECT 1 FROM ICTM_PR_INT_UDEVALS p
+        WHERE p.PRODUCT_CODE = a.PROD
+          AND p.UDE_ID = a.UDE_ID
+          AND NVL(a.UDE_VALUE,0) < NVL(p.UDE_VALUE,0) - 0.0001
+    );
+    print_kv('  Overrides compte < taux produit', TO_CHAR(v_count));
+
+    -- 9.12 ICTM_EXPR — règles expressionnelles (exemptions)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.12 ICTM_EXPR — règles conditionnelles]');
+    SELECT COUNT(*) INTO v_count FROM ICTM_EXPR;
+    print_kv('  Nb lignes règles', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT RULE_ID) INTO v_count FROM ICTM_EXPR;
+    print_kv('  Règles distinctes (RULE_ID)', TO_CHAR(v_count));
+
+    -- 9.13 Top 10 RULE_ID (règles les plus volumineuses)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.13 Top 10 RULE_ID par nb de lignes]');
+    FOR r IN (
+        SELECT RULE_ID, nb FROM (
+            SELECT RULE_ID, COUNT(*) nb
+            FROM ICTM_EXPR
+            GROUP BY RULE_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  RULE_ID=' || NVL(r.RULE_ID,'<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 9.14 Devises les plus fréquentes dans les UDE produit
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [9.14 Top 10 devises dans UDE produit]');
+    FOR r IN (
+        SELECT CCY_CODE, nb FROM (
+            SELECT CCY_CODE, COUNT(*) nb
+            FROM ICTM_PR_INT_UDEVALS
+            GROUP BY CCY_CODE
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CCY=' || NVL(r.CCY_CODE,'<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
 END;
 /

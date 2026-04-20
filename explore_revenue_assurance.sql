@@ -1517,5 +1517,305 @@ BEGIN
     WHERE AMOUNT_EXCESS > 0;
     print_kv('  Liquidations avec AMOUNT_EXCESS > 0', TO_CHAR(v_count));
     print_kv('  Cumul AMOUNT_EXCESS', TO_CHAR(v_num));
+
+    -- =========================================================
+    -- 7. CLTB_ACCOUNT_APPS_MASTER — LIFECYCLE DES PRETS
+    --    Vue maître des prêts CL. Enjeux RA :
+    --      - STOP_ACCRUALS='Y' : arrêts d'accrual (perte revenus),
+    --      - DELINQUENCY_STATUS : impact classement IFRS9,
+    --      - BOOK_UNEARNED_INTEREST / UPFRONT_PROFIT_BOOKED : produits
+    --        constatés d'avance,
+    --      - AMOUNT_FINANCED vs AMOUNT_DISBURSED : non-déboursements,
+    --      - AMEND_PAST_PAID_SCHEDULE='Y' : modifications post-paiement,
+    --      - MAKER=CHECKER : défaut de 4 yeux.
+    -- =========================================================
+    print_section('7. CLTB_ACCOUNT_APPS_MASTER — Lifecycle des prêts');
+
+    -- 7.1 Volumétrie
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Total prêts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CUSTOMER_ID) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Clients distincts emprunteurs', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT PRODUCT_CODE) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  PRODUCT_CODE distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CURRENCY) INTO v_count FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Devises distinctes', TO_CHAR(v_count));
+
+    -- 7.2 Plage temporelle
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.2 Plage temporelle (BOOK_DATE / VALUE_DATE / MATURITY_DATE)]');
+    FOR r IN (SELECT MIN(BOOK_DATE) bmn, MAX(BOOK_DATE) bmx,
+                     MIN(VALUE_DATE) vmn, MAX(VALUE_DATE) vmx,
+                     MIN(MATURITY_DATE) mmn, MAX(MATURITY_DATE) mmx
+              FROM CLTB_ACCOUNT_APPS_MASTER) LOOP
+        print_kv('  BOOK_DATE', TO_CHAR(r.bmn,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.bmx,'DD/MM/YYYY'));
+        print_kv('  VALUE_DATE', TO_CHAR(r.vmn,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.vmx,'DD/MM/YYYY'));
+        print_kv('  MATURITY_DATE', TO_CHAR(r.mmn,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.mmx,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 7.3 Encours global
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.3 Encours global des prêts]');
+    SELECT NVL(ROUND(SUM(AMOUNT_FINANCED),2),0),
+           NVL(ROUND(SUM(AMOUNT_DISBURSED),2),0),
+           NVL(ROUND(SUM(AMOUNT_UTILIZED),2),0)
+      INTO v_num, v_num2, v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER;
+    print_kv('  Cumul AMOUNT_FINANCED', TO_CHAR(v_num));
+    print_kv('  Cumul AMOUNT_DISBURSED', TO_CHAR(v_num2));
+    print_kv('  Cumul AMOUNT_UTILIZED', TO_CHAR(v_count));
+
+    -- 7.4 ** ALERTE RA ** — STOP_ACCRUALS (arrêt accrual = perte revenus)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.4 ** ALERTE RA ** — STOP_ACCRUALS]');
+    FOR r IN (
+        SELECT NVL(STOP_ACCRUALS,'<NULL>') sa, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_FINANCED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(STOP_ACCRUALS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  STOP_ACCRUALS=' || r.sa, 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.5 ** ALERTE RA ** — STOP_DSBR (arrêt déboursement)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.5 STOP_DSBR (arrêt déboursement)]');
+    FOR r IN (
+        SELECT NVL(STOP_DSBR,'<NULL>') sd, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(STOP_DSBR,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  STOP_DSBR=' || r.sd, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.6 DELINQUENCY_STATUS (IFRS9 — impact provisioning)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.6 DELINQUENCY_STATUS]');
+    FOR r IN (
+        SELECT NVL(DELINQUENCY_STATUS,'<NULL>') ds, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_FINANCED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(DELINQUENCY_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DELINQUENCY=' || r.ds, 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.7 USER_DEFINED_STATUS (NORM, NPA, ...)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.7 USER_DEFINED_STATUS]');
+    FOR r IN (
+        SELECT NVL(USER_DEFINED_STATUS,'<NULL>') us, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_FINANCED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(USER_DEFINED_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  USER_DEFINED_STATUS=' || r.us, 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.8 DERIVED_STATUS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.8 DERIVED_STATUS]');
+    FOR r IN (
+        SELECT NVL(DERIVED_STATUS,'<NULL>') ds, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(DERIVED_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DERIVED_STATUS=' || r.ds, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.9 ACCOUNT_STATUS (O=Opened, L=Liquidated...)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.9 ACCOUNT_STATUS]');
+    FOR r IN (
+        SELECT NVL(ACCOUNT_STATUS,'<NULL>') ast, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_FINANCED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(ACCOUNT_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACCOUNT_STATUS=' || r.ast, 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.10 AUTH_STAT (autorisés vs non)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.10 AUTH_STAT prêts]');
+    FOR r IN (
+        SELECT NVL(AUTH_STAT,'<NULL>') au, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(AUTH_STAT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  AUTH_STAT=' || r.au, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.11 Top 15 PRODUCT_CODE (concentration produits)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.11 Top 15 PRODUCT_CODE par encours]');
+    FOR r IN (
+        SELECT PRODUCT_CODE, nb, sm FROM (
+            SELECT PRODUCT_CODE, COUNT(*) nb, ROUND(SUM(AMOUNT_FINANCED),2) sm
+            FROM CLTB_ACCOUNT_APPS_MASTER
+            GROUP BY PRODUCT_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  PRODUCT=' || NVL(r.PRODUCT_CODE,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.12 Devises
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.12 Répartition devises prêts]');
+    FOR r IN (
+        SELECT NVL(CURRENCY,'<NULL>') ccy, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_FINANCED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(CURRENCY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CCY=' || r.ccy, 'nb=' || TO_CHAR(r.nb) || ' | encours=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.13 ** ALERTE RA ** — AMOUNT_DISBURSED > AMOUNT_FINANCED (anomalie)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.13 ** ALERTE RA ** — AMOUNT_DISBURSED > AMOUNT_FINANCED]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE NVL(AMOUNT_DISBURSED,0) > NVL(AMOUNT_FINANCED,0) + 0.01;
+    print_kv('  Prêts avec DISBURSED > FINANCED', TO_CHAR(v_count));
+
+    -- 7.14 ** ALERTE RA ** — Prêts non entièrement déboursés mais accruals en cours
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.14 Prêts partiellement déboursés (DISBURSED/FINANCED < 100%)]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE NVL(AMOUNT_FINANCED,0) > 0
+      AND NVL(AMOUNT_DISBURSED,0) < NVL(AMOUNT_FINANCED,0) * 0.999;
+    print_kv('  Prêts sous-déboursés', TO_CHAR(v_count));
+
+    -- 7.15 BOOK_UNEARNED_INTEREST / UPFRONT_PROFIT_BOOKED
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.15 Produits constatés d''avance / upfront]');
+    FOR r IN (
+        SELECT NVL(BOOK_UNEARNED_INTEREST,'<NULL>') bu, COUNT(*) nb,
+               NVL(ROUND(SUM(UPFRONT_PROFIT_BOOKED),2),0) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(BOOK_UNEARNED_INTEREST,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  BOOK_UNEARNED_INTEREST=' || r.bu,
+                 'nb=' || TO_CHAR(r.nb) || ' | upfront=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    SELECT NVL(ROUND(SUM(UPFRONT_PROFIT_BOOKED),2),0) INTO v_num
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE NVL(UPFRONT_PROFIT_BOOKED,0) > 0;
+    print_kv('  Cumul UPFRONT_PROFIT_BOOKED > 0', TO_CHAR(v_num));
+
+    -- 7.16 ** ALERTE RA ** — AMEND_PAST_PAID_SCHEDULE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.16 ** ALERTE RA ** — AMEND_PAST_PAID_SCHEDULE]');
+    FOR r IN (
+        SELECT NVL(AMEND_PAST_PAID_SCHEDULE,'<NULL>') ap, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(AMEND_PAST_PAID_SCHEDULE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  AMEND_PAST_PAID_SCHEDULE=' || r.ap, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.17 LIQ_BACK_VALUED_SCHEDULES / BACK_VAL_EFF_DT (back-dating)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.17 Back-dating des prêts]');
+    FOR r IN (
+        SELECT NVL(LIQ_BACK_VALUED_SCHEDULES,'<NULL>') lb,
+               NVL(ALLOW_BACK_PERIOD_ENTRY,'<NULL>') ab, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(LIQ_BACK_VALUED_SCHEDULES,'<NULL>'),
+                 NVL(ALLOW_BACK_PERIOD_ENTRY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LIQ_BACK_VAL=' || r.lb || ' / ALLOW_BACK=' || r.ab, TO_CHAR(r.nb));
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE BACK_VAL_EFF_DT IS NOT NULL;
+    print_kv('  Prêts avec BACK_VAL_EFF_DT non null', TO_CHAR(v_count));
+
+    -- 7.18 HAS_PROBLEMS (flag système)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.18 HAS_PROBLEMS]');
+    FOR r IN (
+        SELECT NVL(HAS_PROBLEMS,'<NULL>') hp, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(HAS_PROBLEMS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  HAS_PROBLEMS=' || r.hp, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.19 ** ALERTE RA ** — MAKER_ID = CHECKER_ID
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.19 ** ALERTE RA ** — MAKER_ID = CHECKER_ID (4 yeux violé)]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE MAKER_ID = CHECKER_ID AND MAKER_ID IS NOT NULL;
+    print_kv('  Prêts avec MAKER=CHECKER', TO_CHAR(v_count));
+
+    -- 7.20 Volumétrie annuelle des octrois (BOOK_DATE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.20 Prêts octroyés par année (BOOK_DATE)]');
+    FOR r IN (
+        SELECT TO_CHAR(BOOK_DATE,'YYYY') annee, COUNT(*) nb,
+               ROUND(SUM(AMOUNT_FINANCED),2) sm
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        WHERE BOOK_DATE IS NOT NULL
+        GROUP BY TO_CHAR(BOOK_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee, 'nb=' || TO_CHAR(r.nb) || ' | financement=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 7.21 INTEREST_SUBSIDY_ALLOWED (subventions taux)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.21 INTEREST_SUBSIDY_ALLOWED (subventions)]');
+    FOR r IN (
+        SELECT NVL(INTEREST_SUBSIDY_ALLOWED,'<NULL>') isa, COUNT(*) nb
+        FROM CLTB_ACCOUNT_APPS_MASTER
+        GROUP BY NVL(INTEREST_SUBSIDY_ALLOWED,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  INTEREST_SUBSIDY=' || r.isa, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 7.22 Prêts avec MIGRATION_DATE (héritage système précédent)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.22 Prêts migrés (MIGRATION_DATE non null)]');
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_FINANCED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE MIGRATION_DATE IS NOT NULL;
+    print_kv('  Prêts migrés — nb', TO_CHAR(v_count));
+    print_kv('  Prêts migrés — encours', TO_CHAR(v_num));
+
+    -- 7.23 Cohérence NEXT_ACCR_DATE passée (accruals en retard)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [7.23 ** ALERTE RA ** — NEXT_ACCR_DATE en retard]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE NEXT_ACCR_DATE IS NOT NULL
+      AND NEXT_ACCR_DATE < TRUNC(SYSDATE) - 30
+      AND NVL(STOP_ACCRUALS,'N') <> 'Y'
+      AND NVL(ACCOUNT_STATUS,'X') NOT IN ('L','C');
+    print_kv('  Prêts actifs avec NEXT_ACCR_DATE >30j passé', TO_CHAR(v_count));
 END;
 /

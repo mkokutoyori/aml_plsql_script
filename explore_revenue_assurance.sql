@@ -650,5 +650,270 @@ BEGIN
     ) LOOP
         print_kv('  ORIG_PNL_GL ' || r.ORIG_PNL_GL, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 4. CLTB_ACCOUNT_COMPONENTS — COMPOSANTS DE PRETS & WAIVERS
+    --    Enjeu RA : les waivers de composants d'intérêts / frais
+    --    sur les prêts Consumer Loans constituent la 1ère source
+    --    de revenue leakage. Cette section quantifie les waivers,
+    --    les composants capitalisés, les SPL_INTEREST (taux
+    --    négocié), et les bases de calcul non standard.
+    -- =========================================================
+    print_section('4. CLTB_ACCOUNT_COMPONENTS — Composants de prêts & waivers');
+
+    -- 4.1 Volumétrie globale
+    SELECT COUNT(*) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Total composants', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Comptes distincts avec composants', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT COMPONENT_NAME) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Noms de composants distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT COMPONENT_CCY) INTO v_count FROM CLTB_ACCOUNT_COMPONENTS;
+    print_kv('  Devises composants distinctes', TO_CHAR(v_count));
+
+    -- 4.2 Répartition par COMPONENT_TYPE (INTEREST/PRINCIPAL/CHARGE/PENALTY...)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.2 Répartition par COMPONENT_TYPE]');
+    FOR r IN (
+        SELECT COMPONENT_TYPE, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY COMPONENT_TYPE
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TYPE = ' || NVL(r.COMPONENT_TYPE, '<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.3 Top 25 noms de composants (pour identifier les interests/frais)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.3 Top 25 COMPONENT_NAME]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb FROM (
+            SELECT COMPONENT_NAME, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            GROUP BY COMPONENT_NAME
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 25
+    ) LOOP
+        print_kv('  ' || NVL(r.COMPONENT_NAME, '<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.4 ALERTE RA : waivers (WAIVE = 'Y')
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.4 ** ALERTE RA ** — composants waivés (WAIVE = Y)]');
+    FOR r IN (
+        SELECT NVL(WAIVE, '<NULL>') wv, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(WAIVE, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  WAIVE = ' || r.wv, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.4.b Détail waivers par COMPONENT_NAME
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.4.b Top 25 composants waivés par COMPONENT_NAME]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb FROM (
+            SELECT COMPONENT_NAME, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            WHERE WAIVE = 'Y'
+            GROUP BY COMPONENT_NAME
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 25
+    ) LOOP
+        print_kv('  WAIVED ' || NVL(r.COMPONENT_NAME, '<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.4.c Waivers par COMPONENT_TYPE (enjeu leakage typé)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.4.c Waivers par COMPONENT_TYPE]');
+    FOR r IN (
+        SELECT NVL(COMPONENT_TYPE,'<NULL>') ct, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        WHERE WAIVE = 'Y'
+        GROUP BY NVL(COMPONENT_TYPE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  WAIVED TYPE = ' || r.ct, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.4.d Top 15 comptes avec le plus de composants waivés
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.4.d Top 15 ACCOUNT_NUMBER avec composants waivés]');
+    FOR r IN (
+        SELECT ACCOUNT_NUMBER, nb FROM (
+            SELECT ACCOUNT_NUMBER, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            WHERE WAIVE = 'Y'
+            GROUP BY ACCOUNT_NUMBER
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  Compte ' || r.ACCOUNT_NUMBER, 'nb composants waivés = ' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.5 Composants capitalisés (interest ajouté au principal — suivi IRR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.5 Composants CAPITALIZED (capitalisation intérêts)]');
+    FOR r IN (
+        SELECT NVL(CAPITALIZED, '<NULL>') cp, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(CAPITALIZED, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CAPITALIZED = ' || r.cp, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.6 SPL_INTEREST (taux spécial négocié — fréquent vecteur de leakage)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.6 ** ALERTE RA ** — SPL_INTEREST (taux négocié / override)]');
+    FOR r IN (
+        SELECT NVL(SPL_INTEREST, '<NULL>') si, COUNT(*) nb,
+               NVL(ROUND(AVG(SPL_INTEREST_AMT),4),0) avg_amt,
+               NVL(ROUND(MIN(SPL_INTEREST_AMT),4),0) min_amt,
+               NVL(ROUND(MAX(SPL_INTEREST_AMT),4),0) max_amt
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(SPL_INTEREST, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SPL_INTEREST = ' || r.si, 'nb=' || TO_CHAR(r.nb) ||
+                 ' | avg_amt=' || TO_CHAR(r.avg_amt) ||
+                 ' | min=' || TO_CHAR(r.min_amt) ||
+                 ' | max=' || TO_CHAR(r.max_amt));
+    END LOOP;
+
+    -- 4.7 IRR_APPLICABLE (calcul rendement effectif — obligatoire IFRS9)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.7 IRR_APPLICABLE (rendement effectif IFRS9)]');
+    FOR r IN (
+        SELECT NVL(IRR_APPLICABLE, '<NULL>') ir, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(IRR_APPLICABLE, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  IRR_APPLICABLE = ' || r.ir, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.8 Base de calcul DAYS_MTH x DAYS_YEAR (impact direct sur revenus d'intérêts)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.8 Base de calcul intérêts — DAYS_MTH x DAYS_YEAR]');
+    FOR r IN (
+        SELECT NVL(DAYS_MTH,'<NULL>') dm, NVL(DAYS_YEAR,'<NULL>') dy, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(DAYS_MTH,'<NULL>'), NVL(DAYS_YEAR,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DAYS_MTH=' || r.dm || ' / DAYS_YEAR=' || r.dy, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.9 MAIN_COMPONENT (principal vs accessoires)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.9 Répartition MAIN_COMPONENT]');
+    FOR r IN (
+        SELECT NVL(MAIN_COMPONENT, '<NULL>') mc, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(MAIN_COMPONENT, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MAIN_COMPONENT = ' || r.mc, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.10 LIQUIDATION_MODE (auto vs manual — waivers manuels plus probables)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.10 LIQUIDATION_MODE des composants]');
+    FOR r IN (
+        SELECT NVL(LIQUIDATION_MODE, '<NULL>') lm, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(LIQUIDATION_MODE, '<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LIQUIDATION_MODE = ' || r.lm, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.11 COMPONENT_CCY vs SETTLEMENT_CCY — incohérence = FX leakage
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.11 ** ALERTE RA ** — COMPONENT_CCY != SETTLEMENT_CCY (FX)]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE COMPONENT_CCY <> SETTLEMENT_CCY
+      AND COMPONENT_CCY IS NOT NULL
+      AND SETTLEMENT_CCY IS NOT NULL;
+    print_kv('  Composants avec CCY différente du settlement', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.11.b Top paires (COMPONENT_CCY, SETTLEMENT_CCY)]');
+    FOR r IN (
+        SELECT cc, sc, nb FROM (
+            SELECT NVL(COMPONENT_CCY,'<NULL>') cc, NVL(SETTLEMENT_CCY,'<NULL>') sc, COUNT(*) nb
+            FROM CLTB_ACCOUNT_COMPONENTS
+            WHERE COMPONENT_CCY <> SETTLEMENT_CCY
+              AND COMPONENT_CCY IS NOT NULL
+              AND SETTLEMENT_CCY IS NOT NULL
+            GROUP BY NVL(COMPONENT_CCY,'<NULL>'), NVL(SETTLEMENT_CCY,'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ' || r.cc || ' -> ' || r.sc, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.12 Taux négocié vs taux d'origine (NEGOTIATED_RATE vs ORG_EXCH_RATE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.12 ** ALERTE RA ** — écart EXCHANGE_RATE vs NEGOTIATED_RATE]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NEGOTIATED_RATE IS NOT NULL
+      AND EXCHANGE_RATE IS NOT NULL
+      AND NEGOTIATED_RATE <> EXCHANGE_RATE;
+    print_kv('  Composants avec taux négocié différent du taux standard', TO_CHAR(v_count));
+
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NEGOTIATION_REF_NO IS NOT NULL
+      AND TRIM(NEGOTIATION_REF_NO) IS NOT NULL;
+    print_kv('  Composants avec référence de négociation FX', TO_CHAR(v_count));
+
+    -- 4.13 PENAL_BASIS_COMP (composants de base pénalité — leakage si mal paramétré)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.13 PENAL_BASIS_COMP — composants bases de pénalités]');
+    FOR r IN (
+        SELECT NVL(PENAL_BASIS_COMP,'<NULL>') pb, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(PENAL_BASIS_COMP,'<NULL>')
+        HAVING COUNT(*) > 0
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PENAL_BASIS = ' || r.pb, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.14 FUND_DURING_INIT / FUND_DURING_ROLL (impact sur revenus)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.14 FUND_DURING_INIT vs FUND_DURING_ROLL]');
+    FOR r IN (
+        SELECT NVL(FUND_DURING_INIT,'<NULL>') fi, NVL(FUND_DURING_ROLL,'<NULL>') fr, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS
+        GROUP BY NVL(FUND_DURING_INIT,'<NULL>'), NVL(FUND_DURING_ROLL,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  INIT=' || r.fi || ' / ROLL=' || r.fr, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 4.15 Croisement waivers avec comptes actifs / clos (CLTB_ACCOUNT_APPS_MASTER)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [4.15 Croisement waivers x statut prêt (CLTB_ACCOUNT_APPS_MASTER)]');
+    FOR r IN (
+        SELECT NVL(m.USER_DEFINED_STATUS,'<NULL>') st, COUNT(*) nb
+        FROM CLTB_ACCOUNT_COMPONENTS c
+        JOIN CLTB_ACCOUNT_APPS_MASTER m
+          ON m.ACCOUNT_NUMBER = c.ACCOUNT_NUMBER
+         AND m.BRANCH_CODE = c.BRANCH_CODE
+        WHERE c.WAIVE = 'Y'
+        GROUP BY NVL(m.USER_DEFINED_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  STATUS=' || r.st || ' | nb composants waivés', TO_CHAR(r.nb));
+    END LOOP;
 END;
 /

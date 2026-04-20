@@ -2350,5 +2350,227 @@ BEGIN
     ) LOOP
         print_kv('  CCY=' || NVL(r.CCY_CODE,'<NULL>'), TO_CHAR(r.nb));
     END LOOP;
+
+    -- =========================================================
+    -- 10. GLTB_GL_BAL — GRAND LIVRE (soldes & mouvements)
+    --    Enjeux RA :
+    --      - CATEGORY I (Income) & E (Expense) pour les revenus/charges
+    --      - Soldes anormaux (CR sur GL de type asset, DR sur liability)
+    --      - Mouvements annuels par nature de compte
+    --      - GL feuilles (LEAF='Y') vs agrégés
+    --      - Cohérence CR_BAL - DR_BAL vs mouvements cumulés
+    -- =========================================================
+    print_section('10. GLTB_GL_BAL — Grand livre, soldes & mouvements');
+
+    -- 10.1 Volumétrie
+    SELECT COUNT(*) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  Nb lignes GLTB_GL_BAL', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT GL_CODE) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  GL_CODE distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT FIN_YEAR) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  FIN_YEAR distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT BRANCH_CODE) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  BRANCH_CODE distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY_CODE) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  Devises GL distinctes', TO_CHAR(v_count));
+
+    -- 10.2 Répartition par CATEGORY (A=Actif, L=Passif, I=Income, E=Expense)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.2 Répartition par CATEGORY (A/L/I/E/X)]');
+    FOR r IN (
+        SELECT NVL(CATEGORY,'<NULL>') ct, COUNT(*) nb,
+               NVL(ROUND(SUM(DR_MOV_LCY),2),0) dr_mv,
+               NVL(ROUND(SUM(CR_MOV_LCY),2),0) cr_mv
+        FROM GLTB_GL_BAL
+        GROUP BY NVL(CATEGORY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CATEGORY=' || r.ct, 'nb=' || TO_CHAR(r.nb) ||
+                                         ' | DR_MOV_LCY=' || TO_CHAR(r.dr_mv) ||
+                                         ' | CR_MOV_LCY=' || TO_CHAR(r.cr_mv));
+    END LOOP;
+
+    -- 10.3 Volumétrie par FIN_YEAR (exercices comptables)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.3 Mouvements par FIN_YEAR (LCY)]');
+    FOR r IN (
+        SELECT FIN_YEAR,
+               COUNT(*) nb,
+               ROUND(SUM(DR_MOV_LCY),2) dr_mv,
+               ROUND(SUM(CR_MOV_LCY),2) cr_mv
+        FROM GLTB_GL_BAL
+        GROUP BY FIN_YEAR
+        ORDER BY FIN_YEAR
+    ) LOOP
+        print_kv('  FY=' || NVL(r.FIN_YEAR,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) ||
+                 ' | DR=' || TO_CHAR(r.dr_mv) ||
+                 ' | CR=' || TO_CHAR(r.cr_mv));
+    END LOOP;
+
+    -- 10.4 Revenus (CATEGORY=I) — focus RA
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.4 ** RA ** — Revenus (CATEGORY=I) cumul mouvements]');
+    FOR r IN (
+        SELECT FIN_YEAR,
+               ROUND(SUM(CR_MOV_LCY),2) cr_mv_lcy,
+               ROUND(SUM(DR_MOV_LCY),2) dr_mv_lcy,
+               ROUND(SUM(CR_MOV_LCY - DR_MOV_LCY),2) net_revenue
+        FROM GLTB_GL_BAL
+        WHERE CATEGORY = 'I'
+        GROUP BY FIN_YEAR
+        ORDER BY FIN_YEAR
+    ) LOOP
+        print_kv('  FY=' || r.FIN_YEAR || ' — CR revenus', TO_CHAR(r.cr_mv_lcy));
+        print_kv('  FY=' || r.FIN_YEAR || '   DR revenus (stornos)', TO_CHAR(r.dr_mv_lcy));
+        print_kv('  FY=' || r.FIN_YEAR || '   Net revenues', TO_CHAR(r.net_revenue));
+    END LOOP;
+
+    -- 10.5 Charges (CATEGORY=E)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.5 Charges (CATEGORY=E) cumul mouvements]');
+    FOR r IN (
+        SELECT FIN_YEAR,
+               ROUND(SUM(DR_MOV_LCY),2) dr_mv_lcy,
+               ROUND(SUM(CR_MOV_LCY),2) cr_mv_lcy,
+               ROUND(SUM(DR_MOV_LCY - CR_MOV_LCY),2) net_expense
+        FROM GLTB_GL_BAL
+        WHERE CATEGORY = 'E'
+        GROUP BY FIN_YEAR
+        ORDER BY FIN_YEAR
+    ) LOOP
+        print_kv('  FY=' || r.FIN_YEAR || ' — DR charges', TO_CHAR(r.dr_mv_lcy));
+        print_kv('  FY=' || r.FIN_YEAR || '   CR charges (remb)', TO_CHAR(r.cr_mv_lcy));
+        print_kv('  FY=' || r.FIN_YEAR || '   Net charges', TO_CHAR(r.net_expense));
+    END LOOP;
+
+    -- 10.6 Top 20 GL de revenus par solde CR
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.6 Top 20 GL revenus (CATEGORY=I) par CR_MOV_LCY cumulé]');
+    FOR r IN (
+        SELECT GL_CODE, sm FROM (
+            SELECT GL_CODE, ROUND(SUM(CR_MOV_LCY),2) sm
+            FROM GLTB_GL_BAL
+            WHERE CATEGORY = 'I'
+            GROUP BY GL_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  GL=' || NVL(r.GL_CODE,'<NULL>'), 'CR_MOV_LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 10.7 Top 20 GL de charges par solde DR
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.7 Top 20 GL charges (CATEGORY=E) par DR_MOV_LCY cumulé]');
+    FOR r IN (
+        SELECT GL_CODE, sm FROM (
+            SELECT GL_CODE, ROUND(SUM(DR_MOV_LCY),2) sm
+            FROM GLTB_GL_BAL
+            WHERE CATEGORY = 'E'
+            GROUP BY GL_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  GL=' || NVL(r.GL_CODE,'<NULL>'), 'DR_MOV_LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 10.8 ** ALERTE RA ** — revenus avec solde anormal DR (revenu en négatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.8 ** ALERTE RA ** — GL revenus avec DR_MOV > CR_MOV]');
+    SELECT COUNT(*) INTO v_count
+    FROM GLTB_GL_BAL
+    WHERE CATEGORY = 'I'
+      AND NVL(DR_MOV_LCY,0) > NVL(CR_MOV_LCY,0) + 0.01;
+    print_kv('  Nb lignes GL revenus avec DR>CR', TO_CHAR(v_count));
+
+    -- 10.9 GL feuilles vs agrégés
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.9 GL feuilles (LEAF) vs agrégés]');
+    FOR r IN (
+        SELECT NVL(LEAF,'<NULL>') lf, COUNT(*) nb
+        FROM GLTB_GL_BAL
+        GROUP BY NVL(LEAF,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LEAF=' || r.lf, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 10.10 Ventilation revenus par devise (CATEGORY=I)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.10 Revenus par devise (CATEGORY=I)]');
+    FOR r IN (
+        SELECT CCY_CODE, COUNT(*) nb, ROUND(SUM(CR_MOV_LCY),2) sm
+        FROM GLTB_GL_BAL
+        WHERE CATEGORY = 'I'
+        GROUP BY CCY_CODE
+        ORDER BY sm DESC NULLS LAST
+    ) LOOP
+        print_kv('  CCY=' || NVL(r.CCY_CODE,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | CR_MOV_LCY=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 10.11 Revenus par agence (top 15)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.11 Top 15 agences par revenus (CATEGORY=I, CR_MOV_LCY)]');
+    FOR r IN (
+        SELECT BRANCH_CODE, nb, sm FROM (
+            SELECT BRANCH_CODE, COUNT(*) nb, ROUND(SUM(CR_MOV_LCY),2) sm
+            FROM GLTB_GL_BAL
+            WHERE CATEGORY = 'I'
+            GROUP BY BRANCH_CODE
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  BRN=' || NVL(r.BRANCH_CODE,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | revenus=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 10.12 Mouvements vs balances (sanity check — BAL = OPEN_BAL + MOV)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.12 Cohérence LCY : BAL vs OPEN_BAL + MOV (LCY)]');
+    SELECT COUNT(*) INTO v_count
+    FROM GLTB_GL_BAL
+    WHERE ABS(NVL(DR_BAL_LCY,0) - NVL(OPEN_DR_BAL_LCY,0) - NVL(DR_MOV_LCY,0)) > 0.01
+       OR ABS(NVL(CR_BAL_LCY,0) - NVL(OPEN_CR_BAL_LCY,0) - NVL(CR_MOV_LCY,0)) > 0.01;
+    print_kv('  Lignes GL avec incohérence BAL / OPEN+MOV', TO_CHAR(v_count));
+
+    -- 10.13 UNCOLLECTED (créances non collectées)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.13 UNCOLLECTED — cumul GL avec créance non recouvrée]');
+    SELECT COUNT(*), NVL(ROUND(SUM(UNCOLLECTED),2),0)
+      INTO v_count, v_num
+    FROM GLTB_GL_BAL
+    WHERE NVL(UNCOLLECTED,0) > 0;
+    print_kv('  Nb lignes UNCOLLECTED > 0', TO_CHAR(v_count));
+    print_kv('  Cumul UNCOLLECTED', TO_CHAR(v_num));
+
+    -- 10.14 Rapprochement ACTB_HISTORY (CATEGORY=I) vs GLTB_GL_BAL (CATEGORY=I)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.14 Rapprochement ACTB_HISTORY ↔ GLTB_GL_BAL (CATEGORY=I)]');
+    SELECT NVL(ROUND(SUM(CR_MOV_LCY - DR_MOV_LCY),2),0) INTO v_num
+    FROM GLTB_GL_BAL WHERE CATEGORY = 'I';
+    print_kv('  Net GLTB (CR-DR, CATEGORY=I)', TO_CHAR(v_num));
+
+    SELECT NVL(ROUND(SUM(CASE WHEN h.DRCR_IND='C' THEN h.LCY_AMOUNT
+                              WHEN h.DRCR_IND='D' THEN -h.LCY_AMOUNT
+                              ELSE 0 END),2),0) INTO v_num2
+    FROM ACTB_HISTORY h
+    WHERE EXISTS (
+        SELECT 1 FROM CSTB_AMOUNT_TAG t
+        WHERE t.AMOUNT_TAG = h.AMOUNT_TAG AND t.MODULE = h.MODULE
+          AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
+    );
+    print_kv('  Net ACTB (CR-DR, tags revenue)', TO_CHAR(v_num2));
+    print_kv('  Ecart brut GLTB - ACTB', TO_CHAR(NVL(v_num,0) - NVL(v_num2,0)));
+
+    -- 10.15 Top 20 GL par HAS_TOV='Y' (GL avec turnover du jour)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [10.15 GL avec HAS_TOV=Y (turnover journalier)]');
+    SELECT COUNT(*) INTO v_count FROM GLTB_GL_BAL WHERE HAS_TOV = 'Y';
+    print_kv('  Nb GL actifs aujourd''hui', TO_CHAR(v_count));
 END;
 /

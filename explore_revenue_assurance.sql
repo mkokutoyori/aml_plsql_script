@@ -17,6 +17,7 @@ SET SERVEROUTPUT ON SIZE UNLIMITED;
 DECLARE
     v_count     NUMBER;
     v_num       NUMBER;
+    v_num2      NUMBER;
     v_sep       VARCHAR2(80) := RPAD('=', 80, '=');
 
     PROCEDURE print_section(p_title VARCHAR2) IS
@@ -1224,5 +1225,297 @@ BEGIN
     ) LOOP
         print_kv('  Compte ' || r.ACCOUNT_NUMBER, 'nb=' || TO_CHAR(r.nb) || ' | overdue=' || TO_CHAR(r.sm));
     END LOOP;
+
+    -- =========================================================
+    -- 6. CLTB_AMOUNT_PAID / CLTB_AMOUNT_RECD / CLTB_LIQ
+    --    Paiements et liquidations des échéances de prêts.
+    --    Enjeu RA : s'assurer que tout paiement reçu est :
+    --      - correctement affecté au composant revenu attendu,
+    --      - non waivé à tort (AMOUNT_WAIVED dans CLTB_AMOUNT_PAID),
+    --      - non reversé discrètement (REV_MAKER_ID dans CLTB_LIQ),
+    --      - liquidé en temps voulu (écart DUE_DATE / PAID_DATE).
+    -- =========================================================
+    print_section('6. CLTB_AMOUNT_PAID / RECD / LIQ — Paiements & liquidations');
+
+    -- 6.1 CLTB_AMOUNT_PAID — volumétrie globale
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_PAID),2),0)
+      INTO v_count, v_num
+    FROM CLTB_AMOUNT_PAID;
+    print_kv('  Total paiements (CLTB_AMOUNT_PAID)', TO_CHAR(v_count));
+    print_kv('  Cumul AMOUNT_PAID', TO_CHAR(v_num));
+
+    SELECT NVL(ROUND(SUM(AMOUNT_WAIVED),2),0),
+           NVL(ROUND(SUM(AMOUNT_CAPITALIZED),2),0)
+      INTO v_num, v_num2
+    FROM CLTB_AMOUNT_PAID;
+    print_kv('  Cumul AMOUNT_WAIVED (AMOUNT_PAID)', TO_CHAR(v_num));
+    print_kv('  Cumul AMOUNT_CAPITALIZED (AMOUNT_PAID)', TO_CHAR(v_num2));
+
+    -- 6.2 Plage temporelle
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.2 Plage temporelle des paiements]');
+    FOR r IN (SELECT MIN(PAID_DATE) dmin, MAX(PAID_DATE) dmax,
+                     MIN(DUE_DATE) ddmin, MAX(DUE_DATE) ddmax
+              FROM CLTB_AMOUNT_PAID) LOOP
+        print_kv('  PAID_DATE min / max', TO_CHAR(r.dmin,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.dmax,'DD/MM/YYYY'));
+        print_kv('  DUE_DATE  min / max', TO_CHAR(r.ddmin,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.ddmax,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 6.3 Répartition PAID_STATUS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.3 Répartition PAID_STATUS]');
+    FOR r IN (
+        SELECT NVL(PAID_STATUS,'<NULL>') ps, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_PAID),2),0) sm
+        FROM CLTB_AMOUNT_PAID
+        GROUP BY NVL(PAID_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PAID_STATUS=' || r.ps, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 6.4 Top 20 composants payés (par cumul AMOUNT_PAID)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.4 Top 20 COMPONENT_NAME par AMOUNT_PAID]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb, sm FROM (
+            SELECT COMPONENT_NAME, COUNT(*) nb, ROUND(SUM(AMOUNT_PAID),2) sm
+            FROM CLTB_AMOUNT_PAID
+            GROUP BY COMPONENT_NAME
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 6.5 ** ALERTE RA ** — Waivers au paiement (AMOUNT_WAIVED > 0)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.5 ** ALERTE RA ** — AMOUNT_WAIVED > 0 dans CLTB_AMOUNT_PAID]');
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_WAIVED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_AMOUNT_PAID
+    WHERE AMOUNT_WAIVED > 0;
+    print_kv('  Paiements avec AMOUNT_WAIVED > 0', TO_CHAR(v_count));
+    print_kv('  Cumul AMOUNT_WAIVED', TO_CHAR(v_num));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.5.b Top 20 composants waivés au paiement]');
+    FOR r IN (
+        SELECT COMPONENT_NAME, nb, sm FROM (
+            SELECT COMPONENT_NAME, COUNT(*) nb, ROUND(SUM(AMOUNT_WAIVED),2) sm
+            FROM CLTB_AMOUNT_PAID
+            WHERE AMOUNT_WAIVED > 0
+            GROUP BY COMPONENT_NAME
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.5.c Top 15 comptes avec cumul AMOUNT_WAIVED > 0]');
+    FOR r IN (
+        SELECT ACCOUNT_NUMBER, sm, nb FROM (
+            SELECT ACCOUNT_NUMBER, ROUND(SUM(AMOUNT_WAIVED),2) sm, COUNT(*) nb
+            FROM CLTB_AMOUNT_PAID
+            WHERE AMOUNT_WAIVED > 0
+            GROUP BY ACCOUNT_NUMBER
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  Compte ' || r.ACCOUNT_NUMBER, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 6.6 AMOUNT_CAPITALIZED > 0 (capitalisation — à rapprocher du principal)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.6 AMOUNT_CAPITALIZED > 0 (capitalisation intérêts)]');
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_CAPITALIZED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_AMOUNT_PAID
+    WHERE AMOUNT_CAPITALIZED > 0;
+    print_kv('  Paiements avec AMOUNT_CAPITALIZED > 0', TO_CHAR(v_count));
+    print_kv('  Cumul AMOUNT_CAPITALIZED', TO_CHAR(v_num));
+
+    -- 6.7 Ecart DUE_DATE vs PAID_DATE (retards à la liquidation)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.7 Retards PAID_DATE - DUE_DATE (bucket jours)]');
+    FOR r IN (
+        SELECT bucket, nb, sm FROM (
+            SELECT CASE
+                     WHEN PAID_DATE - DUE_DATE <= 0 THEN '01_le_jour_ou_avant'
+                     WHEN PAID_DATE - DUE_DATE <= 5 THEN '02_1-5j'
+                     WHEN PAID_DATE - DUE_DATE <= 15 THEN '03_6-15j'
+                     WHEN PAID_DATE - DUE_DATE <= 30 THEN '04_16-30j'
+                     WHEN PAID_DATE - DUE_DATE <= 90 THEN '05_31-90j'
+                     ELSE '06_>90j'
+                   END bucket,
+                   COUNT(*) nb,
+                   ROUND(SUM(AMOUNT_PAID),2) sm
+            FROM CLTB_AMOUNT_PAID
+            WHERE PAID_DATE IS NOT NULL AND DUE_DATE IS NOT NULL
+            GROUP BY CASE
+                     WHEN PAID_DATE - DUE_DATE <= 0 THEN '01_le_jour_ou_avant'
+                     WHEN PAID_DATE - DUE_DATE <= 5 THEN '02_1-5j'
+                     WHEN PAID_DATE - DUE_DATE <= 15 THEN '03_6-15j'
+                     WHEN PAID_DATE - DUE_DATE <= 30 THEN '04_16-30j'
+                     WHEN PAID_DATE - DUE_DATE <= 90 THEN '05_31-90j'
+                     ELSE '06_>90j'
+                   END
+        ) ORDER BY bucket
+    ) LOOP
+        print_kv('  Retard ' || r.bucket, 'nb=' || TO_CHAR(r.nb) || ' | sum paid=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 6.8 Volumétrie annuelle des paiements
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.8 Volumétrie annuelle par PAID_DATE]');
+    FOR r IN (
+        SELECT TO_CHAR(PAID_DATE,'YYYY') annee,
+               COUNT(*) nb,
+               ROUND(SUM(AMOUNT_PAID),2) sm_paid,
+               ROUND(SUM(AMOUNT_WAIVED),2) sm_wv
+        FROM CLTB_AMOUNT_PAID
+        WHERE PAID_DATE IS NOT NULL
+        GROUP BY TO_CHAR(PAID_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee || ' — nb', TO_CHAR(r.nb));
+        print_kv('  ' || r.annee || '   PAID', TO_CHAR(r.sm_paid));
+        print_kv('  ' || r.annee || '   WAIVED', TO_CHAR(r.sm_wv));
+    END LOOP;
+
+    -- 6.9 CLTB_AMOUNT_RECD — reçus entrants (versus amount_paid sorti du compte)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.9 CLTB_AMOUNT_RECD — encaissements]');
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_RECD),2),0)
+      INTO v_count, v_num
+    FROM CLTB_AMOUNT_RECD;
+    print_kv('  Nb enregistrements', TO_CHAR(v_count));
+    print_kv('  Cumul AMOUNT_RECD', TO_CHAR(v_num));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.9.b RECD_TYPE]');
+    FOR r IN (
+        SELECT NVL(RECD_TYPE,'<NULL>') rt, COUNT(*) nb,
+               NVL(ROUND(SUM(AMOUNT_RECD),2),0) sm
+        FROM CLTB_AMOUNT_RECD
+        GROUP BY NVL(RECD_TYPE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  RECD_TYPE=' || r.rt, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 6.10 CLTB_LIQ — volumétrie globale des liquidations
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.10 CLTB_LIQ — événements de liquidation]');
+    SELECT COUNT(*) INTO v_count FROM CLTB_LIQ;
+    print_kv('  Nb événements liquidation', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ACCOUNT_NUMBER) INTO v_count FROM CLTB_LIQ;
+    print_kv('  Comptes distincts liquidés', TO_CHAR(v_count));
+
+    -- 6.11 PAYMENT_STATUS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.11 Répartition PAYMENT_STATUS]');
+    FOR r IN (
+        SELECT NVL(PAYMENT_STATUS,'<NULL>') ps, COUNT(*) nb
+        FROM CLTB_LIQ
+        GROUP BY NVL(PAYMENT_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PAYMENT_STATUS=' || r.ps, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 6.12 AUTH_STAT (autorisées vs non) & SIMULATED
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.12 AUTH_STAT & SIMULATED]');
+    FOR r IN (
+        SELECT NVL(AUTH_STAT,'<NULL>') au, NVL(SIMULATED,'<NULL>') si, COUNT(*) nb
+        FROM CLTB_LIQ
+        GROUP BY NVL(AUTH_STAT,'<NULL>'), NVL(SIMULATED,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  AUTH_STAT=' || r.au || ' / SIMULATED=' || r.si, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 6.13 ** ALERTE RA ** — Liquidations reversées (REV_MAKER_ID non null)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.13 ** ALERTE RA ** — Liquidations reversées]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_LIQ
+    WHERE REV_MAKER_ID IS NOT NULL;
+    print_kv('  Liquidations avec REV_MAKER_ID non null', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.13.b Top 10 REV_MAKER_ID]');
+    FOR r IN (
+        SELECT REV_MAKER_ID, nb FROM (
+            SELECT REV_MAKER_ID, COUNT(*) nb
+            FROM CLTB_LIQ
+            WHERE REV_MAKER_ID IS NOT NULL
+            GROUP BY REV_MAKER_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  REV_MAKER_ID=' || r.REV_MAKER_ID, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 6.14 Top 10 MAKER_ID / CHECKER_ID (back-office concentration)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.14 Top 10 MAKER_ID (créateurs de liquidations)]');
+    FOR r IN (
+        SELECT MAKER_ID, nb FROM (
+            SELECT MAKER_ID, COUNT(*) nb
+            FROM CLTB_LIQ
+            GROUP BY MAKER_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  MAKER_ID=' || NVL(r.MAKER_ID,'<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.14.b Top 10 CHECKER_ID (autorisateurs)]');
+    FOR r IN (
+        SELECT CHECKER_ID, nb FROM (
+            SELECT CHECKER_ID, COUNT(*) nb
+            FROM CLTB_LIQ
+            GROUP BY CHECKER_ID
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CHECKER_ID=' || NVL(r.CHECKER_ID,'<NULL>'), TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 6.15 ** ALERTE RA ** — MAKER_ID = CHECKER_ID (self-authorization)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.15 ** ALERTE RA ** — MAKER_ID = CHECKER_ID (auto-authentication)]');
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_LIQ
+    WHERE MAKER_ID = CHECKER_ID
+      AND MAKER_ID IS NOT NULL;
+    print_kv('  Liquidations auto-authentifiées', TO_CHAR(v_count));
+
+    -- 6.16 PREPMNT_RECOMP_BASIS (impact recalcul intérêts prepayment)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.16 Base de recompute prepayment (PREPMNT_RECOMP_BASIS)]');
+    FOR r IN (
+        SELECT NVL(PREPMNT_RECOMP_BASIS,'<NULL>') pb, COUNT(*) nb
+        FROM CLTB_LIQ
+        GROUP BY NVL(PREPMNT_RECOMP_BASIS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PREPMNT_RECOMP_BASIS=' || r.pb, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 6.17 ** ALERTE RA ** — AMOUNT_EXCESS (trop-perçu non ventilé)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [6.17 ** ALERTE RA ** — AMOUNT_EXCESS > 0 (surpaiements)]');
+    SELECT COUNT(*), NVL(ROUND(SUM(AMOUNT_EXCESS),2),0)
+      INTO v_count, v_num
+    FROM CLTB_LIQ
+    WHERE AMOUNT_EXCESS > 0;
+    print_kv('  Liquidations avec AMOUNT_EXCESS > 0', TO_CHAR(v_count));
+    print_kv('  Cumul AMOUNT_EXCESS', TO_CHAR(v_num));
 END;
 /

@@ -3051,5 +3051,319 @@ BEGIN
     ) LOOP
         print_kv('  ACCOUNT_AUTO_CLOSED=' || r.ac, TO_CHAR(r.nb));
     END LOOP;
+
+    -- =========================================================
+    -- 13. SITB_CONTRACT_MASTER & SITB_CYCLE_DETAIL
+    --     Standing Instructions : impact sur revenus de commissions
+    --     et risques de leakage via APPLY_CHG_* flags.
+    --     Enjeux RA :
+    --       - APPLY_CHG_SUXS/PEXC/REJT : charges appliquées ou non
+    --         lors de succès / exécution partielle / rejet.
+    --         'N' systématique = perte de revenus de frais SI,
+    --       - ACTION_CODE_AMT : action si fonds insuffisants (R=reject,
+    --         P=partial, F=force). Proportion de rejets = frais perdus,
+    --       - MAX_RETRY_COUNT : nombre max de tentatives ;
+    --         retries nombreux sans frais = leakage,
+    --       - SITB_CYCLE_DETAIL : suivi des exécutions, retry_seq_no,
+    --         agrégation des montants exécutés LCY,
+    --       - SI_EXPIRY_DATE < aujourd'hui + SUBSYSTEM_STAT actif :
+    --         incohérence (SI expirées mais non clôturées),
+    --       - Auto-approbation (pas de CHECKER distinct) : contrôles
+    --         4 yeux contournés sur setup SI.
+    -- =========================================================
+    print_section('13. SITB_CONTRACT_MASTER / SITB_CYCLE_DETAIL — Standing Instructions');
+
+    -- 13.1 Volumétrie
+    DBMS_OUTPUT.PUT_LINE('  [13.1 Volumétrie SI]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER;
+    print_kv('  SITB_CONTRACT_MASTER (contrats SI)', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SITB_CYCLE_DETAIL;
+    print_kv('  SITB_CYCLE_DETAIL  (exécutions cycles)', TO_CHAR(v_count));
+
+    -- 13.2 SUBSYSTEM_STAT (statut SI)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.2 Statut SUBSYSTEM_STAT (SITB_CONTRACT_MASTER)]');
+    FOR r IN (
+        SELECT NVL(SUBSYSTEM_STAT,'<NULL>') st, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(SUBSYSTEM_STAT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  SUBSYSTEM_STAT=' || r.st, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.3 TRANSFER_TYPE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.3 TRANSFER_TYPE]');
+    FOR r IN (
+        SELECT NVL(TRANSFER_TYPE,'<NULL>') tt, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(TRANSFER_TYPE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TRANSFER_TYPE=' || r.tt, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.4 ACTION_CODE_AMT : action sur fonds insuffisants
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.4 ACTION_CODE_AMT (action si montant insuffisant)]');
+    FOR r IN (
+        SELECT NVL(ACTION_CODE_AMT,'<NULL>') ac, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(ACTION_CODE_AMT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACTION_CODE_AMT=' || r.ac, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.5 APPLY_CHG_SUXS (charge sur exécution réussie)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.5 APPLY_CHG_SUXS (charges sur succès)]');
+    FOR r IN (
+        SELECT NVL(APPLY_CHG_SUXS,'<NULL>') f, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(APPLY_CHG_SUXS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  APPLY_CHG_SUXS=' || r.f, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.6 APPLY_CHG_PEXC (exécution partielle)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.6 APPLY_CHG_PEXC (charges sur exécution partielle)]');
+    FOR r IN (
+        SELECT NVL(APPLY_CHG_PEXC,'<NULL>') f, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(APPLY_CHG_PEXC,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  APPLY_CHG_PEXC=' || r.f, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.7 APPLY_CHG_REJT (rejet)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.7 APPLY_CHG_REJT (charges sur rejet)]');
+    FOR r IN (
+        SELECT NVL(APPLY_CHG_REJT,'<NULL>') f, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(APPLY_CHG_REJT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  APPLY_CHG_REJT=' || r.f, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.8 ** ALERTE RA ** : SI sans AUCUNE charge paramétrée (SUXS=PEXC=REJT='N')
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.8 ** ALERTE RA ** SI sans charge paramétrée (SUXS=PEXC=REJT=N)]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
+     WHERE NVL(APPLY_CHG_SUXS,'N')='N'
+       AND NVL(APPLY_CHG_PEXC,'N')='N'
+       AND NVL(APPLY_CHG_REJT,'N')='N';
+    print_kv('  Nombre SI sans charges', TO_CHAR(v_count));
+    SELECT NVL(ROUND(SUM(SI_AMT),2),0) INTO v_num FROM SITB_CONTRACT_MASTER
+     WHERE NVL(APPLY_CHG_SUXS,'N')='N'
+       AND NVL(APPLY_CHG_PEXC,'N')='N'
+       AND NVL(APPLY_CHG_REJT,'N')='N';
+    print_kv('  Cumul SI_AMT concerné', TO_CHAR(v_num));
+
+    -- 13.9 ** ALERTE RA ** : SI rejet sans charge (APPLY_CHG_REJT='N')
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.9 ** ALERTE RA ** SI avec rejet non facturé (APPLY_CHG_REJT=N)]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
+     WHERE NVL(APPLY_CHG_REJT,'N')='N';
+    print_kv('  Nb SI rejet non facturé', TO_CHAR(v_count));
+
+    -- 13.10 MAX_RETRY_COUNT distribution
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.10 MAX_RETRY_COUNT (distribution)]');
+    FOR r IN (
+        SELECT NVL(TO_CHAR(MAX_RETRY_COUNT),'<NULL>') mx, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(TO_CHAR(MAX_RETRY_COUNT),'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MAX_RETRY_COUNT=' || r.mx, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.11 SI_AMT : devises & cumuls
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.11 SI_AMT par SI_AMT_CCY (TOP 10)]');
+    FOR r IN (
+        SELECT ccy, nb, sm FROM (
+            SELECT NVL(SI_AMT_CCY,'<NULL>') ccy,
+                   COUNT(*) nb,
+                   NVL(ROUND(SUM(SI_AMT),2),0) sm
+            FROM SITB_CONTRACT_MASTER
+            GROUP BY NVL(SI_AMT_CCY,'<NULL>')
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CCY=' || r.ccy, 'nb=' || TO_CHAR(r.nb) || ' | sum SI_AMT=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 13.12 ** ALERTE RA ** : SI expirées mais encore actives
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.12 ** ALERTE RA ** SI_EXPIRY_DATE passée mais SI non clôturée]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CONTRACT_MASTER
+     WHERE SI_EXPIRY_DATE IS NOT NULL
+       AND SI_EXPIRY_DATE < TRUNC(SYSDATE)
+       AND NVL(SUBSYSTEM_STAT,'A') NOT IN ('C','L','V','X');
+    print_kv('  Nb SI expirées mais actives', TO_CHAR(v_count));
+
+    -- 13.13 CHARGE_WHOM (qui paie la charge ?)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.13 CHARGE_WHOM]');
+    FOR r IN (
+        SELECT NVL(CHARGE_WHOM,'<NULL>') c, COUNT(*) nb
+        FROM SITB_CONTRACT_MASTER
+        GROUP BY NVL(CHARGE_WHOM,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CHARGE_WHOM=' || r.c, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.14 SITB_CYCLE_DETAIL : EVENT_CODE (types d'événements)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.14 EVENT_CODE (SITB_CYCLE_DETAIL) — TOP 15]');
+    FOR r IN (
+        SELECT ec, nb FROM (
+            SELECT NVL(EVENT_CODE,'<NULL>') ec, COUNT(*) nb
+            FROM SITB_CYCLE_DETAIL
+            GROUP BY NVL(EVENT_CODE,'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  EVENT_CODE=' || r.ec, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.15 RETRY_SEQ_NO distribution : volume de retries
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.15 RETRY_SEQ_NO (distribution SITB_CYCLE_DETAIL)]');
+    FOR r IN (
+        SELECT rsq, nb FROM (
+            SELECT NVL(TO_CHAR(RETRY_SEQ_NO),'<NULL>') rsq, COUNT(*) nb
+            FROM SITB_CYCLE_DETAIL
+            GROUP BY NVL(TO_CHAR(RETRY_SEQ_NO),'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  RETRY_SEQ_NO=' || r.rsq, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 13.16 ** ALERTE RA ** : retries nombreux (RETRY_SEQ_NO >= 3)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.16 ** ALERTE RA ** Retries >= 3 (SITB_CYCLE_DETAIL)]');
+    SELECT COUNT(*) INTO v_count FROM SITB_CYCLE_DETAIL
+     WHERE RETRY_SEQ_NO >= 3;
+    print_kv('  Nb lignes cycle avec retry >=3', TO_CHAR(v_count));
+
+    -- 13.17 AMT_EXECUTED_LCY / SI_AMT_EXECUTED cumuls
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.17 Cumuls d''exécution SITB_CYCLE_DETAIL]');
+    SELECT NVL(ROUND(SUM(AMT_EXECUTED_LCY),2),0),
+           NVL(ROUND(SUM(SI_AMT_EXECUTED),2),0)
+      INTO v_num, v_num2
+    FROM SITB_CYCLE_DETAIL;
+    print_kv('  SUM AMT_EXECUTED_LCY', TO_CHAR(v_num));
+    print_kv('  SUM SI_AMT_EXECUTED ', TO_CHAR(v_num2));
+
+    -- 13.18 AMT_DEBITED vs AMT_CREDITED (écarts)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.18 ** ALERTE RA ** Écarts AMT_DEBITED vs AMT_CREDITED]');
+    SELECT NVL(ROUND(SUM(AMT_DEBITED),2),0),
+           NVL(ROUND(SUM(AMT_CREDITED),2),0)
+      INTO v_num, v_num2
+    FROM SITB_CYCLE_DETAIL;
+    print_kv('  SUM AMT_DEBITED ', TO_CHAR(v_num));
+    print_kv('  SUM AMT_CREDITED', TO_CHAR(v_num2));
+    print_kv('  ECART (DR - CR) ', TO_CHAR(ROUND(v_num - v_num2,2)));
+
+    -- 13.19 Comptes débiteurs les plus sollicités (TOP 10)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.19 TOP DR_ACCOUNT (comptes SI débiteurs)]');
+    FOR r IN (
+        SELECT ac, nb, sm FROM (
+            SELECT DR_ACCOUNT ac, COUNT(*) nb,
+                   NVL(ROUND(SUM(AMT_DEBITED),2),0) sm
+            FROM SITB_CYCLE_DETAIL
+            WHERE DR_ACCOUNT IS NOT NULL
+            GROUP BY DR_ACCOUNT
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  DR=' || r.ac, 'nb=' || TO_CHAR(r.nb) || ' | debit=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 13.20 Comptes créditeurs les plus sollicités (TOP 10)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.20 TOP CR_ACCOUNT (comptes SI créditeurs)]');
+    FOR r IN (
+        SELECT ac, nb, sm FROM (
+            SELECT CR_ACCOUNT ac, COUNT(*) nb,
+                   NVL(ROUND(SUM(AMT_CREDITED),2),0) sm
+            FROM SITB_CYCLE_DETAIL
+            WHERE CR_ACCOUNT IS NOT NULL
+            GROUP BY CR_ACCOUNT
+            ORDER BY sm DESC NULLS LAST
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  CR=' || r.ac, 'nb=' || TO_CHAR(r.nb) || ' | credit=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 13.21 Volumétrie par année d'exécution (RETRY_DATE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.21 Exécutions SI par année (RETRY_DATE)]');
+    FOR r IN (
+        SELECT TO_CHAR(RETRY_DATE,'YYYY') an, COUNT(*) nb,
+               NVL(ROUND(SUM(AMT_EXECUTED_LCY),2),0) sm
+        FROM SITB_CYCLE_DETAIL
+        WHERE RETRY_DATE IS NOT NULL
+        GROUP BY TO_CHAR(RETRY_DATE,'YYYY')
+        ORDER BY an
+    ) LOOP
+        print_kv('  ' || r.an,
+                 'nb=' || TO_CHAR(r.nb) || ' | executed_lcy=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 13.22 Contrats SI les plus exécutés (TOP 10)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.22 TOP contrats SI par nombre d''exécutions]');
+    FOR r IN (
+        SELECT ref, nb, sm FROM (
+            SELECT CONTRACT_REF_NO ref, COUNT(*) nb,
+                   NVL(ROUND(SUM(AMT_EXECUTED_LCY),2),0) sm
+            FROM SITB_CYCLE_DETAIL
+            GROUP BY CONTRACT_REF_NO
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  Ref=' || r.ref, 'nb=' || TO_CHAR(r.nb) || ' | lcy=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 13.23 ** ALERTE RA ** : cycles avec SI_AMT_EXECUTED < SI_AMT (exec partielles)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.23 ** ALERTE RA ** Exécutions partielles vs montant SI défini]');
+    SELECT COUNT(*) INTO v_count
+    FROM SITB_CYCLE_DETAIL d
+    JOIN SITB_CONTRACT_MASTER m ON m.CONTRACT_REF_NO = d.CONTRACT_REF_NO
+    WHERE d.SI_AMT_EXECUTED IS NOT NULL
+      AND m.SI_AMT IS NOT NULL
+      AND d.SI_AMT_EXECUTED > 0
+      AND d.SI_AMT_EXECUTED < m.SI_AMT;
+    print_kv('  Nb cycles en exécution partielle', TO_CHAR(v_count));
+
+    -- 13.24 PRIORITY (distribution)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [13.24 PRIORITY (SITB_CONTRACT_MASTER)]');
+    FOR r IN (
+        SELECT pr, nb FROM (
+            SELECT NVL(TO_CHAR(PRIORITY),'<NULL>') pr, COUNT(*) nb
+            FROM SITB_CONTRACT_MASTER
+            GROUP BY NVL(TO_CHAR(PRIORITY),'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 10
+    ) LOOP
+        print_kv('  PRIORITY=' || r.pr, TO_CHAR(r.nb));
+    END LOOP;
 END;
 /

@@ -3635,5 +3635,468 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('  6) FX réévaluations à P/L nul : contrôler le process EOD.');
     DBMS_OUTPUT.PUT_LINE('  7) MAKER=CHECKER : revoir la séparation des tâches.');
     DBMS_OUTPUT.PUT_LINE(v_sep);
+
+    -- =========================================================
+    -- 15. REFERENTIELS, CODIFICATION & SECURITE (Exploration)
+    --     Objectif : produire une photographie du paramétrage
+    --     structurant pour calibrer ensuite le script d'audit :
+    --       - Nomenclature GL & plan de comptes (GLTB_GL_BAL,
+    --         STTB_ACCOUNT.GL_CATEGORY, AC_NATURAL_GL, AC_CLASS),
+    --       - Classes de comptes (STTM_ACCOUNT_CLASS),
+    --       - Catalogue produits (CSTM_PRODUCT, LDTM_PRODUCT_MASTER,
+    --         CLTM_PRODUCT_COMP_FRM_EXPR),
+    --       - Codes transactions (STTM_TRN_CODE),
+    --       - Catégories clients (STTM_CUSTOMER_CAT),
+    --       - Branches (FBTM_BRANCH),
+    --       - Modules fonctionnels (SMTB_MODULES),
+    --       - Schémas comptables par Amount Tag (CSTB_AMOUNT_TAG),
+    --       - Utilisateurs & rôles (SMTB_USER, SMTB_ROLE_MASTER,
+    --         SMTB_USER_ROLE, SMTB_USER_DISABLE, SMTB_USERLOG_DETAILS,
+    --         FBTB_USER),
+    --       - Paramètres de sécurité (SMTB_PARAMETERS),
+    --       - Langues (SMTB_LANGUAGE).
+    --     NB : cette section est purement descriptive ; les montants
+    --     sont décomptés pour jauger la volumétrie de chaque
+    --     référentiel, sans hypothèse d'anomalie.
+    -- =========================================================
+    print_section('15. REFERENTIELS, CODIFICATION & SECURITE');
+
+    -- 15.1 Branches (FBTM_BRANCH)
+    DBMS_OUTPUT.PUT_LINE('  [15.1 Branches — FBTM_BRANCH]');
+    SELECT COUNT(*) INTO v_count FROM FBTM_BRANCH;
+    print_kv('  Nb branches', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT BRANCH_CODE, BRANCH_NAME,
+               NVL(END_OF_INPUT,'<NULL>') eoi
+        FROM FBTM_BRANCH
+        ORDER BY BRANCH_CODE
+    ) LOOP
+        print_kv('  Code=' || r.BRANCH_CODE,
+                 'nom=' || NVL(r.BRANCH_NAME,'<NULL>') || ' | EOI=' || r.eoi);
+    END LOOP;
+
+    -- 15.2 Modules fonctionnels (SMTB_MODULES)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.2 Modules fonctionnels — SMTB_MODULES]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_MODULES;
+    print_kv('  Nb modules', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT MODULE_ID, MODULE_DESC
+        FROM SMTB_MODULES
+        ORDER BY MODULE_ID
+    ) LOOP
+        print_kv('  ' || r.MODULE_ID, NVL(r.MODULE_DESC,'<NULL>'));
+    END LOOP;
+
+    -- 15.3 Classes de comptes (STTM_ACCOUNT_CLASS)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.3 Classes de comptes — STTM_ACCOUNT_CLASS]');
+    SELECT COUNT(*) INTO v_count FROM STTM_ACCOUNT_CLASS;
+    print_kv('  Nb classes', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT ACCOUNT_CLASS, DESCRIPTION
+        FROM STTM_ACCOUNT_CLASS
+        ORDER BY ACCOUNT_CLASS
+    ) LOOP
+        print_kv('  ' || r.ACCOUNT_CLASS, NVL(r.DESCRIPTION,'<NULL>'));
+    END LOOP;
+
+    -- 15.4 Catégories clients (STTM_CUSTOMER_CAT)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.4 Catégories clients — STTM_CUSTOMER_CAT]');
+    SELECT COUNT(*) INTO v_count FROM STTM_CUSTOMER_CAT;
+    print_kv('  Nb catégories clients', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT CUST_CAT, CUST_CAT_DESC,
+               NVL(RECORD_STAT,'<NULL>') rs,
+               NVL(AUTH_STAT,'<NULL>') aus
+        FROM STTM_CUSTOMER_CAT
+        ORDER BY CUST_CAT
+    ) LOOP
+        print_kv('  ' || r.CUST_CAT,
+                 NVL(r.CUST_CAT_DESC,'<NULL>') || ' | REC=' || r.rs || ' / AUTH=' || r.aus);
+    END LOOP;
+
+    -- 15.5 Codes transactions (STTM_TRN_CODE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.5 Codes transactions — STTM_TRN_CODE (volumétrie + TOP 30)]');
+    SELECT COUNT(*) INTO v_count FROM STTM_TRN_CODE;
+    print_kv('  Nb codes transaction', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT TRN_CODE, TRN_DESC FROM (
+            SELECT TRN_CODE, TRN_DESC
+            FROM STTM_TRN_CODE
+            ORDER BY TRN_CODE
+        ) WHERE ROWNUM <= 30
+    ) LOOP
+        print_kv('  TRN=' || r.TRN_CODE, NVL(r.TRN_DESC,'<NULL>'));
+    END LOOP;
+
+    -- 15.6 Catalogue produits globaux (CSTM_PRODUCT)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.6 Produits CORE — CSTM_PRODUCT (volumétrie + répartition par module)]');
+    SELECT COUNT(*) INTO v_count FROM CSTM_PRODUCT;
+    print_kv('  Nb produits', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(MODULE,'<NULL>') mod_id, COUNT(*) nb
+        FROM CSTM_PRODUCT
+        GROUP BY NVL(MODULE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MODULE=' || r.mod_id, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.6.b TOP 30 produits CSTM
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.6.b TOP 30 produits (CSTM_PRODUCT)]');
+    FOR r IN (
+        SELECT PRODUCT_CODE, PRODUCT_DESCRIPTION, MODULE FROM (
+            SELECT PRODUCT_CODE, PRODUCT_DESCRIPTION, MODULE
+            FROM CSTM_PRODUCT
+            ORDER BY MODULE, PRODUCT_CODE
+        ) WHERE ROWNUM <= 30
+    ) LOOP
+        print_kv('  [' || NVL(r.MODULE,'?') || '] ' || r.PRODUCT_CODE,
+                 NVL(r.PRODUCT_DESCRIPTION,'<NULL>'));
+    END LOOP;
+
+    -- 15.7 Produits LD (LDTM_PRODUCT_MASTER)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.7 Produits LD — LDTM_PRODUCT_MASTER]');
+    SELECT COUNT(*) INTO v_count FROM LDTM_PRODUCT_MASTER;
+    print_kv('  Nb produits LD', TO_CHAR(v_count));
+
+    -- 15.8 Formules composants CL (CLTM_PRODUCT_COMP_FRM_EXPR)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.8 Formules composants CL — CLTM_PRODUCT_COMP_FRM_EXPR]');
+    SELECT COUNT(*) INTO v_count FROM CLTM_PRODUCT_COMP_FRM_EXPR;
+    print_kv('  Nb lignes formule', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT COMPONENT_NAME, COUNT(*) nb, COUNT(DISTINCT PRODUCT_CODE) nprod
+        FROM CLTM_PRODUCT_COMP_FRM_EXPR
+        GROUP BY COMPONENT_NAME
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  COMPONENT=' || r.COMPONENT_NAME,
+                 'nb_lignes=' || TO_CHAR(r.nb) || ' | nb_produits=' || TO_CHAR(r.nprod));
+    END LOOP;
+
+    -- 15.9 STTB_ACCOUNT — plan de comptes interne (GL & natural GL)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.9 Nomenclature STTB_ACCOUNT — volumétrie & catégories GL]');
+    SELECT COUNT(*) INTO v_count FROM STTB_ACCOUNT;
+    print_kv('  Nb comptes (STTB_ACCOUNT)', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(GL_CATEGORY,'<NULL>') gc, COUNT(*) nb
+        FROM STTB_ACCOUNT
+        GROUP BY NVL(GL_CATEGORY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  GL_CATEGORY=' || r.gc, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.9.b Répartition par AC_CLASS (classe de compte)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.9.b STTB_ACCOUNT — TOP 20 AC_CLASS]');
+    FOR r IN (
+        SELECT c, nb FROM (
+            SELECT NVL(AC_CLASS,'<NULL>') c, COUNT(*) nb
+            FROM STTB_ACCOUNT
+            GROUP BY NVL(AC_CLASS,'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  AC_CLASS=' || r.c, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.9.c Top 20 AC_NATURAL_GL
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.9.c STTB_ACCOUNT — TOP 20 AC_NATURAL_GL]');
+    FOR r IN (
+        SELECT g, nb FROM (
+            SELECT NVL(AC_NATURAL_GL,'<NULL>') g, COUNT(*) nb
+            FROM STTB_ACCOUNT
+            GROUP BY NVL(AC_NATURAL_GL,'<NULL>')
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 20
+    ) LOOP
+        print_kv('  AC_NATURAL_GL=' || r.g, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.10 GLTB_GL_BAL — photographie du plan comptable (GL distincts)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.10 Plan comptable — GLTB_GL_BAL (GL distincts, CATEGORY, LEAF)]');
+    SELECT COUNT(DISTINCT GL_CODE) INTO v_count FROM GLTB_GL_BAL;
+    print_kv('  Nb GL distincts', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(CATEGORY,'<NULL>') c, COUNT(DISTINCT GL_CODE) nb
+        FROM GLTB_GL_BAL
+        GROUP BY NVL(CATEGORY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CATEGORY=' || r.c, 'nb GL=' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.10.b Répartition LEAF (feuille / noeud)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.10.b LEAF (Y = feuille, N = noeud hiérarchique)]');
+    FOR r IN (
+        SELECT NVL(LEAF,'<NULL>') l, COUNT(DISTINCT GL_CODE) nb
+        FROM GLTB_GL_BAL
+        GROUP BY NVL(LEAF,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LEAF=' || r.l, 'nb GL=' || TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.10.c Top 30 GL par mouvements (toutes catégories)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.10.c TOP 30 GL par |DR_MOV_LCY|+|CR_MOV_LCY|]');
+    FOR r IN (
+        SELECT gl, cat, mvt FROM (
+            SELECT GL_CODE gl, MAX(CATEGORY) cat,
+                   ROUND(SUM(ABS(NVL(DR_MOV_LCY,0)) + ABS(NVL(CR_MOV_LCY,0))),2) mvt
+            FROM GLTB_GL_BAL
+            GROUP BY GL_CODE
+            ORDER BY mvt DESC
+        ) WHERE ROWNUM <= 30
+    ) LOOP
+        print_kv('  GL=' || r.gl || ' (' || r.cat || ')', 'mouvements=' || TO_CHAR(r.mvt));
+    END LOOP;
+
+    -- 15.11 Schémas comptables — CSTB_AMOUNT_TAG par MODULE & nature
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.11 Amount Tags — CSTB_AMOUNT_TAG ventilation par MODULE]');
+    FOR r IN (
+        SELECT MODULE, COUNT(*) nb,
+               SUM(CASE WHEN NVL(INTEREST_ALLOWED,'N')  = 'Y' THEN 1 ELSE 0 END) nb_int,
+               SUM(CASE WHEN NVL(COMMISSION_ALLOWED,'N')= 'Y' THEN 1 ELSE 0 END) nb_com,
+               SUM(CASE WHEN NVL(CHARGE_ALLOWED,'N')    = 'Y' THEN 1 ELSE 0 END) nb_chg,
+               SUM(CASE WHEN NVL(TAX_ALLOWED,'N')       = 'Y' THEN 1 ELSE 0 END) nb_tax
+        FROM CSTB_AMOUNT_TAG
+        GROUP BY MODULE
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  MODULE=' || NVL(r.MODULE,'<NULL>'),
+                 'tags=' || TO_CHAR(r.nb) ||
+                 ' | INT=' || TO_CHAR(r.nb_int) ||
+                 ' | COM=' || TO_CHAR(r.nb_com) ||
+                 ' | CHG=' || TO_CHAR(r.nb_chg) ||
+                 ' | TAX=' || TO_CHAR(r.nb_tax));
+    END LOOP;
+
+    -- 15.11.b AMOUNT_TAG_TYPE distribution (S=System, U=User...)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.11.b AMOUNT_TAG_TYPE]');
+    FOR r IN (
+        SELECT NVL(AMOUNT_TAG_TYPE,'<NULL>') t, COUNT(*) nb
+        FROM CSTB_AMOUNT_TAG
+        GROUP BY NVL(AMOUNT_TAG_TYPE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TYPE=' || r.t, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.12 Utilisateurs système (SMTB_USER)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.12 Utilisateurs — SMTB_USER]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER;
+    print_kv('  Nb utilisateurs', TO_CHAR(v_count));
+
+    -- Répartition par USER_STATUS
+    FOR r IN (
+        SELECT NVL(USER_STATUS,'<NULL>') s, COUNT(*) nb
+        FROM SMTB_USER
+        GROUP BY NVL(USER_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  USER_STATUS=' || r.s, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- Répartition par USER_CATEGORY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.12.b USER_CATEGORY]');
+    FOR r IN (
+        SELECT NVL(USER_CATEGORY,'<NULL>') c, COUNT(*) nb
+        FROM SMTB_USER
+        GROUP BY NVL(USER_CATEGORY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  USER_CATEGORY=' || r.c, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- Volumétrie START_DATE / END_DATE (cycle de vie)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.12.c SMTB_USER — cycle de vie]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER WHERE END_DATE IS NOT NULL;
+    print_kv('  Nb users avec END_DATE renseignée', TO_CHAR(v_count));
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER
+     WHERE END_DATE IS NOT NULL AND END_DATE < TRUNC(SYSDATE);
+    print_kv('  Nb users END_DATE passée', TO_CHAR(v_count));
+
+    -- 15.13 Rôles (SMTB_ROLE_MASTER)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.13 Rôles — SMTB_ROLE_MASTER]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_ROLE_MASTER;
+    print_kv('  Nb rôles', TO_CHAR(v_count));
+
+    FOR r IN (
+        SELECT NVL(RECORD_STAT,'<NULL>') rs, COUNT(*) nb
+        FROM SMTB_ROLE_MASTER
+        GROUP BY NVL(RECORD_STAT,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  RECORD_STAT=' || r.rs, TO_CHAR(r.nb));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.13.b TOP 30 rôles]');
+    FOR r IN (
+        SELECT ROLE_ID, ROLE_DESCRIPTION FROM (
+            SELECT ROLE_ID, ROLE_DESCRIPTION
+            FROM SMTB_ROLE_MASTER
+            ORDER BY ROLE_ID
+        ) WHERE ROWNUM <= 30
+    ) LOOP
+        print_kv('  ' || r.ROLE_ID, NVL(r.ROLE_DESCRIPTION,'<NULL>'));
+    END LOOP;
+
+    -- 15.14 Affectations USER-ROLE (SMTB_USER_ROLE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.14 Affectations USER <-> ROLE — SMTB_USER_ROLE]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_ROLE;
+    print_kv('  Nb affectations', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_ROLE;
+    print_kv('  Users distincts affectés', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT ROLE_ID) INTO v_count FROM SMTB_USER_ROLE;
+    print_kv('  Rôles distincts utilisés', TO_CHAR(v_count));
+
+    -- TOP 15 users par nb de rôles
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.14.b TOP 15 users par nombre de rôles attribués]');
+    FOR r IN (
+        SELECT uid, nr FROM (
+            SELECT USER_ID uid, COUNT(DISTINCT ROLE_ID) nr
+            FROM SMTB_USER_ROLE
+            GROUP BY USER_ID
+            ORDER BY nr DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  USER=' || r.uid, 'nb_rôles=' || TO_CHAR(r.nr));
+    END LOOP;
+
+    -- TOP 15 rôles par nb d'utilisateurs affectés
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.14.c TOP 15 rôles par nombre d''users]');
+    FOR r IN (
+        SELECT rid, nu FROM (
+            SELECT ROLE_ID rid, COUNT(DISTINCT USER_ID) nu
+            FROM SMTB_USER_ROLE
+            GROUP BY ROLE_ID
+            ORDER BY nu DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ROLE=' || r.rid, 'nb_users=' || TO_CHAR(r.nu));
+    END LOOP;
+
+    -- 15.15 Désactivations utilisateurs (SMTB_USER_DISABLE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.15 Désactivations — SMTB_USER_DISABLE]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USER_DISABLE;
+    print_kv('  Nb évènements de désactivation', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USER_ID) INTO v_count FROM SMTB_USER_DISABLE;
+    print_kv('  Users distincts désactivés', TO_CHAR(v_count));
+
+    -- 15.16 Logs utilisateur (SMTB_USERLOG_DETAILS)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.16 Logs — SMTB_USERLOG_DETAILS]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_USERLOG_DETAILS;
+    print_kv('  Nb lignes log users', TO_CHAR(v_count));
+    BEGIN
+        SELECT NVL(ROUND(SUM(NO_CUMULATIVE_LOGINS),0),0),
+               NVL(ROUND(MAX(NO_SUCCESSIVE_LOGINS),0),0)
+          INTO v_num, v_num2
+        FROM SMTB_USERLOG_DETAILS;
+        print_kv('  Cumul logins (SUM)', TO_CHAR(v_num));
+        print_kv('  Max logins consécutifs', TO_CHAR(v_num2));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  SMTB_USERLOG_DETAILS (erreur)', SQLERRM);
+    END;
+
+    -- 15.17 Paramètres sécurité (SMTB_PARAMETERS — 1 ligne)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.17 Paramètres sécurité — SMTB_PARAMETERS]');
+    BEGIN
+        FOR r IN (
+            SELECT NVL(TO_CHAR(MIN_PWD_LENGTH),'<NULL>') minp,
+                   NVL(TO_CHAR(MAX_PWD_LENGTH),'<NULL>') maxp,
+                   NVL(TO_CHAR(PWD_CHANGE_AFTER),'<NULL>') pca,
+                   NVL(TO_CHAR(PWD_EXPIRY_MSG_DAYS),'<NULL>') pem,
+                   NVL(TO_CHAR(FREQ_PWD_CHG),'<NULL>') fpc,
+                   NVL(TO_CHAR(ARCHIVAL_PERIOD),'<NULL>') arc
+            FROM SMTB_PARAMETERS
+        ) LOOP
+            print_kv('  MIN_PWD_LENGTH',         r.minp);
+            print_kv('  MAX_PWD_LENGTH',         r.maxp);
+            print_kv('  PWD_CHANGE_AFTER (j)',   r.pca);
+            print_kv('  PWD_EXPIRY_MSG_DAYS',    r.pem);
+            print_kv('  FREQ_PWD_CHG',           r.fpc);
+            print_kv('  ARCHIVAL_PERIOD',        r.arc);
+        END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  SMTB_PARAMETERS (erreur)', SQLERRM);
+    END;
+
+    -- 15.18 Langues (SMTB_LANGUAGE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.18 Langues — SMTB_LANGUAGE]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_LANGUAGE;
+    print_kv('  Nb langues', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT LANG_CODE, LANG_NAME,
+               NVL(LANG_ISO_CODE,'<NULL>') iso
+        FROM SMTB_LANGUAGE
+        ORDER BY LANG_CODE
+    ) LOOP
+        print_kv('  ' || r.LANG_CODE,
+                 NVL(r.LANG_NAME,'<NULL>') || ' | ISO=' || r.iso);
+    END LOOP;
+
+    -- 15.19 Front-Branch users (FBTB_USER)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.19 Front-Branch users — FBTB_USER]');
+    SELECT COUNT(*) INTO v_count FROM FBTB_USER;
+    print_kv('  Nb FBTB_USER', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT USERID) INTO v_count FROM FBTB_USER;
+    print_kv('  USERID distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT BRANCHCODE) INTO v_count FROM FBTB_USER;
+    print_kv('  BRANCHCODE distincts', TO_CHAR(v_count));
+    FOR r IN (
+        SELECT NVL(LOGINSTATUS,'<NULL>') ls, COUNT(*) nb
+        FROM FBTB_USER
+        GROUP BY NVL(LOGINSTATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  LOGINSTATUS=' || r.ls, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 15.20 Descriptions de fonctions (SMTB_FUNCTION_DESCRIPTION)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [15.20 Fonctions métier — SMTB_FUNCTION_DESCRIPTION]');
+    SELECT COUNT(*) INTO v_count FROM SMTB_FUNCTION_DESCRIPTION;
+    print_kv('  Nb lignes', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT FUNCTION_ID) INTO v_count FROM SMTB_FUNCTION_DESCRIPTION;
+    print_kv('  FUNCTION_ID distincts', TO_CHAR(v_count));
+    SELECT COUNT(DISTINCT LANG_CODE) INTO v_count FROM SMTB_FUNCTION_DESCRIPTION;
+    print_kv('  Langues couvertes', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('FIN SECTION 15 — REFERENTIELS & SECURITE');
+    DBMS_OUTPUT.PUT_LINE('Les résultats ci-dessus permettent de cadrer le périmètre');
+    DBMS_OUTPUT.PUT_LINE('et d''affiner le script d''audit cible (sélection des modules,');
+    DBMS_OUTPUT.PUT_LINE('des classes de comptes, des rôles à scruter, des règles de');
+    DBMS_OUTPUT.PUT_LINE('passation MAKER/CHECKER, etc.)');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
 END;
 /

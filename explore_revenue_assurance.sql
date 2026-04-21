@@ -379,7 +379,7 @@ BEGIN
         SELECT MODULE, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
         FROM ACTB_HISTORY
         GROUP BY MODULE
-        ORDER BY sm DESC NULLS LAST
+        ORDER BY sm DESC
     ) LOOP
         print_kv('  MODULE = ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
     END LOOP;
@@ -394,7 +394,7 @@ BEGIN
                    ROUND(SUM(LCY_AMOUNT),2) sm
             FROM ACTB_HISTORY
             GROUP BY AMOUNT_TAG
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 25
     ) LOOP
         print_kv('  TAG ' || r.AMOUNT_TAG, 'nb=' || TO_CHAR(r.nb) || ' | sum LCY=' || TO_CHAR(r.sm));
@@ -477,7 +477,7 @@ BEGIN
         )
           AND h.TRN_DT IS NOT NULL
         GROUP BY TO_CHAR(h.TRN_DT, 'YYYY'), h.MODULE
-        ORDER BY annee, sm DESC NULLS LAST
+        ORDER BY annee, sm DESC
     ) LOOP
         print_kv('  ' || r.annee || ' / ' || r.MODULE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
     END LOOP;
@@ -495,7 +495,7 @@ BEGIN
                   AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
             )
             GROUP BY h.AC_BRANCH
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  AGENCE ' || r.AC_BRANCH, 'sum=' || TO_CHAR(r.sm) || ' | nb=' || TO_CHAR(r.nb));
@@ -516,7 +516,7 @@ BEGIN
                   AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
             )
             GROUP BY h.AC_CCY
-            ORDER BY sm_lcy DESC NULLS LAST
+            ORDER BY sm_lcy DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  CCY ' || r.AC_CCY, 'LCY=' || TO_CHAR(r.sm_lcy) || ' | FCY=' || TO_CHAR(r.sm_fcy) || ' | nb=' || TO_CHAR(r.nb));
@@ -580,7 +580,7 @@ BEGIN
                   AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
             )
             GROUP BY h.TRN_CODE
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  TRN_CODE ' || r.TRN_CODE, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -599,7 +599,7 @@ BEGIN
                   AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
             )
             GROUP BY h.PRODUCT
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  PRODUCT ' || r.PRODUCT, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -618,7 +618,7 @@ BEGIN
                   AND (t.INTEREST_ALLOWED = 'Y' OR t.CHARGE_ALLOWED = 'Y' OR t.COMMISSION_ALLOWED = 'Y')
             )
             GROUP BY h.USER_ID
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  USER ' || r.USER_ID, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -646,7 +646,7 @@ BEGIN
             FROM ACTB_HISTORY
             WHERE ORIG_PNL_GL IS NOT NULL AND ORIG_PNL_GL <> ' '
             GROUP BY ORIG_PNL_GL
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  ORIG_PNL_GL ' || r.ORIG_PNL_GL, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1010,7 +1010,7 @@ BEGIN
             FROM CLTB_ACCOUNT_SCHEDULES
             WHERE AMOUNT_OVERDUE > 0
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1073,7 +1073,7 @@ BEGIN
             FROM CLTB_ACCOUNT_SCHEDULES
             WHERE AMOUNT_WAIVED > 0
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1097,7 +1097,7 @@ BEGIN
             FROM CLTB_ACCOUNT_SCHEDULES
             WHERE WRITEOFF_AMT > 0
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1121,7 +1121,7 @@ BEGIN
             FROM CLTB_ACCOUNT_SCHEDULES
             WHERE ACCRUED_AMOUNT > 0
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1220,7 +1220,7 @@ BEGIN
             FROM CLTB_ACCOUNT_SCHEDULES
             WHERE AMOUNT_OVERDUE > 0
             GROUP BY ACCOUNT_NUMBER
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  Compte ' || r.ACCOUNT_NUMBER, 'nb=' || TO_CHAR(r.nb) || ' | overdue=' || TO_CHAR(r.sm));
@@ -1282,7 +1282,7 @@ BEGIN
             SELECT COMPONENT_NAME, COUNT(*) nb, ROUND(SUM(AMOUNT_PAID),2) sm
             FROM CLTB_AMOUNT_PAID
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1306,7 +1306,7 @@ BEGIN
             FROM CLTB_AMOUNT_PAID
             WHERE AMOUNT_WAIVED > 0
             GROUP BY COMPONENT_NAME
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  ' || NVL(r.COMPONENT_NAME,'<NULL>'), 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1320,7 +1320,7 @@ BEGIN
             FROM CLTB_AMOUNT_PAID
             WHERE AMOUNT_WAIVED > 0
             GROUP BY ACCOUNT_NUMBER
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  Compte ' || r.ACCOUNT_NUMBER, 'nb=' || TO_CHAR(r.nb) || ' | sum=' || TO_CHAR(r.sm));
@@ -1664,7 +1664,7 @@ BEGIN
             SELECT PRODUCT_CODE, COUNT(*) nb, ROUND(SUM(AMOUNT_FINANCED),2) sm
             FROM CLTB_ACCOUNT_APPS_MASTER
             GROUP BY PRODUCT_CODE
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  PRODUCT=' || NVL(r.PRODUCT_CODE,'<NULL>'),
@@ -2111,12 +2111,12 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [8.16 AMORTISATION_TYPE]');
     FOR r IN (
-        SELECT NVL(AMORTISATION_TYPE,'<NULL>') at, COUNT(*) nb
+        SELECT NVL(AMORTISATION_TYPE,'<NULL>') atyp, COUNT(*) nb
         FROM LDTB_CONTRACT_PREFERENCE
         GROUP BY NVL(AMORTISATION_TYPE,'<NULL>')
         ORDER BY nb DESC
     ) LOOP
-        print_kv('  AMORTISATION_TYPE=' || r.at, TO_CHAR(r.nb));
+        print_kv('  AMORTISATION_TYPE=' || r.atyp, TO_CHAR(r.nb));
     END LOOP;
 
     -- 8.17 MAX_INT_PAY_PERIOD & MAX_RATE_REV_PERIOD
@@ -2139,7 +2139,7 @@ BEGIN
             SELECT COUNTERPARTY, COUNT(*) nb, ROUND(SUM(LCY_AMOUNT),2) sm
             FROM LDTB_CONTRACT_MASTER
             GROUP BY COUNTERPARTY
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  CP=' || NVL(r.COUNTERPARTY,'<NULL>'),
@@ -2263,17 +2263,17 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [9.8.b Top 15 comptes avec UDE_VARIANCE négative (clients favorisés)]');
     FOR r IN (
-        SELECT ACC, BRN, PROD, variance, UDE_ID FROM (
+        SELECT ACC, BRN, PROD, var_amt, UDE_ID FROM (
             SELECT ACC, BRN, PROD, UDE_ID,
-                   ROUND(MIN(UDE_VARIANCE),6) variance
+                   ROUND(MIN(UDE_VARIANCE),6) var_amt
             FROM ICTM_ACC_UDEVALS
             WHERE UDE_VARIANCE < 0
             GROUP BY ACC, BRN, PROD, UDE_ID
-            ORDER BY variance ASC
+            ORDER BY var_amt ASC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  Cpt=' || r.ACC || ' / BRN=' || r.BRN || ' / PROD=' || r.PROD || ' / UDE=' || r.UDE_ID,
-                 'variance=' || TO_CHAR(r.variance));
+                 'variance=' || TO_CHAR(r.var_amt));
     END LOOP;
 
     -- 9.9 BASE_RATE vs BASE_SPREAD (override structure)
@@ -2457,7 +2457,7 @@ BEGIN
             FROM GLTB_GL_BAL
             WHERE CATEGORY = 'I'
             GROUP BY GL_CODE
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  GL=' || NVL(r.GL_CODE,'<NULL>'), 'CR_MOV_LCY=' || TO_CHAR(r.sm));
@@ -2472,7 +2472,7 @@ BEGIN
             FROM GLTB_GL_BAL
             WHERE CATEGORY = 'E'
             GROUP BY GL_CODE
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 20
     ) LOOP
         print_kv('  GL=' || NVL(r.GL_CODE,'<NULL>'), 'DR_MOV_LCY=' || TO_CHAR(r.sm));
@@ -2507,7 +2507,7 @@ BEGIN
         FROM GLTB_GL_BAL
         WHERE CATEGORY = 'I'
         GROUP BY CCY_CODE
-        ORDER BY sm DESC NULLS LAST
+        ORDER BY sm DESC
     ) LOOP
         print_kv('  CCY=' || NVL(r.CCY_CODE,'<NULL>'),
                  'nb=' || TO_CHAR(r.nb) || ' | CR_MOV_LCY=' || TO_CHAR(r.sm));
@@ -2522,7 +2522,7 @@ BEGIN
             FROM GLTB_GL_BAL
             WHERE CATEGORY = 'I'
             GROUP BY BRANCH_CODE
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  BRN=' || NVL(r.BRANCH_CODE,'<NULL>'),
@@ -2710,7 +2710,7 @@ BEGIN
                    ROUND(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),2) pnl
             FROM RVTB_ACC_REVAL
             GROUP BY ACCOUNT, CCY
-            ORDER BY ABS(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT)) DESC NULLS LAST
+            ORDER BY ABS(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT)) DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
         print_kv('  ACC=' || r.ACCOUNT || ' / CCY=' || r.CCY, 'P&L=' || TO_CHAR(r.pnl));
@@ -3195,7 +3195,7 @@ BEGIN
                    NVL(ROUND(SUM(SI_AMT),2),0) sm
             FROM SITB_CONTRACT_MASTER
             GROUP BY NVL(SI_AMT_CCY,'<NULL>')
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  CCY=' || r.ccy, 'nb=' || TO_CHAR(r.nb) || ' | sum SI_AMT=' || TO_CHAR(r.sm));
@@ -3288,7 +3288,7 @@ BEGIN
             FROM SITB_CYCLE_DETAIL
             WHERE DR_ACCOUNT IS NOT NULL
             GROUP BY DR_ACCOUNT
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  DR=' || r.ac, 'nb=' || TO_CHAR(r.nb) || ' | debit=' || TO_CHAR(r.sm));
@@ -3304,7 +3304,7 @@ BEGIN
             FROM SITB_CYCLE_DETAIL
             WHERE CR_ACCOUNT IS NOT NULL
             GROUP BY CR_ACCOUNT
-            ORDER BY sm DESC NULLS LAST
+            ORDER BY sm DESC
         ) WHERE ROWNUM <= 10
     ) LOOP
         print_kv('  CR=' || r.ac, 'nb=' || TO_CHAR(r.nb) || ' | credit=' || TO_CHAR(r.sm));

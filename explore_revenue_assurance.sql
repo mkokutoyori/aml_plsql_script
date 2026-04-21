@@ -2572,5 +2572,219 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('  [10.15 GL avec HAS_TOV=Y (turnover journalier)]');
     SELECT COUNT(*) INTO v_count FROM GLTB_GL_BAL WHERE HAS_TOV = 'Y';
     print_kv('  Nb GL actifs aujourd''hui', TO_CHAR(v_count));
+
+    -- =========================================================
+    -- 11. RVTB_ACC_REVAL & CYTB — REEVALUATION FX / P&L DE CHANGE
+    --    Enjeu RA : les gains/pertes de change sur réévaluation
+    --    sont un vecteur majeur de revenus non liés aux intérêts.
+    --    Il faut s'assurer que :
+    --      - la réévaluation porte sur tous les comptes FCY,
+    --      - NEW_RATE est cohérent avec CYTB_RATES_HISTORY,
+    --      - le P&L (NEW-OLD LCY_EQUIVALENT) est passé en compta.
+    -- =========================================================
+    print_section('11. RVTB_ACC_REVAL & CYTB — Réévaluation FX & P&L');
+
+    -- 11.1 RVTB_ACC_REVAL — volumétrie
+    SELECT COUNT(*) INTO v_count FROM RVTB_ACC_REVAL;
+    print_kv('  Nb lignes RVTB_ACC_REVAL', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ACCOUNT) INTO v_count FROM RVTB_ACC_REVAL;
+    print_kv('  Comptes FCY réévalués', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY) INTO v_count FROM RVTB_ACC_REVAL;
+    print_kv('  Devises réévaluées', TO_CHAR(v_count));
+
+    -- 11.2 Plage temporelle REVAL_DATE
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.2 Plage REVAL_DATE]');
+    FOR r IN (SELECT MIN(REVAL_DATE) dmin, MAX(REVAL_DATE) dmax FROM RVTB_ACC_REVAL) LOOP
+        print_kv('  min / max', TO_CHAR(r.dmin,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.dmax,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 11.3 Volumétrie annuelle des réévaluations
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.3 Volumétrie annuelle des réévaluations]');
+    FOR r IN (
+        SELECT TO_CHAR(REVAL_DATE,'YYYY') annee, COUNT(*) nb,
+               ROUND(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),2) pnl
+        FROM RVTB_ACC_REVAL
+        WHERE REVAL_DATE IS NOT NULL
+        GROUP BY TO_CHAR(REVAL_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee, 'nb=' || TO_CHAR(r.nb) || ' | P&L net=' || TO_CHAR(r.pnl));
+    END LOOP;
+
+    -- 11.4 P&L par devise
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.4 P&L réévaluation par devise]');
+    FOR r IN (
+        SELECT CCY, COUNT(*) nb,
+               ROUND(SUM(OLD_LCY_EQUIVALENT),2) old_lcy,
+               ROUND(SUM(NEW_LCY_EQUIVALENT),2) new_lcy,
+               ROUND(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),2) pnl
+        FROM RVTB_ACC_REVAL
+        GROUP BY CCY
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CCY=' || NVL(r.CCY,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | OLD=' || TO_CHAR(r.old_lcy) ||
+                 ' | NEW=' || TO_CHAR(r.new_lcy) || ' | P&L=' || TO_CHAR(r.pnl));
+    END LOOP;
+
+    -- 11.5 REVAL_IND (gain/loss indicator)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.5 Répartition REVAL_IND]');
+    FOR r IN (
+        SELECT NVL(REVAL_IND,'<NULL>') ri, COUNT(*) nb,
+               ROUND(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),2) pnl
+        FROM RVTB_ACC_REVAL
+        GROUP BY NVL(REVAL_IND,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  REVAL_IND=' || r.ri, 'nb=' || TO_CHAR(r.nb) || ' | P&L=' || TO_CHAR(r.pnl));
+    END LOOP;
+
+    -- 11.6 P&L trading vs non-trading
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.6 TRADING_PL_INDICATOR & P&L trading]');
+    FOR r IN (
+        SELECT NVL(TRADING_PL_INDICATOR,'<NULL>') ti, COUNT(*) nb,
+               ROUND(SUM(TRADING_NEW_LCY_EQUIVALENT - TRADING_OLD_LCY_EQUIVALENT),2) pnl
+        FROM RVTB_ACC_REVAL
+        GROUP BY NVL(TRADING_PL_INDICATOR,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  TRADING_PL=' || r.ti, 'nb=' || TO_CHAR(r.nb) || ' | P&L trading=' || TO_CHAR(r.pnl));
+    END LOOP;
+
+    -- 11.7 PL_SPLIT_FLAG (séparation gains latents vs réalisés)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.7 PL_SPLIT_FLAG]');
+    FOR r IN (
+        SELECT NVL(PL_SPLIT_FLAG,'<NULL>') ps, COUNT(*) nb
+        FROM RVTB_ACC_REVAL
+        GROUP BY NVL(PL_SPLIT_FLAG,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  PL_SPLIT_FLAG=' || r.ps, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 11.8 GLMIS_UPD_STATUS (intégration MIS — doit être 'P' processed)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.8 GLMIS_UPD_STATUS (intégration MIS)]');
+    FOR r IN (
+        SELECT NVL(GLMIS_UPD_STATUS,'<NULL>') gs, COUNT(*) nb
+        FROM RVTB_ACC_REVAL
+        GROUP BY NVL(GLMIS_UPD_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  GLMIS_UPD_STATUS=' || r.gs, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 11.9 ** ALERTE RA ** — variations de taux suspectes (NEW_RATE min/max/avg par CCY)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.9 NEW_RATE statistiques par devise]');
+    FOR r IN (
+        SELECT CCY,
+               ROUND(MIN(NEW_RATE),8) mn,
+               ROUND(MAX(NEW_RATE),8) mx,
+               ROUND(AVG(NEW_RATE),8) av,
+               ROUND(STDDEV(NEW_RATE),8) sd
+        FROM RVTB_ACC_REVAL
+        WHERE NEW_RATE IS NOT NULL
+        GROUP BY CCY
+        ORDER BY CCY
+    ) LOOP
+        print_kv('  CCY=' || NVL(r.CCY,'<NULL>'),
+                 'min=' || TO_CHAR(r.mn) || ' / max=' || TO_CHAR(r.mx) ||
+                 ' / avg=' || TO_CHAR(r.av) || ' / std=' || TO_CHAR(r.sd));
+    END LOOP;
+
+    -- 11.10 Top 15 comptes par P&L absolu
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.10 Top 15 comptes par |P&L réévaluation|]');
+    FOR r IN (
+        SELECT ACCOUNT, CCY, pnl FROM (
+            SELECT ACCOUNT, CCY,
+                   ROUND(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT),2) pnl
+            FROM RVTB_ACC_REVAL
+            GROUP BY ACCOUNT, CCY
+            ORDER BY ABS(SUM(NEW_LCY_EQUIVALENT - OLD_LCY_EQUIVALENT)) DESC NULLS LAST
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  ACC=' || r.ACCOUNT || ' / CCY=' || r.CCY, 'P&L=' || TO_CHAR(r.pnl));
+    END LOOP;
+
+    -- 11.11 Réévaluations sans P&L (NEW = OLD) — possible manque d'effet
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.11 ** ALERTE RA ** — Réévaluations sans écart (NEW=OLD)]');
+    SELECT COUNT(*) INTO v_count
+    FROM RVTB_ACC_REVAL
+    WHERE ABS(NVL(NEW_LCY_EQUIVALENT,0) - NVL(OLD_LCY_EQUIVALENT,0)) < 0.01
+      AND NVL(ACCOUNT_BALANCE,0) <> 0;
+    print_kv('  Réévaluations plates (anomalie potentielle)', TO_CHAR(v_count));
+
+    -- 11.12 CYTB_RATES_HISTORY — volumétrie
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.12 CYTB_RATES_HISTORY — historique cours FX]');
+    SELECT COUNT(*) INTO v_count FROM CYTB_RATES_HISTORY;
+    print_kv('  Nb cotations historiques', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY1 || '-' || CCY2) INTO v_count FROM CYTB_RATES_HISTORY;
+    print_kv('  Paires CCY distinctes', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT RATE_TYPE) INTO v_count FROM CYTB_RATES_HISTORY;
+    print_kv('  RATE_TYPE distincts', TO_CHAR(v_count));
+
+    -- 11.13 Plage CYTB_RATES_HISTORY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.13 Plage RATE_DATE]');
+    FOR r IN (SELECT MIN(RATE_DATE) dmin, MAX(RATE_DATE) dmax FROM CYTB_RATES_HISTORY) LOOP
+        print_kv('  min / max', TO_CHAR(r.dmin,'DD/MM/YYYY') || ' — ' || TO_CHAR(r.dmax,'DD/MM/YYYY'));
+    END LOOP;
+
+    -- 11.14 Spread BUY-SALE par devise (proxy P&L trading)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.14 Spread BUY_RATE vs SALE_RATE par paire (moyenne)]');
+    FOR r IN (
+        SELECT CCY1, CCY2, COUNT(*) nb,
+               ROUND(AVG(SALE_RATE - BUY_RATE),6) sp_avg,
+               ROUND(MAX(SALE_RATE - BUY_RATE),6) sp_max
+        FROM CYTB_RATES_HISTORY
+        WHERE BUY_RATE IS NOT NULL AND SALE_RATE IS NOT NULL
+        GROUP BY CCY1, CCY2
+        HAVING COUNT(*) > 10
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ' || r.CCY1 || '/' || r.CCY2,
+                 'nb=' || TO_CHAR(r.nb) || ' | spread avg=' || TO_CHAR(r.sp_avg) ||
+                 ' | spread max=' || TO_CHAR(r.sp_max));
+    END LOOP;
+
+    -- 11.15 ** ALERTE RA ** — cours à 0 ou négatif
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.15 ** ALERTE RA ** — Cours MID/BUY/SALE <= 0]');
+    SELECT COUNT(*) INTO v_count
+    FROM CYTB_RATES_HISTORY
+    WHERE NVL(MID_RATE,0) <= 0 OR NVL(BUY_RATE,0) <= 0 OR NVL(SALE_RATE,0) <= 0;
+    print_kv('  Cotations anormales', TO_CHAR(v_count));
+
+    -- 11.16 ** ALERTE RA ** — inversion BUY > SALE (arbitrage impossible)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.16 ** ALERTE RA ** — BUY_RATE > SALE_RATE (inversion)]');
+    SELECT COUNT(*) INTO v_count
+    FROM CYTB_RATES_HISTORY
+    WHERE BUY_RATE > SALE_RATE;
+    print_kv('  Cotations inversées', TO_CHAR(v_count));
+
+    -- 11.17 CYTB_DERIVED_RATES_HISTORY — cours dérivés (cross-rates)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [11.17 CYTB_DERIVED_RATES_HISTORY — cours dérivés]');
+    SELECT COUNT(*) INTO v_count FROM CYTB_DERIVED_RATES_HISTORY;
+    print_kv('  Nb cours dérivés', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY1 || '-' || CCY2) INTO v_count FROM CYTB_DERIVED_RATES_HISTORY;
+    print_kv('  Paires dérivées distinctes', TO_CHAR(v_count));
 END;
 /

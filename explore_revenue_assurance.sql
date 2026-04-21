@@ -3383,14 +3383,11 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  ========== A. CONSUMER LOANS (module CL) ==========');
 
-    -- 14.A1 Composants actifs avec accrual arrêté (STOP_ACCRUALS='Y')
-    SELECT COUNT(*),
-           NVL(ROUND(SUM(AMT_LAST_ACCRUED),2),0)
-      INTO v_count, v_num
-    FROM CLTB_ACCOUNT_COMPONENTS
+    -- 14.A1 Prêts actifs avec accrual arrêté (STOP_ACCRUALS='Y' sur APPS_MASTER)
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER
     WHERE NVL(STOP_ACCRUALS,'N') = 'Y';
-    print_kv('  A1. STOP_ACCRUALS=Y : composants',
-             'nb=' || TO_CHAR(v_count) || ' | amt_last_accrued=' || TO_CHAR(v_num));
+    print_kv('  A1. STOP_ACCRUALS=Y : prêts concernés', TO_CHAR(v_count));
 
     -- 14.A2 Waiver d'intérêts (WAIVER_FLAG='Y') sur échéances : cumul waivé
     SELECT COUNT(*),
@@ -3402,22 +3399,25 @@ BEGIN
     print_kv('  A2. Échéances waivées',
              'nb=' || TO_CHAR(v_count) || ' | amt_waived=' || TO_CHAR(v_num));
 
-    -- 14.A3 Échéances en retard (AMOUNT_DUE > AMOUNT_SETTLED, DUE_DATE passée)
+    -- 14.A3 Échéances en retard (AMOUNT_DUE > AMOUNT_SETTLED, SCHEDULE_DUE_DATE passée)
     SELECT COUNT(*),
            NVL(ROUND(SUM(NVL(AMOUNT_DUE,0) - NVL(AMOUNT_SETTLED,0)),2),0)
       INTO v_count, v_num
     FROM CLTB_ACCOUNT_SCHEDULES
-    WHERE DUE_DATE IS NOT NULL
-      AND DUE_DATE < TRUNC(SYSDATE)
+    WHERE SCHEDULE_DUE_DATE IS NOT NULL
+      AND SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
       AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
     print_kv('  A3. Échéances en retard non soldées',
              'nb=' || TO_CHAR(v_count) || ' | reliquat=' || TO_CHAR(v_num));
 
-    -- 14.A4 Prêts avec SPL_INTEREST (taux spécial négocié)
-    SELECT COUNT(*) INTO v_count
+    -- 14.A4 Composants avec SPL_INTEREST (taux spécial négocié)
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(SPL_INTEREST_AMT),2),0)
+      INTO v_count, v_num
     FROM CLTB_ACCOUNT_COMPONENTS
     WHERE NVL(SPL_INTEREST,'N') = 'Y';
-    print_kv('  A4. Composants SPL_INTEREST=Y (*)', TO_CHAR(v_count));
+    print_kv('  A4. Composants SPL_INTEREST=Y (*)',
+             'nb=' || TO_CHAR(v_count) || ' | spl_interest_amt=' || TO_CHAR(v_num));
 
     -- 14.A5 Prêts disbursed > financed (sur-décaissement)
     SELECT COUNT(*),
@@ -3430,13 +3430,13 @@ BEGIN
     print_kv('  A5. DISBURSED > FINANCED',
              'nb=' || TO_CHAR(v_count) || ' | sur-décaissement=' || TO_CHAR(v_num));
 
-    -- 14.A6 MAKER = CHECKER (self-auth) sur paiements CLTB_AMOUNT_PAID
+    -- 14.A6 MAKER = CHECKER (self-auth) sur APPS_MASTER
     SELECT COUNT(*) INTO v_count
-    FROM CLTB_AMOUNT_PAID
+    FROM CLTB_ACCOUNT_APPS_MASTER
     WHERE MAKER_ID IS NOT NULL
       AND CHECKER_ID IS NOT NULL
       AND MAKER_ID = CHECKER_ID;
-    print_kv('  A6. MAKER=CHECKER sur paiements CL', TO_CHAR(v_count));
+    print_kv('  A6. MAKER=CHECKER sur CLTB_ACCOUNT_APPS_MASTER', TO_CHAR(v_count));
 
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  ========== B. LD / MONEY MARKET ==========');
@@ -3448,15 +3448,15 @@ BEGIN
       AND NVL(BASIS_AMOUNT,0) > 0;
     print_kv('  B1. ICCF RATE=0 mais BASIS>0', TO_CHAR(v_count));
 
-    -- 14.B2 Contrats LD : SUBSIDY présent (perte de revenu relative)
+    -- 14.B2 Contrats LD : SUBSIDY_PERCENTAGE présent (sur LDTB_CONTRACT_MASTER)
     SELECT COUNT(*),
-           NVL(ROUND(SUM(SUBSIDY_PERCENTAGE),2),0)
+           NVL(ROUND(AVG(SUBSIDY_PERCENTAGE),2),0)
       INTO v_count, v_num
-    FROM LDTB_CONTRACT_ICCF_CALC_FCC
+    FROM LDTB_CONTRACT_MASTER
     WHERE SUBSIDY_PERCENTAGE IS NOT NULL
       AND SUBSIDY_PERCENTAGE > 0;
-    print_kv('  B2. Lignes ICCF avec SUBSIDY_PERCENTAGE > 0',
-             'nb=' || TO_CHAR(v_count) || ' | cumul %=' || TO_CHAR(v_num));
+    print_kv('  B2. Contrats LD avec SUBSIDY_PERCENTAGE > 0',
+             'nb=' || TO_CHAR(v_count) || ' | moy %=' || TO_CHAR(v_num));
 
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  ========== C. IC / PARAMÉTRAGE TAUX ==========');
@@ -3483,51 +3483,37 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  ========== D. GL / GRAND LIVRE ==========');
 
-    -- 14.D1 GL revenus (CATEGORY='I') : cumul soldes LCY
-    BEGIN
-        SELECT NVL(ROUND(SUM(g.BAL),2),0), COUNT(*)
-          INTO v_num, v_count
-        FROM GLTB_GL_BAL g
-        JOIN GLTM_GLMASTER m ON m.GL_CODE = g.GL_CODE
-        WHERE m.CATEGORY = 'I';
-        print_kv('  D1. GL revenus (CATEGORY=I)',
-                 'nb lignes=' || TO_CHAR(v_count) || ' | cumul BAL=' || TO_CHAR(v_num));
-    EXCEPTION WHEN OTHERS THEN
-        print_kv('  D1. GL revenus (erreur)', SQLERRM);
-    END;
+    -- 14.D1 GL revenus (CATEGORY='I') : cumul soldes LCY (CR_BAL - DR_BAL)
+    SELECT NVL(ROUND(SUM(NVL(CR_BAL_LCY,0) - NVL(DR_BAL_LCY,0)),2),0), COUNT(*)
+      INTO v_num, v_count
+    FROM GLTB_GL_BAL
+    WHERE CATEGORY = 'I';
+    print_kv('  D1. GL revenus (CATEGORY=I)',
+             'nb lignes=' || TO_CHAR(v_count) || ' | cumul net LCY=' || TO_CHAR(v_num));
 
-    -- 14.D2 GL charges (CATEGORY='E')
-    BEGIN
-        SELECT NVL(ROUND(SUM(g.BAL),2),0), COUNT(*)
-          INTO v_num, v_count
-        FROM GLTB_GL_BAL g
-        JOIN GLTM_GLMASTER m ON m.GL_CODE = g.GL_CODE
-        WHERE m.CATEGORY = 'E';
-        print_kv('  D2. GL charges (CATEGORY=E)',
-                 'nb lignes=' || TO_CHAR(v_count) || ' | cumul BAL=' || TO_CHAR(v_num));
-    EXCEPTION WHEN OTHERS THEN
-        print_kv('  D2. GL charges (erreur)', SQLERRM);
-    END;
+    -- 14.D2 GL charges (CATEGORY='E') : cumul soldes LCY (DR_BAL - CR_BAL)
+    SELECT NVL(ROUND(SUM(NVL(DR_BAL_LCY,0) - NVL(CR_BAL_LCY,0)),2),0), COUNT(*)
+      INTO v_num, v_count
+    FROM GLTB_GL_BAL
+    WHERE CATEGORY = 'E';
+    print_kv('  D2. GL charges (CATEGORY=E)',
+             'nb lignes=' || TO_CHAR(v_count) || ' | cumul net LCY=' || TO_CHAR(v_num));
 
-    -- 14.D3 Cohérence BAL ~= OPEN_BAL + MOV
-    BEGIN
-        SELECT COUNT(*) INTO v_count
-        FROM GLTB_GL_BAL
-        WHERE ABS(NVL(BAL,0) - (NVL(OPEN_BAL,0) + NVL(MOV,0))) > 0.01;
-        print_kv('  D3. Lignes GL incohérentes BAL<>OPEN+MOV', TO_CHAR(v_count));
-    EXCEPTION WHEN OTHERS THEN
-        print_kv('  D3. Cohérence GL (erreur)', SQLERRM);
-    END;
+    -- 14.D3 Cohérence solde LCY ~= open + mouvements (DR et CR séparés)
+    SELECT COUNT(*) INTO v_count
+    FROM GLTB_GL_BAL
+    WHERE ABS(NVL(DR_BAL_LCY,0) - (NVL(OPEN_DR_BAL_LCY,0) + NVL(DR_MOV_LCY,0))) > 0.01
+       OR ABS(NVL(CR_BAL_LCY,0) - (NVL(OPEN_CR_BAL_LCY,0) + NVL(CR_MOV_LCY,0))) > 0.01;
+    print_kv('  D3. Lignes GL incohérentes BAL<>OPEN+MOV (DR ou CR)', TO_CHAR(v_count));
 
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  ========== E. FX / RÉÉVALUATION ==========');
 
-    -- 14.E1 Réévaluations à zéro (RVTB_ACC_REVAL)
+    -- 14.E1 Réévaluations à P/L nul (NEW_LCY = OLD_LCY)
     SELECT COUNT(*) INTO v_count
     FROM RVTB_ACC_REVAL
-    WHERE NVL(REVAL_PROFIT_LOSS,0) = 0
-      AND NVL(REVAL_AMT,0) = 0;
-    print_kv('  E1. Réévaluations à P/L nul', TO_CHAR(v_count));
+    WHERE ABS(NVL(NEW_LCY_EQUIVALENT,0) - NVL(OLD_LCY_EQUIVALENT,0)) < 0.01;
+    print_kv('  E1. Réévaluations à P/L nul (NEW=OLD LCY)', TO_CHAR(v_count));
 
     -- 14.E2 Taux de change BUY > SALE (anomalie)
     SELECT COUNT(*) INTO v_count
@@ -3618,7 +3604,7 @@ BEGIN
         print_kv('  H1. ACTB CL (erreur)', SQLERRM);
     END;
 
-    -- 14.H2 Rappel : lignes ACTB_HISTORY revenus (jointure CSTB)
+    -- 14.H2 Rappel : lignes ACTB_HISTORY de nature revenus (intérêts/comm/charges)
     BEGIN
         SELECT COUNT(*),
                NVL(ROUND(SUM(a.LCY_AMOUNT),2),0)
@@ -3627,8 +3613,10 @@ BEGIN
         JOIN CSTB_AMOUNT_TAG t
           ON t.AMOUNT_TAG = a.AMOUNT_TAG
          AND t.MODULE      = a.MODULE
-        WHERE t.CONTRIB_TO_PROFIT = 'Y';
-        print_kv('  H2. ACTB lignes contrib. profit',
+        WHERE NVL(t.INTEREST_ALLOWED,'N')   = 'Y'
+           OR NVL(t.COMMISSION_ALLOWED,'N') = 'Y'
+           OR NVL(t.CHARGE_ALLOWED,'N')     = 'Y';
+        print_kv('  H2. ACTB lignes intérêt/commission/charge',
                  'nb=' || TO_CHAR(v_count) || ' | LCY=' || TO_CHAR(v_num));
     EXCEPTION WHEN OTHERS THEN
         print_kv('  H2. ACTB revenus (erreur)', SQLERRM);

@@ -3975,28 +3975,28 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [15.14.b TOP 15 users par nombre de rôles attribués]');
     FOR r IN (
-        SELECT uid, nr FROM (
-            SELECT USER_ID uid, COUNT(DISTINCT ROLE_ID) nr
+        SELECT usr_id, nr FROM (
+            SELECT USER_ID usr_id, COUNT(DISTINCT ROLE_ID) nr
             FROM SMTB_USER_ROLE
             GROUP BY USER_ID
             ORDER BY nr DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
-        print_kv('  USER=' || r.uid, 'nb_rôles=' || TO_CHAR(r.nr));
+        print_kv('  USER=' || r.usr_id, 'nb_rôles=' || TO_CHAR(r.nr));
     END LOOP;
 
     -- TOP 15 rôles par nb d'utilisateurs affectés
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [15.14.c TOP 15 rôles par nombre d''users]');
     FOR r IN (
-        SELECT rid, nu FROM (
-            SELECT ROLE_ID rid, COUNT(DISTINCT USER_ID) nu
+        SELECT rol_id, nu FROM (
+            SELECT ROLE_ID rol_id, COUNT(DISTINCT USER_ID) nu
             FROM SMTB_USER_ROLE
             GROUP BY ROLE_ID
             ORDER BY nu DESC
         ) WHERE ROWNUM <= 15
     ) LOOP
-        print_kv('  ROLE=' || r.rid, 'nb_users=' || TO_CHAR(r.nu));
+        print_kv('  ROLE=' || r.rol_id, 'nb_users=' || TO_CHAR(r.nu));
     END LOOP;
 
     -- 15.15 Désactivations utilisateurs (SMTB_USER_DISABLE)

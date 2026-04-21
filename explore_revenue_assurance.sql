@@ -3365,5 +3365,287 @@ BEGIN
     ) LOOP
         print_kv('  PRIORITY=' || r.pr, TO_CHAR(r.nb));
     END LOOP;
+
+    -- =========================================================
+    -- 14. SYNTHÈSE RA — ANOMALIES & LEAKAGES CROSS-MODULES
+    --     Cette section consolide en un tableau de bord final
+    --     les principaux indicateurs de risque de fuite de revenus
+    --     détectés dans les modules précédents.
+    --     Chaque indicateur est chiffré (nombre + montant si possible)
+    --     pour prioriser les actions correctives en fonction de la
+    --     matérialité.
+    --     Lecture : plus la valeur est élevée, plus l'enjeu RA est
+    --     important. Les items marqués (*) requièrent validation
+    --     métier avant action.
+    -- =========================================================
+    print_section('14. SYNTHÈSE RA — Tableau de bord des leakages & anomalies');
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== A. CONSUMER LOANS (module CL) ==========');
+
+    -- 14.A1 Composants actifs avec accrual arrêté (STOP_ACCRUALS='Y')
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(AMT_LAST_ACCRUED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NVL(STOP_ACCRUALS,'N') = 'Y';
+    print_kv('  A1. STOP_ACCRUALS=Y : composants',
+             'nb=' || TO_CHAR(v_count) || ' | amt_last_accrued=' || TO_CHAR(v_num));
+
+    -- 14.A2 Waiver d'intérêts (WAIVER_FLAG='Y') sur échéances : cumul waivé
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(AMOUNT_WAIVED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE NVL(WAIVER_FLAG,'N') = 'Y'
+       OR (AMOUNT_WAIVED IS NOT NULL AND AMOUNT_WAIVED > 0);
+    print_kv('  A2. Échéances waivées',
+             'nb=' || TO_CHAR(v_count) || ' | amt_waived=' || TO_CHAR(v_num));
+
+    -- 14.A3 Échéances en retard (AMOUNT_DUE > AMOUNT_SETTLED, DUE_DATE passée)
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(NVL(AMOUNT_DUE,0) - NVL(AMOUNT_SETTLED,0)),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_SCHEDULES
+    WHERE DUE_DATE IS NOT NULL
+      AND DUE_DATE < TRUNC(SYSDATE)
+      AND NVL(AMOUNT_DUE,0) > NVL(AMOUNT_SETTLED,0);
+    print_kv('  A3. Échéances en retard non soldées',
+             'nb=' || TO_CHAR(v_count) || ' | reliquat=' || TO_CHAR(v_num));
+
+    -- 14.A4 Prêts avec SPL_INTEREST (taux spécial négocié)
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_COMPONENTS
+    WHERE NVL(SPL_INTEREST,'N') = 'Y';
+    print_kv('  A4. Composants SPL_INTEREST=Y (*)', TO_CHAR(v_count));
+
+    -- 14.A5 Prêts disbursed > financed (sur-décaissement)
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(AMOUNT_DISBURSED - AMOUNT_FINANCED),2),0)
+      INTO v_count, v_num
+    FROM CLTB_ACCOUNT_APPS_MASTER
+    WHERE AMOUNT_DISBURSED IS NOT NULL
+      AND AMOUNT_FINANCED IS NOT NULL
+      AND AMOUNT_DISBURSED > AMOUNT_FINANCED;
+    print_kv('  A5. DISBURSED > FINANCED',
+             'nb=' || TO_CHAR(v_count) || ' | sur-décaissement=' || TO_CHAR(v_num));
+
+    -- 14.A6 MAKER = CHECKER (self-auth) sur paiements CLTB_AMOUNT_PAID
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_AMOUNT_PAID
+    WHERE MAKER_ID IS NOT NULL
+      AND CHECKER_ID IS NOT NULL
+      AND MAKER_ID = CHECKER_ID;
+    print_kv('  A6. MAKER=CHECKER sur paiements CL', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== B. LD / MONEY MARKET ==========');
+
+    -- 14.B1 Contrats LD actifs avec taux ICCF à 0
+    SELECT COUNT(*) INTO v_count
+    FROM LDTB_CONTRACT_ICCF_CALC_FCC
+    WHERE NVL(RATE,0) = 0
+      AND NVL(BASIS_AMOUNT,0) > 0;
+    print_kv('  B1. ICCF RATE=0 mais BASIS>0', TO_CHAR(v_count));
+
+    -- 14.B2 Contrats LD : SUBSIDY présent (perte de revenu relative)
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(SUBSIDY_PERCENTAGE),2),0)
+      INTO v_count, v_num
+    FROM LDTB_CONTRACT_ICCF_CALC_FCC
+    WHERE SUBSIDY_PERCENTAGE IS NOT NULL
+      AND SUBSIDY_PERCENTAGE > 0;
+    print_kv('  B2. Lignes ICCF avec SUBSIDY_PERCENTAGE > 0',
+             'nb=' || TO_CHAR(v_count) || ' | cumul %=' || TO_CHAR(v_num));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== C. IC / PARAMÉTRAGE TAUX ==========');
+
+    -- 14.C1 UDE overrides au compte (ICTM_ACC_UDEVALS) vs produit
+    SELECT COUNT(*) INTO v_count FROM ICTM_ACC_UDEVALS;
+    print_kv('  C1. Overrides taux au niveau compte', TO_CHAR(v_count));
+
+    -- 14.C2 Overrides à la baisse vs produit (dérogation tarifaire)
+    BEGIN
+        SELECT COUNT(*) INTO v_count
+        FROM ICTM_ACC_UDEVALS a
+        JOIN ICTM_PR_INT_UDEVALS p
+          ON p.PRODUCT_CODE = a.PROD
+         AND p.UDE_ID = a.UDE_ID
+        WHERE a.UDE_VALUE IS NOT NULL
+          AND p.UDE_VALUE IS NOT NULL
+          AND a.UDE_VALUE < p.UDE_VALUE;
+        print_kv('  C2. Overrides compte < produit (baisse)', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  C2. Overrides baisse (erreur jointure)', SQLERRM);
+    END;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== D. GL / GRAND LIVRE ==========');
+
+    -- 14.D1 GL revenus (CATEGORY='I') : cumul soldes LCY
+    BEGIN
+        SELECT NVL(ROUND(SUM(g.BAL),2),0), COUNT(*)
+          INTO v_num, v_count
+        FROM GLTB_GL_BAL g
+        JOIN GLTM_GLMASTER m ON m.GL_CODE = g.GL_CODE
+        WHERE m.CATEGORY = 'I';
+        print_kv('  D1. GL revenus (CATEGORY=I)',
+                 'nb lignes=' || TO_CHAR(v_count) || ' | cumul BAL=' || TO_CHAR(v_num));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  D1. GL revenus (erreur)', SQLERRM);
+    END;
+
+    -- 14.D2 GL charges (CATEGORY='E')
+    BEGIN
+        SELECT NVL(ROUND(SUM(g.BAL),2),0), COUNT(*)
+          INTO v_num, v_count
+        FROM GLTB_GL_BAL g
+        JOIN GLTM_GLMASTER m ON m.GL_CODE = g.GL_CODE
+        WHERE m.CATEGORY = 'E';
+        print_kv('  D2. GL charges (CATEGORY=E)',
+                 'nb lignes=' || TO_CHAR(v_count) || ' | cumul BAL=' || TO_CHAR(v_num));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  D2. GL charges (erreur)', SQLERRM);
+    END;
+
+    -- 14.D3 Cohérence BAL ~= OPEN_BAL + MOV
+    BEGIN
+        SELECT COUNT(*) INTO v_count
+        FROM GLTB_GL_BAL
+        WHERE ABS(NVL(BAL,0) - (NVL(OPEN_BAL,0) + NVL(MOV,0))) > 0.01;
+        print_kv('  D3. Lignes GL incohérentes BAL<>OPEN+MOV', TO_CHAR(v_count));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  D3. Cohérence GL (erreur)', SQLERRM);
+    END;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== E. FX / RÉÉVALUATION ==========');
+
+    -- 14.E1 Réévaluations à zéro (RVTB_ACC_REVAL)
+    SELECT COUNT(*) INTO v_count
+    FROM RVTB_ACC_REVAL
+    WHERE NVL(REVAL_PROFIT_LOSS,0) = 0
+      AND NVL(REVAL_AMT,0) = 0;
+    print_kv('  E1. Réévaluations à P/L nul', TO_CHAR(v_count));
+
+    -- 14.E2 Taux de change BUY > SALE (anomalie)
+    SELECT COUNT(*) INTO v_count
+    FROM CYTB_RATES_HISTORY
+    WHERE BUY_RATE IS NOT NULL
+      AND SALE_RATE IS NOT NULL
+      AND BUY_RATE > SALE_RATE;
+    print_kv('  E2. Cours CYTB BUY>SALE', TO_CHAR(v_count));
+
+    -- 14.E3 Cours <= 0
+    SELECT COUNT(*) INTO v_count
+    FROM CYTB_RATES_HISTORY
+    WHERE NVL(MID_RATE,0) <= 0
+       OR NVL(BUY_RATE,0) <= 0
+       OR NVL(SALE_RATE,0) <= 0;
+    print_kv('  E3. Cours CYTB <= 0', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== F. COMPTES CLIENTS (ST) ==========');
+
+    -- 14.F1 Comptes débiteurs sans TOD (overdraft non autorisé)
+    SELECT COUNT(*),
+           NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0)
+      INTO v_count, v_num
+    FROM STTM_CUST_ACCOUNT
+    WHERE NVL(LCY_CURR_BALANCE,0) < 0
+      AND NVL(TOD_LIMIT,0) = 0;
+    print_kv('  F1. Débiteurs sans TOD',
+             'nb=' || TO_CHAR(v_count) || ' | cumul solde=' || TO_CHAR(v_num));
+
+    -- 14.F2 Comptes avec DEFAULT_WAIVER='Y'
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT
+    WHERE NVL(DEFAULT_WAIVER,'N') = 'Y';
+    print_kv('  F2. Comptes avec DEFAULT_WAIVER=Y', TO_CHAR(v_count));
+
+    -- 14.F3 Comptes dormants (DORMANCY_DATE renseignée)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT
+    WHERE DORMANCY_DATE IS NOT NULL;
+    print_kv('  F3. Comptes dormants (DORMANCY_DATE NOT NULL)', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== G. STANDING INSTRUCTIONS (SI) ==========');
+
+    -- 14.G1 SI sans charges paramétrées
+    SELECT COUNT(*) INTO v_count
+    FROM SITB_CONTRACT_MASTER
+    WHERE NVL(APPLY_CHG_SUXS,'N') = 'N'
+      AND NVL(APPLY_CHG_PEXC,'N') = 'N'
+      AND NVL(APPLY_CHG_REJT,'N') = 'N';
+    print_kv('  G1. SI sans charges paramétrées', TO_CHAR(v_count));
+
+    -- 14.G2 SI avec rejets non facturés
+    SELECT COUNT(*) INTO v_count
+    FROM SITB_CONTRACT_MASTER
+    WHERE NVL(APPLY_CHG_REJT,'N') = 'N';
+    print_kv('  G2. SI rejets non facturés (APPLY_CHG_REJT=N)', TO_CHAR(v_count));
+
+    -- 14.G3 SI expirées mais encore actives
+    SELECT COUNT(*) INTO v_count
+    FROM SITB_CONTRACT_MASTER
+    WHERE SI_EXPIRY_DATE IS NOT NULL
+      AND SI_EXPIRY_DATE < TRUNC(SYSDATE)
+      AND NVL(SUBSYSTEM_STAT,'A') NOT IN ('C','L','V','X');
+    print_kv('  G3. SI expirées mais actives', TO_CHAR(v_count));
+
+    -- 14.G4 Retries >= 3 (suivi frais potentiels)
+    SELECT COUNT(*) INTO v_count
+    FROM SITB_CYCLE_DETAIL
+    WHERE RETRY_SEQ_NO >= 3;
+    print_kv('  G4. Cycles SI avec retry >=3', TO_CHAR(v_count));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  ========== H. CONTRÔLES GÉNÉRAUX ==========');
+
+    -- 14.H1 Écart global ACTB (module CL) flux débit vs crédit
+    BEGIN
+        SELECT NVL(ROUND(SUM(CASE WHEN DRCR_IND='D' THEN LCY_AMOUNT ELSE 0 END),2),0),
+               NVL(ROUND(SUM(CASE WHEN DRCR_IND='C' THEN LCY_AMOUNT ELSE 0 END),2),0)
+          INTO v_num, v_num2
+        FROM ACTB_HISTORY
+        WHERE MODULE = 'CL';
+        print_kv('  H1. ACTB module CL - SUM DR (LCY)', TO_CHAR(v_num));
+        print_kv('  H1. ACTB module CL - SUM CR (LCY)', TO_CHAR(v_num2));
+        print_kv('  H1. Écart DR-CR (doit ~ 0)', TO_CHAR(ROUND(v_num - v_num2, 2)));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  H1. ACTB CL (erreur)', SQLERRM);
+    END;
+
+    -- 14.H2 Rappel : lignes ACTB_HISTORY revenus (jointure CSTB)
+    BEGIN
+        SELECT COUNT(*),
+               NVL(ROUND(SUM(a.LCY_AMOUNT),2),0)
+          INTO v_count, v_num
+        FROM ACTB_HISTORY a
+        JOIN CSTB_AMOUNT_TAG t
+          ON t.AMOUNT_TAG = a.AMOUNT_TAG
+         AND t.MODULE      = a.MODULE
+        WHERE t.CONTRIB_TO_PROFIT = 'Y';
+        print_kv('  H2. ACTB lignes contrib. profit',
+                 'nb=' || TO_CHAR(v_count) || ' | LCY=' || TO_CHAR(v_num));
+    EXCEPTION WHEN OTHERS THEN
+        print_kv('  H2. ACTB revenus (erreur)', SQLERRM);
+    END;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('FIN DE L''EXPLORATION REVENUE ASSURANCE');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('Priorisation suggérée des chantiers :');
+    DBMS_OUTPUT.PUT_LINE('  1) STOP_ACCRUALS + waivers CL : vérifier la gouvernance.');
+    DBMS_OUTPUT.PUT_LINE('  2) ICCF RATE=0 / SUBSIDY : valider les dérogations.');
+    DBMS_OUTPUT.PUT_LINE('  3) UDE overrides à la baisse : revue tarifaire.');
+    DBMS_OUTPUT.PUT_LINE('  4) Débiteurs sans TOD : facturer les intérêts débiteurs.');
+    DBMS_OUTPUT.PUT_LINE('  5) SI sans charges / rejets non facturés : paramétrage.');
+    DBMS_OUTPUT.PUT_LINE('  6) FX réévaluations à P/L nul : contrôler le process EOD.');
+    DBMS_OUTPUT.PUT_LINE('  7) MAKER=CHECKER : revoir la séparation des tâches.');
+    DBMS_OUTPUT.PUT_LINE(v_sep);
 END;
 /

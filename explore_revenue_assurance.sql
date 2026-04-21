@@ -2786,5 +2786,270 @@ BEGIN
 
     SELECT COUNT(DISTINCT CCY1 || '-' || CCY2) INTO v_count FROM CYTB_DERIVED_RATES_HISTORY;
     print_kv('  Paires dérivées distinctes', TO_CHAR(v_count));
+
+    -- =========================================================
+    -- 12. STTM_CUST_ACCOUNT — COMPTES CLIENTS / TOD / DORMANCE
+    --    Enjeux RA :
+    --      - Overdraft non autorisé (solde < 0 sans TOD) : frais
+    --        d'intérêts débiteurs à calculer,
+    --      - Comptes dormants : suivi frais de dormance,
+    --      - DEFAULT_WAIVER = 'Y' : désactivation charges par défaut,
+    --      - INF_WAIVE_ACC_OPEN_CHARGE : frais d'ouverture waivés,
+    --      - Soldes créditeurs sur comptes sans rémunération d'intérêts.
+    -- =========================================================
+    print_section('12. STTM_CUST_ACCOUNT — Comptes clients, TOD & dormance');
+
+    -- 12.1 Volumétrie
+    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT;
+    print_kv('  Total comptes', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CUST_NO) INTO v_count FROM STTM_CUST_ACCOUNT;
+    print_kv('  Clients distincts titulaires', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT ACCOUNT_CLASS) INTO v_count FROM STTM_CUST_ACCOUNT;
+    print_kv('  ACCOUNT_CLASS distincts', TO_CHAR(v_count));
+
+    SELECT COUNT(DISTINCT CCY) INTO v_count FROM STTM_CUST_ACCOUNT;
+    print_kv('  Devises distinctes', TO_CHAR(v_count));
+
+    -- 12.2 Soldes agrégés LCY
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.2 Soldes cumulés (LCY)]');
+    SELECT NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0),
+           NVL(ROUND(SUM(CASE WHEN LCY_CURR_BALANCE > 0 THEN LCY_CURR_BALANCE ELSE 0 END),2),0),
+           NVL(ROUND(SUM(CASE WHEN LCY_CURR_BALANCE < 0 THEN LCY_CURR_BALANCE ELSE 0 END),2),0)
+      INTO v_num, v_num2, v_count
+    FROM STTM_CUST_ACCOUNT;
+    print_kv('  Solde net LCY', TO_CHAR(v_num));
+    print_kv('  Cumul créditeurs LCY', TO_CHAR(v_num2));
+    print_kv('  Cumul débiteurs LCY', TO_CHAR(v_count));
+
+    -- 12.3 Répartition ACC_STATUS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.3 Répartition ACC_STATUS]');
+    FOR r IN (
+        SELECT NVL(ACC_STATUS,'<NULL>') st, COUNT(*) nb,
+               NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0) sm
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY NVL(ACC_STATUS,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACC_STATUS=' || r.st, 'nb=' || TO_CHAR(r.nb) || ' | solde=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 12.4 Top 15 ACCOUNT_CLASS
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.4 Top 15 ACCOUNT_CLASS par nb comptes]');
+    FOR r IN (
+        SELECT ACCOUNT_CLASS, nb, sm FROM (
+            SELECT ACCOUNT_CLASS, COUNT(*) nb, ROUND(SUM(LCY_CURR_BALANCE),2) sm
+            FROM STTM_CUST_ACCOUNT
+            GROUP BY ACCOUNT_CLASS
+            ORDER BY nb DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  AC_CLASS=' || NVL(r.ACCOUNT_CLASS,'<NULL>'),
+                 'nb=' || TO_CHAR(r.nb) || ' | solde=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 12.5 Répartition par devise
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.5 Répartition par devise]');
+    FOR r IN (
+        SELECT NVL(CCY,'<NULL>') ccy, COUNT(*) nb,
+               NVL(ROUND(SUM(ACY_CURR_BALANCE),2),0) sm_fcy,
+               NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0) sm_lcy
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY NVL(CCY,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  CCY=' || r.ccy,
+                 'nb=' || TO_CHAR(r.nb) || ' | FCY=' || TO_CHAR(r.sm_fcy) || ' | LCY=' || TO_CHAR(r.sm_lcy));
+    END LOOP;
+
+    -- 12.6 ** ALERTE RA ** — soldes débiteurs SANS TOD_LIMIT actif (overdraft non autorisé)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.6 ** ALERTE RA ** — soldes débiteurs sans TOD_LIMIT]');
+    SELECT COUNT(*), NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0)
+      INTO v_count, v_num
+    FROM STTM_CUST_ACCOUNT
+    WHERE LCY_CURR_BALANCE < 0
+      AND NVL(TOD_LIMIT,0) = 0;
+    print_kv('  Comptes débiteurs sans TOD', TO_CHAR(v_count));
+    print_kv('  Cumul débiteurs non autorisés (LCY)', TO_CHAR(v_num));
+
+    -- 12.7 Comptes avec TOD_LIMIT > 0 (découvert autorisé)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.7 Comptes avec TOD_LIMIT > 0]');
+    SELECT COUNT(*), NVL(ROUND(SUM(TOD_LIMIT),2),0),
+           NVL(ROUND(AVG(TOD_LIMIT),2),0)
+      INTO v_count, v_num, v_num2
+    FROM STTM_CUST_ACCOUNT
+    WHERE NVL(TOD_LIMIT,0) > 0;
+    print_kv('  Comptes avec TOD', TO_CHAR(v_count));
+    print_kv('  Cumul TOD_LIMIT', TO_CHAR(v_num));
+    print_kv('  TOD_LIMIT moyen', TO_CHAR(v_num2));
+
+    -- 12.8 ** ALERTE RA ** — comptes dépassant le TOD_LIMIT
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.8 ** ALERTE RA ** — dépassement TOD_LIMIT]');
+    SELECT COUNT(*), NVL(ROUND(SUM(ABS(LCY_CURR_BALANCE) - TOD_LIMIT),2),0)
+      INTO v_count, v_num
+    FROM STTM_CUST_ACCOUNT
+    WHERE LCY_CURR_BALANCE < 0
+      AND NVL(TOD_LIMIT,0) > 0
+      AND ABS(LCY_CURR_BALANCE) > NVL(TOD_LIMIT,0);
+    print_kv('  Comptes dépassant TOD', TO_CHAR(v_count));
+    print_kv('  Cumul dépassement', TO_CHAR(v_num));
+
+    -- 12.9 Ancienneté TOD (TOD_SINCE — bucket)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.9 Ancienneté TOD_SINCE (bucket)]');
+    FOR r IN (
+        SELECT bucket, nb FROM (
+            SELECT CASE
+                     WHEN TOD_SINCE IS NULL THEN '00_pas_de_TOD'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 30 THEN '01_0-30j'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 90 THEN '02_31-90j'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 365 THEN '03_91-365j'
+                     ELSE '04_>365j'
+                   END bucket, COUNT(*) nb
+            FROM STTM_CUST_ACCOUNT
+            GROUP BY CASE
+                     WHEN TOD_SINCE IS NULL THEN '00_pas_de_TOD'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 30 THEN '01_0-30j'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 90 THEN '02_31-90j'
+                     WHEN TRUNC(SYSDATE) - TOD_SINCE <= 365 THEN '03_91-365j'
+                     ELSE '04_>365j'
+                   END
+        ) ORDER BY bucket
+    ) LOOP
+        print_kv('  ' || r.bucket, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.10 Comptes dormants (DORMANCY_DATE non null / DORMANCY_DAYS > 0)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.10 Comptes dormants]');
+    SELECT COUNT(*), NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0)
+      INTO v_count, v_num
+    FROM STTM_CUST_ACCOUNT
+    WHERE DORMANCY_DATE IS NOT NULL;
+    print_kv('  Comptes dormants', TO_CHAR(v_count));
+    print_kv('  Soldes dormants (LCY)', TO_CHAR(v_num));
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.10.b Distribution DORMANCY_DAYS]');
+    FOR r IN (
+        SELECT bucket, nb, sm FROM (
+            SELECT CASE
+                     WHEN NVL(DORMANCY_DAYS,0) = 0 THEN '00_actif'
+                     WHEN DORMANCY_DAYS <= 180 THEN '01_1-180j'
+                     WHEN DORMANCY_DAYS <= 365 THEN '02_181-365j'
+                     WHEN DORMANCY_DAYS <= 730 THEN '03_1-2ans'
+                     ELSE '04_>2ans'
+                   END bucket,
+                   COUNT(*) nb,
+                   ROUND(SUM(LCY_CURR_BALANCE),2) sm
+            FROM STTM_CUST_ACCOUNT
+            GROUP BY CASE
+                     WHEN NVL(DORMANCY_DAYS,0) = 0 THEN '00_actif'
+                     WHEN DORMANCY_DAYS <= 180 THEN '01_1-180j'
+                     WHEN DORMANCY_DAYS <= 365 THEN '02_181-365j'
+                     WHEN DORMANCY_DAYS <= 730 THEN '03_1-2ans'
+                     ELSE '04_>2ans'
+                   END
+        ) ORDER BY bucket
+    ) LOOP
+        print_kv('  ' || r.bucket, 'nb=' || TO_CHAR(r.nb) || ' | solde=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 12.11 ** ALERTE RA ** — DEFAULT_WAIVER = 'Y'
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.11 ** ALERTE RA ** — DEFAULT_WAIVER = Y]');
+    FOR r IN (
+        SELECT NVL(DEFAULT_WAIVER,'<NULL>') dw, COUNT(*) nb,
+               NVL(ROUND(SUM(LCY_CURR_BALANCE),2),0) sm
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY NVL(DEFAULT_WAIVER,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  DEFAULT_WAIVER=' || r.dw, 'nb=' || TO_CHAR(r.nb) || ' | solde=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 12.12 INF_WAIVE_ACC_OPEN_CHARGE (frais d'ouverture waivés)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.12 INF_WAIVE_ACC_OPEN_CHARGE (waivers à l''ouverture)]');
+    FOR r IN (
+        SELECT NVL(INF_WAIVE_ACC_OPEN_CHARGE,'<NULL>') w, COUNT(*) nb
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY NVL(INF_WAIVE_ACC_OPEN_CHARGE,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  INF_WAIVE_ACC_OPEN_CHARGE=' || r.w, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.13 Top 15 comptes par solde créditeur (enjeu rémunération)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.13 Top 15 comptes par solde créditeur (LCY)]');
+    FOR r IN (
+        SELECT CUST_AC_NO, CCY, sm FROM (
+            SELECT CUST_AC_NO, CCY, LCY_CURR_BALANCE sm
+            FROM STTM_CUST_ACCOUNT
+            WHERE LCY_CURR_BALANCE > 0
+            ORDER BY LCY_CURR_BALANCE DESC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  Cpt=' || r.CUST_AC_NO || ' / CCY=' || r.CCY, 'solde=' || TO_CHAR(r.sm));
+    END LOOP;
+
+    -- 12.14 Top 15 comptes par solde débiteur (enjeu recouvrement)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.14 Top 15 comptes par solde débiteur (LCY)]');
+    FOR r IN (
+        SELECT CUST_AC_NO, CCY, sm, tod FROM (
+            SELECT CUST_AC_NO, CCY, LCY_CURR_BALANCE sm, TOD_LIMIT tod
+            FROM STTM_CUST_ACCOUNT
+            WHERE LCY_CURR_BALANCE < 0
+            ORDER BY LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= 15
+    ) LOOP
+        print_kv('  Cpt=' || r.CUST_AC_NO || ' / CCY=' || r.CCY,
+                 'solde=' || TO_CHAR(r.sm) || ' | TOD=' || TO_CHAR(NVL(r.tod,0)));
+    END LOOP;
+
+    -- 12.15 Volumétrie annuelle d'ouverture (AC_OPEN_DATE)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.15 Ouvertures de comptes par année]');
+    FOR r IN (
+        SELECT TO_CHAR(AC_OPEN_DATE,'YYYY') annee, COUNT(*) nb
+        FROM STTM_CUST_ACCOUNT
+        WHERE AC_OPEN_DATE IS NOT NULL
+        GROUP BY TO_CHAR(AC_OPEN_DATE,'YYYY')
+        ORDER BY annee
+    ) LOOP
+        print_kv('  ' || r.annee, TO_CHAR(r.nb));
+    END LOOP;
+
+    -- 12.16 INTERIM_DEBIT_AMT / INTERIM_CREDIT_AMT (turnovers provisoires)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.16 Turnovers provisoires (INTERIM_DEBIT_AMT / INTERIM_CREDIT_AMT)]');
+    SELECT NVL(ROUND(SUM(INTERIM_DEBIT_AMT),2),0),
+           NVL(ROUND(SUM(INTERIM_CREDIT_AMT),2),0)
+      INTO v_num, v_num2
+    FROM STTM_CUST_ACCOUNT;
+    print_kv('  Cumul INTERIM_DEBIT_AMT', TO_CHAR(v_num));
+    print_kv('  Cumul INTERIM_CREDIT_AMT', TO_CHAR(v_num2));
+
+    -- 12.17 ACCOUNT_AUTO_CLOSED
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [12.17 ACCOUNT_AUTO_CLOSED]');
+    FOR r IN (
+        SELECT NVL(ACCOUNT_AUTO_CLOSED,'<NULL>') ac, COUNT(*) nb
+        FROM STTM_CUST_ACCOUNT
+        GROUP BY NVL(ACCOUNT_AUTO_CLOSED,'<NULL>')
+        ORDER BY nb DESC
+    ) LOOP
+        print_kv('  ACCOUNT_AUTO_CLOSED=' || r.ac, TO_CHAR(r.nb));
+    END LOOP;
 END;
 /

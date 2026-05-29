@@ -55,6 +55,7 @@ SELECT
     , sig.name                               AS kckp_name               -- signataires corporate
     , sig.relationship                       AS kckp_relationship
     , sig.position_or_title                  AS kckp_position_or_title
+    , sig.est_signataire                     AS kckp_est_signataire     -- Y/N par personne (POSITION_OR_TITLE ~ SIGNATORY)
 
     -- ----------------------------------------------------------------------
     -- PROCURATION (Power of Attorney)
@@ -111,6 +112,13 @@ FROM            sttm_customer            c
                   WITHIN GROUP (ORDER BY k.name)              AS relationship
             , LISTAGG(k.position_or_title, ' | ')
                   WITHIN GROUP (ORDER BY k.name)              AS position_or_title
+            -- Indicateur signataire (Y/N) par personne, aligne avec NAME ci-dessus.
+            -- Le titre est en texte libre : on detecte la mention "SIGNATORY"
+            -- (couvre SIGNATORY, UBO+SIGNATORY, SHAREHOLDER/SIGNATORY, etc.).
+            , LISTAGG(
+                  CASE WHEN UPPER(k.position_or_title) LIKE '%SIGNATORY%'
+                       THEN 'Y' ELSE 'N' END, ' | ')
+                  WITHIN GROUP (ORDER BY k.name)              AS est_signataire
         FROM   sttm_kyc_corp_keypersons k
         GROUP BY k.kyc_ref_no
     ) sig

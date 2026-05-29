@@ -1,25 +1,32 @@
 --------------------------------------------------------------------------------
 -- LISTE DES CLIENTS DE LA BANQUE
---   avec MANDAT (mode de fonctionnement) / POUVOIR DE SIGNATURE / PROCURATION
+--   avec MANDAT / POUVOIR DE SIGNATURE / PROCURATION
 --
 -- SGBD        : Oracle (FLEXCUBE Universal Banking - FCUBS)
 -- Type        : Requete SQL pure (aucun PL/SQL)
--- Granularite : 1 ligne par client (CUSTOMER_NO)
+-- Granularite : 1 ligne par (CLIENT x PERSONNE CLE corporate).
+--               - Un client corporate ayant N personnes cles -> N lignes.
+--               - Un client sans personne cle (particuliers, corporate sans
+--                 keyperson) -> 1 ligne, colonnes KCKP_* a NULL.
+--               => permet de filtrer directement sur KCKP_EST_SIGNATAIRE = 'Y'.
 -- Convention  : chaque colonne de sortie reprend le nom REEL de la colonne
 --               source, prefixe d'un code court de table (limite Oracle de
 --               30 octets sur les identifiants en version < 12.2) :
 --                 CUST_ = STTM_CUSTOMER             ACC_  = STTM_CUST_ACCOUNT
 --                 PERS_ = STTM_CUST_PERSONAL        KYCR_ = STTM_KYC_RETAIL
---                 KCKP_ = STTM_KYC_CORP_KEYPERSONS
---               Les colonnes multi-valuees (comptes, signataires) sont
---               agregees via LISTAGG mais conservent le nom reel de la colonne.
+--                 KCKP_ = STTM_KYC_CORP_KEYPERSONS  UDF_  = CSTM_FUNCTION_USERDEF_FIELDS (STDKYCMN)
+--               Le mode de fonctionnement des comptes (par client) reste agrege
+--               via LISTAGG en conservant le nom reel de la colonne.
 --
 -- Cartographie metier -> donnees FCUBS :
 --   * MANDAT (mode de fonctionnement du compte)
---        -> STTM_CUST_ACCOUNT.MODE_OF_OPERATION  (+ JOINT_AC_INDICATOR)
+--        -> STTM_CUST_ACCOUNT.JOINT_AC_INDICATOR
+--           (MODE_OF_OPERATION non retenue : vide dans toute la base)
 --   * POUVOIR DE SIGNATURE
---        -> STTM_KYC_CORP_KEYPERSONS  (signataires / directeurs des dossiers corporate)
+--        -> STTM_KYC_CORP_KEYPERSONS  (1 ligne / personne cle, flag signataire)
 --        -> STTM_CUST_ACCOUNT.REPL_CUST_SIG  (replication signature client)
+--        -> CSTM_FUNCTION_USERDEF_FIELDS / STDKYCMN.field_val_7
+--           (corp_ac_sign_or_director : signataire / directeur saisi en KYC)
 --   * PROCURATION (Power of Attorney)
 --        -> STTM_CUST_PERSONAL.PA_ISSUED / PA_HOLDER_NAME (particuliers)
 --        -> STTM_KYC_RETAIL.PA_GIVEN / PA_HOLDER_NAME      (KYC retail)
@@ -29,6 +36,7 @@
 --   STTM_CUSTOMER.CUSTOMER_NO  = STTM_CUST_ACCOUNT.CUST_NO
 --   STTM_CUSTOMER.KYC_REF_NO   = STTM_KYC_RETAIL.KYC_REF_NO
 --   STTM_CUSTOMER.KYC_REF_NO   = STTM_KYC_CORP_KEYPERSONS.KYC_REF_NO
+--   STTM_CUSTOMER.KYC_REF_NO   = SUBSTR(rec_key,1,LENGTH(rec_key)-1) (STDKYCMN)
 --------------------------------------------------------------------------------
 
 SELECT
@@ -52,10 +60,14 @@ SELECT
     -- POUVOIR DE SIGNATURE
     -- ----------------------------------------------------------------------
     , acc.repl_cust_sig                      AS acc_repl_cust_sig       -- Y/N (sur comptes)
-    , sig.name                               AS kckp_name               -- signataires corporate
-    , sig.relationship                       AS kckp_relationship
-    , sig.position_or_title                  AS kckp_position_or_title
-    , sig.est_signataire                     AS kckp_est_signataire     -- Y/N par personne (POSITION_OR_TITLE ~ SIGNATORY)
+    -- 1 ligne par personne cle (STTM_KYC_CORP_KEYPERSONS)
+    , k.name                                 AS kckp_name
+    , k.relationship                         AS kckp_relationship
+    , k.position_or_title                    AS kckp_position_or_title
+    , CASE WHEN UPPER(k.position_or_title) LIKE '%SIGNATORY%'
+           THEN 'Y' ELSE 'N' END             AS kckp_est_signataire     -- Y/N (POSITION_OR_TITLE ~ SIGNATORY)
+    -- Champ KYC utilisateur (STDKYCMN.field_val_7)
+    , udf.corp_ac_sign_or_director           AS udf_corp_ac_sign_or_dir
 
     -- ----------------------------------------------------------------------
     -- PROCURATION (Power of Attorney)
@@ -74,8 +86,25 @@ FROM            sttm_customer            c
     LEFT JOIN   sttm_kyc_retail          kr
            ON   kr.kyc_ref_no  = c.kyc_ref_no
 
+    -- ---- 1 ligne par PERSONNE CLE corporate (pouvoir de signature) ----
+    LEFT JOIN   sttm_kyc_corp_keypersons k
+           ON   k.kyc_ref_no   = c.kyc_ref_no
+
+    -- ---- Champ utilisateur STDKYCMN : corp_ac_sign_or_director ----
+    -- rec_key = KYC_REF_NO + 1 caractere technique -> on retire le dernier.
+    -- MAX() pour garantir 1 ligne par KYC_REF_NO (pas de demultiplication).
+    LEFT JOIN (
+        SELECT
+              SUBSTR(rec_key, 1, LENGTH(rec_key) - 1)  AS kyc_ref_no
+            , MAX(field_val_7)                         AS corp_ac_sign_or_director
+        FROM   cstm_function_userdef_fields
+        WHERE  function_id = 'STDKYCMN'
+        GROUP BY SUBSTR(rec_key, 1, LENGTH(rec_key) - 1)
+    ) udf
+           ON   udf.kyc_ref_no = c.kyc_ref_no
+
     -- ---- Agregation des COMPTES par client (STTM_CUST_ACCOUNT) ----
-    -- NB: le DISTINCT est applique dans des sous-requetes imbriquees car
+    -- NB: le DISTINCT est applique dans une sous-requete imbriquee car
     --     LISTAGG(DISTINCT ...) n'est disponible qu'a partir d'Oracle 19c.
     LEFT JOIN (
         SELECT
@@ -102,26 +131,4 @@ FROM            sttm_customer            c
     ) acc
            ON   acc.cust_no    = c.customer_no
 
-    -- ---- Agregation des SIGNATAIRES corporate (STTM_KYC_CORP_KEYPERSONS) ----
-    LEFT JOIN (
-        SELECT
-              k.kyc_ref_no
-            , LISTAGG(k.name, ' | ')
-                  WITHIN GROUP (ORDER BY k.name)              AS name
-            , LISTAGG(k.relationship, ' | ')
-                  WITHIN GROUP (ORDER BY k.name)              AS relationship
-            , LISTAGG(k.position_or_title, ' | ')
-                  WITHIN GROUP (ORDER BY k.name)              AS position_or_title
-            -- Indicateur signataire (Y/N) par personne, aligne avec NAME ci-dessus.
-            -- Le titre est en texte libre : on detecte la mention "SIGNATORY"
-            -- (couvre SIGNATORY, UBO+SIGNATORY, SHAREHOLDER/SIGNATORY, etc.).
-            , LISTAGG(
-                  CASE WHEN UPPER(k.position_or_title) LIKE '%SIGNATORY%'
-                       THEN 'Y' ELSE 'N' END, ' | ')
-                  WITHIN GROUP (ORDER BY k.name)              AS est_signataire
-        FROM   sttm_kyc_corp_keypersons k
-        GROUP BY k.kyc_ref_no
-    ) sig
-           ON   sig.kyc_ref_no = c.kyc_ref_no
-
-ORDER BY c.customer_no;
+ORDER BY c.customer_no, k.name;

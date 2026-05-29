@@ -6,7 +6,11 @@
 -- Type        : Requete SQL pure (aucun PL/SQL)
 -- Granularite : 1 ligne par client (CUSTOMER_NO)
 -- Convention  : chaque colonne de sortie reprend le nom REEL de la colonne
---               source, prefixe du nom de sa table -> TABLE_COLONNE.
+--               source, prefixe d'un code court de table (limite Oracle de
+--               30 octets sur les identifiants en version < 12.2) :
+--                 CUST_ = STTM_CUSTOMER             ACC_  = STTM_CUST_ACCOUNT
+--                 PERS_ = STTM_CUST_PERSONAL        KYCR_ = STTM_KYC_RETAIL
+--                 KCKP_ = STTM_KYC_CORP_KEYPERSONS
 --               Les colonnes multi-valuees (comptes, signataires) sont
 --               agregees via LISTAGG mais conservent le nom reel de la colonne.
 --
@@ -31,37 +35,37 @@ SELECT
     -- ----------------------------------------------------------------------
     -- IDENTITE DU CLIENT  (STTM_CUSTOMER)
     -- ----------------------------------------------------------------------
-      c.customer_no                          AS sttm_customer_customer_no
-    , c.customer_name1                       AS sttm_customer_customer_name1
-    , c.short_name                           AS sttm_customer_short_name
-    , c.customer_type                        AS sttm_customer_customer_type      -- I=Indiv, C=Corporate, B=Bank
-    , c.customer_category                    AS sttm_customer_customer_category
-    , c.kyc_ref_no                           AS sttm_customer_kyc_ref_no
+      c.customer_no                          AS cust_customer_no
+    , c.customer_name1                       AS cust_customer_name1
+    , c.short_name                           AS cust_short_name
+    , c.customer_type                        AS cust_customer_type      -- I=Indiv, C=Corporate, B=Bank
+    , c.customer_category                    AS cust_customer_category
+    , c.kyc_ref_no                           AS cust_kyc_ref_no
 
     -- ----------------------------------------------------------------------
     -- MANDAT - STTM_CUST_ACCOUNT (agrege par client)
     -- NB: MODE_OF_OPERATION non retenue (colonne vide dans toute la base).
     -- ----------------------------------------------------------------------
-    , acc.joint_ac_indicator                 AS sttm_cust_account_joint_ac_indicator  -- S=Single / J=Joint
+    , acc.joint_ac_indicator                 AS acc_joint_ac_indicator  -- S=Single / J=Joint
 
     -- ----------------------------------------------------------------------
     -- POUVOIR DE SIGNATURE
     -- ----------------------------------------------------------------------
-    , acc.repl_cust_sig                      AS sttm_cust_account_repl_cust_sig       -- Y/N (sur comptes)
-    , sig.name                               AS sttm_kyc_corp_keypersons_name         -- signataires corporate
-    , sig.relationship                       AS sttm_kyc_corp_keypersons_relationship
-    , sig.position_or_title                  AS sttm_kyc_corp_keypersons_position_or_title
+    , acc.repl_cust_sig                      AS acc_repl_cust_sig       -- Y/N (sur comptes)
+    , sig.name                               AS kckp_name               -- signataires corporate
+    , sig.relationship                       AS kckp_relationship
+    , sig.position_or_title                  AS kckp_position_or_title
 
     -- ----------------------------------------------------------------------
     -- PROCURATION (Power of Attorney)
     -- ----------------------------------------------------------------------
     -- Particuliers (STTM_CUST_PERSONAL)
-    , p.pa_issued                            AS sttm_cust_personal_pa_issued          -- Y/N
-    , p.pa_holder_name                       AS sttm_cust_personal_pa_holder_name
-    , p.pa_holder_nationalty                 AS sttm_cust_personal_pa_holder_nationalty
+    , p.pa_issued                            AS pers_pa_issued          -- Y/N
+    , p.pa_holder_name                       AS pers_pa_holder_name
+    , p.pa_holder_nationalty                 AS pers_pa_holder_nationalty
     -- KYC Retail (STTM_KYC_RETAIL)
-    , kr.pa_given                            AS sttm_kyc_retail_pa_given              -- Y/N
-    , kr.pa_holder_name                      AS sttm_kyc_retail_pa_holder_name
+    , kr.pa_given                            AS kycr_pa_given           -- Y/N
+    , kr.pa_holder_name                      AS kycr_pa_holder_name
 
 FROM            sttm_customer            c
     LEFT JOIN   sttm_cust_personal       p

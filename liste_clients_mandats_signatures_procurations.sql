@@ -39,9 +39,9 @@ SELECT
     , c.kyc_ref_no                           AS sttm_customer_kyc_ref_no
 
     -- ----------------------------------------------------------------------
-    -- MANDAT (mode de fonctionnement) - STTM_CUST_ACCOUNT (agrege par client)
+    -- MANDAT - STTM_CUST_ACCOUNT (agrege par client)
+    -- NB: MODE_OF_OPERATION non retenue (colonne vide dans toute la base).
     -- ----------------------------------------------------------------------
-    , acc.mode_of_operation                  AS sttm_cust_account_mode_of_operation   -- S/J/E/F/A/M
     , acc.joint_ac_indicator                 AS sttm_cust_account_joint_ac_indicator  -- S=Single / J=Joint
 
     -- ----------------------------------------------------------------------
@@ -76,7 +76,6 @@ FROM            sttm_customer            c
         SELECT
               b.cust_no
             , b.repl_cust_sig
-            , m.mode_of_operation
             , j.joint_ac_indicator
         FROM (
                  SELECT
@@ -85,16 +84,6 @@ FROM            sttm_customer            c
                  FROM   sttm_cust_account a
                  GROUP BY a.cust_no
              ) b
-        LEFT JOIN (
-                 SELECT
-                       d.cust_no
-                     , LISTAGG(d.mode_of_operation, ', ')
-                           WITHIN GROUP (ORDER BY d.mode_of_operation)  AS mode_of_operation
-                 FROM ( SELECT DISTINCT cust_no, mode_of_operation
-                        FROM   sttm_cust_account ) d
-                 GROUP BY d.cust_no
-             ) m
-               ON m.cust_no = b.cust_no
         LEFT JOIN (
                  SELECT
                        e.cust_no

@@ -79,28 +79,57 @@ FROM            sttm_customer            c
            ON   kr.kyc_ref_no  = c.kyc_ref_no
 
     -- ---- Agregation des COMPTES par client (mandat + signature repliquee) ----
+    -- NB: le DISTINCT est applique dans des sous-requetes imbriquees car
+    --     LISTAGG(DISTINCT ...) n'est disponible qu'a partir d'Oracle 19c.
     LEFT JOIN (
         SELECT
-              a.cust_no
-            , COUNT(*)                                          AS nb_comptes
-            , LISTAGG(DISTINCT a.mode_of_operation, ', ')
-                  WITHIN GROUP (ORDER BY a.mode_of_operation)   AS modes_fonctionnement
-            , LISTAGG(DISTINCT
-                  CASE a.mode_of_operation
-                      WHEN 'S' THEN 'Signature unique'
-                      WHEN 'J' THEN 'Conjointe (Jointly)'
-                      WHEN 'E' THEN 'Indifferente (Either)'
-                      WHEN 'F' THEN 'Premier ou survivant'
-                      WHEN 'A' THEN 'Quiconque ou survivant'
-                      WHEN 'M' THEN 'Titulaire de mandat'
-                      ELSE a.mode_of_operation
-                  END, ', ')
-                  WITHIN GROUP (ORDER BY a.mode_of_operation)   AS modes_fonctionnement_lib
-            , LISTAGG(DISTINCT a.joint_ac_indicator, ', ')
-                  WITHIN GROUP (ORDER BY a.joint_ac_indicator)  AS indicateurs_jointure
-            , MAX(a.repl_cust_sig)                              AS repl_signature_client
-        FROM   sttm_cust_account a
-        GROUP BY a.cust_no
+              b.cust_no
+            , b.nb_comptes
+            , b.repl_signature_client
+            , m.modes_fonctionnement
+            , m.modes_fonctionnement_lib
+            , j.indicateurs_jointure
+        FROM (
+                 SELECT
+                       a.cust_no
+                     , COUNT(*)              AS nb_comptes
+                     , MAX(a.repl_cust_sig)  AS repl_signature_client
+                 FROM   sttm_cust_account a
+                 GROUP BY a.cust_no
+             ) b
+        -- Modes de fonctionnement distincts -> libelles agreges
+        LEFT JOIN (
+                 SELECT
+                       d.cust_no
+                     , LISTAGG(d.mode_of_operation, ', ')
+                           WITHIN GROUP (ORDER BY d.mode_of_operation)  AS modes_fonctionnement
+                     , LISTAGG(
+                           CASE d.mode_of_operation
+                               WHEN 'S' THEN 'Signature unique'
+                               WHEN 'J' THEN 'Conjointe (Jointly)'
+                               WHEN 'E' THEN 'Indifferente (Either)'
+                               WHEN 'F' THEN 'Premier ou survivant'
+                               WHEN 'A' THEN 'Quiconque ou survivant'
+                               WHEN 'M' THEN 'Titulaire de mandat'
+                               ELSE d.mode_of_operation
+                           END, ', ')
+                           WITHIN GROUP (ORDER BY d.mode_of_operation)  AS modes_fonctionnement_lib
+                 FROM ( SELECT DISTINCT cust_no, mode_of_operation
+                        FROM   sttm_cust_account ) d
+                 GROUP BY d.cust_no
+             ) m
+               ON m.cust_no = b.cust_no
+        -- Indicateurs de compte joint distincts
+        LEFT JOIN (
+                 SELECT
+                       e.cust_no
+                     , LISTAGG(e.joint_ac_indicator, ', ')
+                           WITHIN GROUP (ORDER BY e.joint_ac_indicator) AS indicateurs_jointure
+                 FROM ( SELECT DISTINCT cust_no, joint_ac_indicator
+                        FROM   sttm_cust_account ) e
+                 GROUP BY e.cust_no
+             ) j
+               ON j.cust_no = b.cust_no
     ) acc
            ON   acc.cust_no    = c.customer_no
 

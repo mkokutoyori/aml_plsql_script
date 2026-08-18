@@ -1575,7 +1575,7 @@ BEGIN
                  FROM LDTB_CONTRACT_MASTER c WHERE c.MODULE = p_module)
               WHERE rn = 1 AND CURRENCY <> p_ccy_locale AND NVL(AMOUNT,0) <> 0) m)
     WHERE taux_ref IS NOT NULL AND taux_ref <> 0
-    AND   ABS(taux_implicite - taux_ref) / taux_ref > p_tol_change_pct;
+    AND   ABS(taux_implicite - taux_ref) / NULLIF(taux_ref,0) > p_tol_change_pct;
     print_test('TRS-313 Contrats en devise a taux de change hors reference CYTB', v_count, NULL, 'MAJEUR');
     IF v_count > 0 THEN
         tbl_line('4,22,8,20,20,16,16,12');
@@ -1586,7 +1586,7 @@ BEGIN
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
             SELECT CONTRACT_REF_NO, CURRENCY, AMOUNT, LCY_AMOUNT, taux_implicite, taux_ref,
-                   ROUND((taux_implicite - taux_ref) / taux_ref * 100, 2) AS ecart_pct
+                   ROUND((taux_implicite - taux_ref) / NULLIF(taux_ref,0) * 100, 2) AS ecart_pct
             FROM (
                 SELECT m.CONTRACT_REF_NO, m.CURRENCY, m.AMOUNT, m.LCY_AMOUNT,
                        m.LCY_AMOUNT / NULLIF(m.AMOUNT,0) AS taux_implicite,
@@ -1601,7 +1601,7 @@ BEGIN
                          FROM LDTB_CONTRACT_MASTER c WHERE c.MODULE = p_module)
                       WHERE rn = 1 AND CURRENCY <> p_ccy_locale AND NVL(AMOUNT,0) <> 0) m)
             WHERE taux_ref IS NOT NULL AND taux_ref <> 0
-            AND   ABS(taux_implicite - taux_ref) / taux_ref > p_tol_change_pct
+            AND   ABS(taux_implicite - taux_ref) / NULLIF(taux_ref,0) > p_tol_change_pct
             ORDER BY ABS(LCY_AMOUNT) DESC) WHERE ROWNUM <= p_echantillon) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
@@ -3545,7 +3545,7 @@ BEGIN
         WHERE  h.MODULE = p_module AND h.AC_CCY <> p_ccy_locale
         AND    NVL(h.EXCH_RATE,0) > 0)
     WHERE taux_ref IS NOT NULL AND taux_ref <> 0
-    AND   ABS(EXCH_RATE - taux_ref) / taux_ref > p_tol_change_pct;
+    AND   ABS(EXCH_RATE - taux_ref) / NULLIF(taux_ref,0) > p_tol_change_pct;
     print_test('TRS-707 Ecritures MM a taux de change hors cours de reference',
                v_count, NULL, 'CRITIQUE');
 
@@ -3690,17 +3690,26 @@ BEGIN
         || RPAD(' SOLDE GL (M XAF)',24) || '|' || RPAD(' DEVISE',12) || '|');
     tbl_line('4,22,10,14,24,24,12');
     v_row_num := 0;
-    FOR d IN (SELECT * FROM (
-        SELECT h.AC_NO, h.AC_BRANCH, COUNT(*) nb,
-               SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE -h.LCY_AMOUNT END) mvt,
-               (SELECT SUM(NVL(b.DR_BAL_LCY,0) - NVL(b.CR_BAL_LCY,0)) FROM GLTB_GL_BAL b
-                WHERE b.GL_CODE = h.AC_NO AND b.BRANCH_CODE = h.AC_BRANCH) solde,
-               MAX(h.AC_CCY) ccy
-        FROM   ACTB_HISTORY h
-        JOIN   STTB_ACCOUNT a ON a.AC_GL_NO = h.AC_NO
-        WHERE  h.MODULE = p_module AND a.AC_OR_GL <> 'A'
-        GROUP BY h.AC_NO, h.AC_BRANCH
-        ORDER BY COUNT(*) DESC) WHERE ROWNUM <= 25) LOOP
+    FOR d IN (
+        WITH gl AS (
+            SELECT b.GL_CODE, b.BRANCH_CODE,
+                   SUM(NVL(b.DR_BAL_LCY,0) - NVL(b.CR_BAL_LCY,0)) AS solde
+            FROM   GLTB_GL_BAL b
+            GROUP BY b.GL_CODE, b.BRANCH_CODE),
+        mv AS (
+            SELECT h.AC_NO, h.AC_BRANCH, COUNT(*) nb,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE -h.LCY_AMOUNT END) mvt,
+                   MAX(h.AC_CCY) ccy
+            FROM   ACTB_HISTORY h
+            JOIN   STTB_ACCOUNT a ON a.AC_GL_NO = h.AC_NO
+            WHERE  h.MODULE = p_module AND a.AC_OR_GL <> 'A'
+            GROUP BY h.AC_NO, h.AC_BRANCH)
+        SELECT * FROM (
+            SELECT mv.AC_NO, mv.AC_BRANCH, mv.nb, mv.mvt, gl.solde, mv.ccy
+            FROM   mv LEFT JOIN gl
+              ON   gl.GL_CODE = mv.AC_NO AND gl.BRANCH_CODE = mv.AC_BRANCH
+            ORDER BY mv.nb DESC)
+        WHERE ROWNUM <= 25) LOOP
         v_row_num := v_row_num + 1;
         DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
             || RPAD(' ' || SUBSTR(d.AC_NO,1,20),22) || '|' || RPAD(' ' || d.AC_BRANCH,10) || '|'

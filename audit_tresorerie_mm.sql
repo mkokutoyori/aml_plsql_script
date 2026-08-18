@@ -3755,26 +3755,28 @@ BEGIN
     tbl_line('4,24,12,12,26');
     v_row_num := 0;
     FOR d IN (
-        SELECT CASE
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_1 THEN '1. 0 a ' || TO_CHAR(p_jours_retard_1) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_2 THEN '2. ' || TO_CHAR(p_jours_retard_1+1) || ' a ' || TO_CHAR(p_jours_retard_2) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_3 THEN '3. ' || TO_CHAR(p_jours_retard_2+1) || ' a ' || TO_CHAR(p_jours_retard_3) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_4 THEN '4. ' || TO_CHAR(p_jours_retard_3+1) || ' a ' || TO_CHAR(p_jours_retard_4) || ' jours'
-                 ELSE                                              '5. plus de ' || TO_CHAR(p_jours_retard_4) || ' jours'
-               END AS palier,
-               COUNT(*) nb, COUNT(DISTINCT CONTRACT_REF_NO) nbc,
-               NVL(SUM(NVL(AMOUNT_DUE,0) - NVL(AMOUNT_PAID,0)),0) mt
-        FROM   LDTB_CONTRACT_LIQ
-        WHERE  CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO FROM LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
-        AND    NVL(AMOUNT_DUE,0) > NVL(AMOUNT_PAID,0) + 0.01
-        GROUP BY CASE
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_1 THEN '1. 0 a ' || TO_CHAR(p_jours_retard_1) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_2 THEN '2. ' || TO_CHAR(p_jours_retard_1+1) || ' a ' || TO_CHAR(p_jours_retard_2) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_3 THEN '3. ' || TO_CHAR(p_jours_retard_2+1) || ' a ' || TO_CHAR(p_jours_retard_3) || ' jours'
-                 WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_4 THEN '4. ' || TO_CHAR(p_jours_retard_3+1) || ' a ' || TO_CHAR(p_jours_retard_4) || ' jours'
-                 ELSE                                              '5. plus de ' || TO_CHAR(p_jours_retard_4) || ' jours'
-               END
-        ORDER BY 1) LOOP
+        SELECT palier, COUNT(*) nb, COUNT(DISTINCT CONTRACT_REF_NO) nbc,
+               NVL(SUM(du_restant),0) mt
+        FROM (
+            SELECT CONTRACT_REF_NO,
+                   NVL(AMOUNT_DUE,0) - NVL(AMOUNT_PAID,0) AS du_restant,
+                   CASE
+                     WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_1
+                          THEN '1. 0 a ' || TO_CHAR(p_jours_retard_1) || ' jours'
+                     WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_2
+                          THEN '2. ' || TO_CHAR(p_jours_retard_1+1) || ' a ' || TO_CHAR(p_jours_retard_2) || ' jours'
+                     WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_3
+                          THEN '3. ' || TO_CHAR(p_jours_retard_2+1) || ' a ' || TO_CHAR(p_jours_retard_3) || ' jours'
+                     WHEN NVL(OVERDUE_DAYS,0) <= p_jours_retard_4
+                          THEN '4. ' || TO_CHAR(p_jours_retard_3+1) || ' a ' || TO_CHAR(p_jours_retard_4) || ' jours'
+                     ELSE      '5. plus de ' || TO_CHAR(p_jours_retard_4) || ' jours'
+                   END AS palier
+            FROM   LDTB_CONTRACT_LIQ
+            WHERE  CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO
+                                       FROM   LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
+            AND    NVL(AMOUNT_DUE,0) > NVL(AMOUNT_PAID,0) + 0.01)
+        GROUP BY palier
+        ORDER BY palier) LOOP
         v_row_num := v_row_num + 1;
         DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
             || RPAD(' ' || d.palier,24) || '|' || LPAD(TO_CHAR(d.nb,'FM999G990'),11) || ' |'
@@ -5232,25 +5234,23 @@ BEGIN
         || RPAD(' NB INTERVENTIONS',16) || '|' || RPAD(' NB UTILISATEURS',20) || '|');
     tbl_line('4,20,16,20');
     v_row_num := 0;
-    FOR d IN (SELECT CASE
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) <  7 THEN '1. 00h - 07h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 12 THEN '2. 07h - 12h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 18 THEN '3. 12h - 18h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 21 THEN '4. 18h - 21h'
-                       ELSE                                                   '5. 21h - 24h'
-                     END AS plage,
-                     COUNT(*) nb, COUNT(DISTINCT c.ENTRY_BY) nbu
-              FROM   LDTB_CONTRACT_CONTROL c
-              WHERE  c.CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO FROM LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
-              AND    c.ENTRY_TIME IS NOT NULL
-              GROUP BY CASE
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) <  7 THEN '1. 00h - 07h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 12 THEN '2. 07h - 12h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 18 THEN '3. 12h - 18h'
-                       WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 21 THEN '4. 18h - 21h'
-                       ELSE                                                   '5. 21h - 24h'
-                     END
-              ORDER BY 1) LOOP
+    FOR d IN (
+        SELECT plage, COUNT(*) nb, COUNT(DISTINCT operateur) nbu
+        FROM (
+            SELECT c.ENTRY_BY AS operateur,
+                   CASE
+                     WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) <  7 THEN '1. 00h - 07h'
+                     WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 12 THEN '2. 07h - 12h'
+                     WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 18 THEN '3. 12h - 18h'
+                     WHEN TO_NUMBER(TO_CHAR(c.ENTRY_TIME,'HH24')) < 21 THEN '4. 18h - 21h'
+                     ELSE                                                   '5. 21h - 24h'
+                   END AS plage
+            FROM   LDTB_CONTRACT_CONTROL c
+            WHERE  c.CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO
+                                         FROM   LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
+            AND    c.ENTRY_TIME IS NOT NULL)
+        GROUP BY plage
+        ORDER BY plage) LOOP
         v_row_num := v_row_num + 1;
         DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
             || RPAD(' ' || d.plage,20) || '|' || LPAD(TO_CHAR(d.nb,'FM999G999G990'),15) || ' |'

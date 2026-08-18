@@ -2137,17 +2137,27 @@ BEGIN
         || RPAD(' NB CTR',12) || '|' || RPAD(' NB ECHEANCES',12) || '|');
     tbl_line('4,20,20,12,12');
     v_row_num := 0;
-    FOR d IN (SELECT NVL(p.AMORTISATION_TYPE,'(vide)') at, NVL(p.CONTRACT_SCHEDULE_TYPE,'(vide)') st,
-                     COUNT(DISTINCT p.CONTRACT_REF_NO) nb,
-                     NVL(SUM((SELECT COUNT(*) FROM LDTB_CONTRACT_SCHEDULES s
-                              WHERE s.CONTRACT_REF_NO = p.CONTRACT_REF_NO)),0) nbe
-              FROM   LDTB_CONTRACT_PREFERENCE p
-              WHERE  p.CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO FROM LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
-              GROUP BY p.AMORTISATION_TYPE, p.CONTRACT_SCHEDULE_TYPE
-              ORDER BY COUNT(*) DESC) LOOP
+    FOR d IN (
+        WITH prefs AS (
+            SELECT p.CONTRACT_REF_NO,
+                   NVL(p.AMORTISATION_TYPE,'(vide)')      AS amort,
+                   NVL(p.CONTRACT_SCHEDULE_TYPE,'(vide)') AS sched
+            FROM   LDTB_CONTRACT_PREFERENCE p
+            WHERE  p.CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO
+                                         FROM   LDTB_CONTRACT_MASTER WHERE MODULE = p_module)),
+        nb_sch AS (
+            SELECT CONTRACT_REF_NO, COUNT(*) AS nb_ech
+            FROM   LDTB_CONTRACT_SCHEDULES
+            GROUP BY CONTRACT_REF_NO)
+        SELECT prefs.amort, prefs.sched,
+               COUNT(DISTINCT prefs.CONTRACT_REF_NO) AS nb,
+               NVL(SUM(nb_sch.nb_ech),0)             AS nbe
+        FROM   prefs LEFT JOIN nb_sch ON nb_sch.CONTRACT_REF_NO = prefs.CONTRACT_REF_NO
+        GROUP BY prefs.amort, prefs.sched
+        ORDER BY COUNT(*) DESC) LOOP
         v_row_num := v_row_num + 1;
         DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-            || RPAD(' ' || d.at,20) || '|' || RPAD(' ' || d.st,20) || '|'
+            || RPAD(' ' || d.amort,20) || '|' || RPAD(' ' || d.sched,20) || '|'
             || LPAD(TO_CHAR(d.nb,'FM999G990'),11) || ' |'
             || LPAD(TO_CHAR(d.nbe,'FM999G999G990'),11) || ' |');
     END LOOP;
@@ -2157,9 +2167,12 @@ BEGIN
     FROM   LDTB_CONTRACT_PREFERENCE p
     WHERE  p.CONTRACT_REF_NO IN (SELECT CONTRACT_REF_NO FROM LDTB_CONTRACT_MASTER WHERE MODULE = p_module)
     AND    p.AMORTISATION_TYPE IS NOT NULL AND TRIM(p.AMORTISATION_TYPE) IS NOT NULL
-    AND   (SELECT COUNT(*) FROM LDTB_CONTRACT_SCHEDULES s
-           WHERE s.CONTRACT_REF_NO = p.CONTRACT_REF_NO
-           AND   UPPER(s.COMPONENT) LIKE 'PRINCIP%') <= 1;
+    AND    NOT EXISTS (SELECT 1
+                       FROM   LDTB_CONTRACT_SCHEDULES s
+                       WHERE  s.CONTRACT_REF_NO = p.CONTRACT_REF_NO
+                       AND    UPPER(s.COMPONENT) LIKE 'PRINCIP%'
+                       GROUP BY s.CONTRACT_REF_NO
+                       HAVING COUNT(*) > 1);
     print_test('TRS-414 Contrats amortissables sans echeancier de principal multiple',
                v_count, NULL, 'MAJEUR');
 
@@ -2217,9 +2230,12 @@ BEGIN
                     FROM LDTB_CONTRACT_MASTER c WHERE c.MODULE = p_module)
                 WHERE rn = 1 AND MAIN_COMP_RATE_CODE IS NOT NULL
                 AND   TRIM(MAIN_COMP_RATE_CODE) IS NOT NULL) m
-            WHERE (SELECT COUNT(DISTINCT i.RATE) FROM LDTB_CONTRACT_ICCF_CALC i
-                   WHERE i.CONTRACT_REF_NO = m.CONTRACT_REF_NO
-                   AND   i.COMPONENT = m.MAIN_COMP) <= 1);
+            WHERE NOT EXISTS (SELECT 1
+                              FROM   LDTB_CONTRACT_ICCF_CALC i
+                              WHERE  i.CONTRACT_REF_NO = m.CONTRACT_REF_NO
+                              AND    i.COMPONENT = m.MAIN_COMP
+                              GROUP BY i.CONTRACT_REF_NO, i.COMPONENT
+                              HAVING COUNT(DISTINCT i.RATE) > 1));
         print_test('TRS-419 Contrats a taux revisable n''ayant jamais ete revises',
                    v_count2, v_count, 'MAJEUR');
     ELSE
@@ -4256,7 +4272,7 @@ BEGIN
         || RPAD(' MONTANT ROLLOVER',24) || '|');
     tbl_line('4,14,14,14,14,12,24');
     v_row_num := 0;
-    FOR d IN (SELECT NVL(r.ROLLOVER_TYPE,'-') rt, NVL(r.ROLLOVER_AMOUNT_TYPE,'-') at,
+    FOR d IN (SELECT NVL(r.ROLLOVER_TYPE,'-') rt, NVL(r.ROLLOVER_AMOUNT_TYPE,'-') amt_type,
                      NVL(r.MATURITY_TYPE,'-') mt, NVL(r.ROLL_INST_STATUS,'(vide)') st,
                      COUNT(*) nb, NVL(SUM(r.ROLLOVER_AMT),0) montant
               FROM   LDTB_CONTRACT_ROLLOVER r
@@ -4265,7 +4281,7 @@ BEGIN
               ORDER BY COUNT(*) DESC) LOOP
         v_row_num := v_row_num + 1;
         DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-            || RPAD(' ' || d.rt,14) || '|' || RPAD(' ' || d.at,14) || '|' || RPAD(' ' || d.mt,14) || '|'
+            || RPAD(' ' || d.rt,14) || '|' || RPAD(' ' || d.amt_type,14) || '|' || RPAD(' ' || d.mt,14) || '|'
             || RPAD(' ' || d.st,14) || '|' || LPAD(TO_CHAR(d.nb,'FM999G990'),11) || ' |'
             || LPAD(TO_CHAR(d.montant,'FM999G999G999G990'),23) || ' |');
     END LOOP;

@@ -642,6 +642,313 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 2 : OVERDRAFTS EXPIRES MAIS TOUJOURS UTILISES
+    -- =========================================================
+    -- Une ligne echue doit etre soit renouvelee formellement, soit
+    -- apuree. Le maintien d'une utilisation apres l'echeance revient
+    -- a accorder un concours sans decision de credit valide.
+    -- =========================================================
+    print_section('2. OVERDRAFTS EXPIRES MAIS TOUJOURS UTILISES');
+
+    -- 2.1 Lignes expirees dont l'utilisation reste positive
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.LINE_EXPIRY_DATE IS NOT NULL
+      AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+      AND NVL(f.UTILISATION,0) > 0;
+    print_test('Lignes expirees avec utilisation > 0', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,13,10,6');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' EXPIRE LE',13) || '|'
+            || RPAD(' J.RETARD',10) || '|' || RPAD(' DISPO',6) || '|');
+        tbl_line('4,12,24,16,5,15,15,13,10,6');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   f.LINE_EXPIRY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(f.LINE_EXPIRY_DATE) AS nb_jours,
+                   NVL(f.AVAILABILITY_FLAG,'-') AS dispo
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.LINE_EXPIRY_DATE IS NOT NULL
+              AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+              AND NVL(f.UTILISATION,0) > 0
+            ORDER BY NVL(f.UTILISATION,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || fmt_d(d.LINE_EXPIRY_DATE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),9) || ' |'
+                || RPAD(' ' || d.dispo,6) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,13,10,6');
+    END IF;
+
+    -- 2.2 Lignes expirees mais toujours declarees disponibles
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.LINE_EXPIRY_DATE IS NOT NULL
+      AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+      AND NVL(f.AVAILABILITY_FLAG,'N') = 'Y'
+      AND f.RECORD_STAT = 'O';
+    print_test('Lignes expirees encore disponibles (AVAILABILITY=Y)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' DISPONIBLE',15) || '|' || RPAD(' EXPIRE LE',13) || '|'
+            || RPAD(' J.RETARD',10) || '|');
+        tbl_line('4,12,24,16,5,15,15,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.AVAILABLE_AMOUNT,0) AS dispo,
+                   f.LINE_EXPIRY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(f.LINE_EXPIRY_DATE) AS nb_jours
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.LINE_EXPIRY_DATE IS NOT NULL
+              AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+              AND NVL(f.AVAILABILITY_FLAG,'N') = 'Y'
+              AND f.RECORD_STAT = 'O'
+            ORDER BY NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.dispo),14) || ' |'
+                || RPAD(' ' || fmt_d(d.LINE_EXPIRY_DATE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),9) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,13,10');
+    END IF;
+
+    -- 2.3 Comptes debiteurs rattaches a une (ou des) ligne(s) toutes expirees
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.CUST_AC_NO
+        FROM STTM_CUST_ACCOUNT a
+        JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+        WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+        GROUP BY a.CUST_AC_NO
+        HAVING MAX(f.LINE_EXPIRY_DATE) < TRUNC(SYSDATE)
+           AND COUNT(CASE WHEN f.LINE_EXPIRY_DATE IS NULL THEN 1 END) = 0
+    );
+    print_test('Comptes debiteurs sur ligne(s) toutes expirees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,16,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' DERN. LIGNE',16) || '|' || RPAD(' EXPIREE LE',13) || '|'
+            || RPAD(' J.RETARD',10) || '|');
+        tbl_line('4,12,24,20,5,15,16,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   MIN(a.ACY_CURR_BALANCE) AS solde,
+                   MAX(a.LINE_ID) AS ligne,
+                   MAX(f.LINE_EXPIRY_DATE) AS expiry,
+                   TRUNC(SYSDATE) - TRUNC(MAX(f.LINE_EXPIRY_DATE)) AS nb_jours
+            FROM STTM_CUST_ACCOUNT a
+            JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+            GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, a.CUST_AC_NO, a.CCY
+            HAVING MAX(f.LINE_EXPIRY_DATE) < TRUNC(SYSDATE)
+               AND COUNT(CASE WHEN f.LINE_EXPIRY_DATE IS NULL THEN 1 END) = 0
+            ORDER BY MIN(a.ACY_CURR_BALANCE) ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.expiry),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),9) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,16,13,10');
+    END IF;
+
+    -- 2.4 TOD (decouverts temporaires) expires et compte toujours debiteur
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND NVL(a.TOD_LIMIT,0) > 0
+      AND a.TOD_LIMIT_END_DATE IS NOT NULL
+      AND a.TOD_LIMIT_END_DATE < TRUNC(SYSDATE);
+    print_test('TOD expires avec compte encore debiteur', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,15,13,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' TOD',15) || '|' || RPAD(' DEBUT TOD',13) || '|'
+            || RPAD(' FIN TOD',13) || '|' || RPAD(' J.RETARD',9) || '|');
+        tbl_line('4,12,24,20,5,15,15,13,13,9');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, NVL(a.TOD_LIMIT,0) AS tod,
+                   a.TOD_LIMIT_START_DATE, a.TOD_LIMIT_END_DATE,
+                   TRUNC(SYSDATE) - TRUNC(a.TOD_LIMIT_END_DATE) AS nb_jours
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND NVL(a.TOD_LIMIT,0) > 0
+              AND a.TOD_LIMIT_END_DATE IS NOT NULL
+              AND a.TOD_LIMIT_END_DATE < TRUNC(SYSDATE)
+            ORDER BY a.TOD_LIMIT_END_DATE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |' || LPAD(fmt_m(d.tod),14) || ' |'
+                || RPAD(' ' || fmt_d(d.TOD_LIMIT_START_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.TOD_LIMIT_END_DATE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,15,13,13,9');
+    END IF;
+
+    -- 2.5 Mouvements debiteurs enregistres APRES l'expiration de la ligne
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.CUST_AC_NO
+        FROM STTM_CUST_ACCOUNT a
+        JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+        JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO
+             AND h.DRCR_IND = 'D'
+             AND h.TRN_DT > f.LINE_EXPIRY_DATE
+             AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        WHERE a.RECORD_STAT = 'O'
+          AND f.LINE_EXPIRY_DATE IS NOT NULL
+          AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+        GROUP BY a.CUST_AC_NO
+    );
+    print_test('Comptes : debits posterieurs a l''expiration de la ligne', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,16,13,9,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' LIGNE',16) || '|' || RPAD(' EXPIREE LE',13) || '|'
+            || RPAD(' NB DEBITS',9) || '|' || RPAD(' TOTAL DEBITS',17) || '|');
+        tbl_line('4,12,24,20,16,13,9,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO,
+                   MAX(a.LINE_ID) AS ligne, MAX(f.LINE_EXPIRY_DATE) AS expiry,
+                   COUNT(*) AS nb_deb, SUM(h.LCY_AMOUNT) AS total_deb
+            FROM STTM_CUST_ACCOUNT a
+            JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+            JOIN ACTB_HISTORY h ON h.AC_NO = a.CUST_AC_NO
+                 AND h.DRCR_IND = 'D'
+                 AND h.TRN_DT > f.LINE_EXPIRY_DATE
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND f.LINE_EXPIRY_DATE IS NOT NULL
+              AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
+            GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, a.CUST_AC_NO
+            ORDER BY SUM(h.LCY_AMOUNT) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.expiry),13) || '|'
+                || LPAD(fmt_n(d.nb_deb),8) || ' |'
+                || LPAD(fmt_m(d.total_deb),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,16,13,9,17');
+    END IF;
+
+    -- 2.6 Lignes utilisees sans date d'expiration (concours perpetuel)
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.LINE_EXPIRY_DATE IS NULL
+      AND NVL(f.UTILISATION,0) > 0
+      AND f.RECORD_STAT = 'O';
+    print_test('Lignes utilisees sans date d''expiration', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,13,11');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' DEBUT LE',13) || '|'
+            || RPAD(' ANCIENNETE',11) || '|');
+        tbl_line('4,12,24,16,5,15,15,13,11');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   f.LINE_START_DATE,
+                   TRUNC(SYSDATE) - TRUNC(f.LINE_START_DATE) AS anciennete
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.LINE_EXPIRY_DATE IS NULL
+              AND NVL(f.UTILISATION,0) > 0
+              AND f.RECORD_STAT = 'O'
+            ORDER BY NVL(f.UTILISATION,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || fmt_d(d.LINE_START_DATE),13) || '|'
+                || LPAD(fmt_n(d.anciennete) || ' j',10) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,13,11');
+    END IF;
+
+    -- 2.7 Incoherences de dates sur les lignes (expiration <= debut)
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.LINE_START_DATE IS NOT NULL AND f.LINE_EXPIRY_DATE IS NOT NULL
+      AND f.LINE_EXPIRY_DATE <= f.LINE_START_DATE;
+    print_test('Lignes : date d''expiration <= date de debut', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,13,13,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' DEBUT',13) || '|' || RPAD(' EXPIRATION',13) || '|'
+            || RPAD(' UTILISE',15) || '|');
+        tbl_line('4,12,24,16,5,15,13,13,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, f.LINE_START_DATE, f.LINE_EXPIRY_DATE,
+                   NVL(f.UTILISATION,0) AS util
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.LINE_START_DATE IS NOT NULL AND f.LINE_EXPIRY_DATE IS NOT NULL
+              AND f.LINE_EXPIRY_DATE <= f.LINE_START_DATE
+            ORDER BY NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |'
+                || RPAD(' ' || fmt_d(d.LINE_START_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.LINE_EXPIRY_DATE),13) || '|'
+                || LPAD(fmt_m(d.util),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,13,13,15');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

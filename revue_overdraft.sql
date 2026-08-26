@@ -1305,6 +1305,311 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 4 : OVERDRAFTS DEPASSES PENDANT UNE LONGUE PERIODE
+    -- =========================================================
+    -- Un decouvert durablement immobilise n'est plus une facilite de
+    -- tresorerie mais un credit de fait : il doit etre consolide,
+    -- provisionne et declasse selon les regles prudentielles.
+    -- =========================================================
+    print_section('4. OVERDRAFTS DEPASSES PENDANT UNE LONGUE PERIODE');
+
+    -- Ventilation de l'anciennete des positions debitrices (informatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Anciennete des positions debitrices — OVERDRAFT_SINCE]');
+    FOR d IN (SELECT tranche, COUNT(*) AS nb, NVL(SUM(ABS(solde)),0) AS mnt
+              FROM (SELECT CASE
+                             WHEN TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) <= 30  THEN '1. 0 a 30 jours'
+                             WHEN TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) <= 90  THEN '2. 31 a 90 jours'
+                             WHEN TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) <= 180 THEN '3. 91 a 180 jours'
+                             WHEN TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) <= 365 THEN '4. 181 a 365 jours'
+                             ELSE '5. plus de 365 jours'
+                           END AS tranche,
+                           a.LCY_CURR_BALANCE AS solde
+                    FROM STTM_CUST_ACCOUNT a
+                    WHERE a.RECORD_STAT = 'O'
+                      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+                      AND a.OVERDRAFT_SINCE IS NOT NULL)
+              GROUP BY tranche
+              ORDER BY tranche) LOOP
+        print_info(d.tranche, fmt_n(d.nb) || ' compte(s) — ' || fmt_m(d.mnt));
+    END LOOP;
+
+    -- 4.1 Comptes en position debitrice depuis plus de c_jours_long
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND a.OVERDRAFT_SINCE IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long;
+    print_test('Comptes debiteurs depuis plus de ' || c_jours_long || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,13,9,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' OD DEPUIS',13) || '|' || RPAD(' JOURS',9) || '|'
+            || RPAD(' INT. DUS',15) || '|');
+        tbl_line('4,12,24,20,5,15,13,9,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) AS nb_jours,
+                   NVL(a.DR_INT_DUE,0) AS int_dus
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND a.OVERDRAFT_SINCE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long
+            ORDER BY a.OVERDRAFT_SINCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |'
+                || LPAD(fmt_m(d.int_dus),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,13,9,15');
+    END IF;
+
+    -- 4.2 Comptes en depassement de ligne depuis plus de c_jours_long
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.OVERLINE_OD_SINCE IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) > c_jours_long;
+    print_test('Comptes en depassement de ligne > ' || c_jours_long || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,14,9,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' OVERLINE LE',14) || '|' || RPAD(' JOURS',9) || '|'
+            || RPAD(' LIGNE',16) || '|');
+        tbl_line('4,12,24,20,5,15,14,9,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERLINE_OD_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) AS nb_jours,
+                   NVL(a.LINE_ID,'-') AS ligne
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.OVERLINE_OD_SINCE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) > c_jours_long
+            ORDER BY a.OVERLINE_OD_SINCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERLINE_OD_SINCE),14) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,14,9,16');
+    END IF;
+
+    -- 4.3 TOD utilises au-dela de la duree normale d'un decouvert temporaire
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.TOD_SINCE IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(a.TOD_SINCE) > c_jours_tod_max;
+    print_test('TOD en cours depuis plus de ' || c_jours_tod_max || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,15,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' TOD',15) || '|' || RPAD(' TOD DEPUIS',13) || '|'
+            || RPAD(' JOURS',9) || '|');
+        tbl_line('4,12,24,20,5,15,15,13,9');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, NVL(a.TOD_LIMIT,0) AS tod, a.TOD_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.TOD_SINCE) AS nb_jours
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.TOD_SINCE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(a.TOD_SINCE) > c_jours_tod_max
+            ORDER BY a.TOD_SINCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |' || LPAD(fmt_m(d.tod),14) || ' |'
+                || RPAD(' ' || fmt_d(d.TOD_SINCE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,15,13,9');
+    END IF;
+
+    -- 4.4 Lignes en depassement dont le premier decouvert est ancien
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.DATE_OF_FIRST_OD IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(f.DATE_OF_FIRST_OD) > c_jours_tres_long
+      AND NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0);
+    print_test('Lignes en depassement depuis plus de ' || c_jours_tres_long || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,15,15,13,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|'
+            || RPAD(' 1er OD LE',13) || '|' || RPAD(' DERN. OD LE',13) || '|' || RPAD(' JOURS',9) || '|');
+        tbl_line('4,12,24,16,15,15,13,13,9');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, f.LINE_CODE,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   f.DATE_OF_FIRST_OD, f.DATE_OF_LAST_OD,
+                   TRUNC(SYSDATE) - TRUNC(f.DATE_OF_FIRST_OD) AS nb_jours
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.DATE_OF_FIRST_OD IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(f.DATE_OF_FIRST_OD) > c_jours_tres_long
+              AND NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0)
+            ORDER BY f.DATE_OF_FIRST_OD ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || fmt_d(d.DATE_OF_FIRST_OD),13) || '|'
+                || RPAD(' ' || fmt_d(d.DATE_OF_LAST_OD),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,15,15,13,13,9');
+    END IF;
+
+    -- 4.5 Plus longue periode CONTINUE de solde debiteur sur la periode
+    --     (reconstituee a partir des soldes journaliers ACTB_ACCBAL_HISTORY)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT ACCOUNT
+        FROM (
+            SELECT ACCOUNT, grp, MAX(BKG_DATE) - MIN(BKG_DATE) + 1 AS duree
+            FROM (
+                SELECT ACCOUNT, BKG_DATE,
+                       SUM(top_dep) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS grp
+                FROM (
+                    SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                           CASE WHEN NVL(LAG(ACY_CLOSING_BAL)
+                                OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE),0) < 0
+                                THEN 0 ELSE 1 END AS top_dep
+                    FROM ACTB_ACCBAL_HISTORY
+                    WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                )
+                WHERE ACY_CLOSING_BAL < 0
+            )
+            GROUP BY ACCOUNT, grp
+        )
+        GROUP BY ACCOUNT
+        HAVING MAX(duree) > c_jours_long
+    );
+    print_test('Comptes : periode continue debitrice > ' || c_jours_long || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,13,13,9,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' DEBUT',13) || '|' || RPAD(' FIN',13) || '|'
+            || RPAD(' DUREE(j)',9) || '|' || RPAD(' PIRE SOLDE',16) || '|');
+        tbl_line('4,12,24,20,13,13,9,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT x.ACCOUNT, NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   x.deb, x.fin, x.duree, x.pire
+            FROM (
+                SELECT ACCOUNT, deb, fin, duree, pire,
+                       ROW_NUMBER() OVER (PARTITION BY ACCOUNT ORDER BY duree DESC) AS rn
+                FROM (
+                    SELECT ACCOUNT, grp, MIN(BKG_DATE) AS deb, MAX(BKG_DATE) AS fin,
+                           MAX(BKG_DATE) - MIN(BKG_DATE) + 1 AS duree,
+                           MIN(ACY_CLOSING_BAL) AS pire
+                    FROM (
+                        SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                               SUM(top_dep) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS grp
+                        FROM (
+                            SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                                   CASE WHEN NVL(LAG(ACY_CLOSING_BAL)
+                                        OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE),0) < 0
+                                        THEN 0 ELSE 1 END AS top_dep
+                            FROM ACTB_ACCBAL_HISTORY
+                            WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                        )
+                        WHERE ACY_CLOSING_BAL < 0
+                    )
+                    GROUP BY ACCOUNT, grp
+                )
+            ) x
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = x.ACCOUNT
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE x.rn = 1 AND x.duree > c_jours_long
+            ORDER BY x.duree DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || RPAD(' ' || fmt_d(d.deb),13) || '|' || RPAD(' ' || fmt_d(d.fin),13) || '|'
+                || LPAD(fmt_n(d.duree),8) || ' |'
+                || LPAD(fmt_m(d.pire),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,13,13,9,16');
+    END IF;
+
+    -- 4.6 Comptes jamais revenus en position creditrice sur la periode
+    --     => decouvert structurel (credit deguise)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT h.ACCOUNT
+        FROM ACTB_ACCBAL_HISTORY h
+        WHERE h.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        GROUP BY h.ACCOUNT
+        HAVING MAX(h.ACY_CLOSING_BAL) < 0
+           AND COUNT(*) >= c_jours_long
+    );
+    print_test('Comptes constamment debiteurs sur ' || c_mois_hist || ' mois', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,9,16,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' NB JOURS',9) || '|'
+            || RPAD(' SOLDE MOYEN',16) || '|' || RPAD(' PIRE SOLDE',16) || '|' || RPAD(' SOLDE FINAL',16) || '|');
+        tbl_line('4,12,24,20,9,16,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT x.ACCOUNT, NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   x.nb_jours, x.moyen, x.pire, x.dernier
+            FROM (
+                SELECT h.ACCOUNT, COUNT(*) AS nb_jours, AVG(h.ACY_CLOSING_BAL) AS moyen,
+                       MIN(h.ACY_CLOSING_BAL) AS pire,
+                       MAX(h.ACY_CLOSING_BAL) KEEP (DENSE_RANK LAST ORDER BY h.BKG_DATE) AS dernier
+                FROM ACTB_ACCBAL_HISTORY h
+                WHERE h.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                GROUP BY h.ACCOUNT
+                HAVING MAX(h.ACY_CLOSING_BAL) < 0
+                   AND COUNT(*) >= c_jours_long
+            ) x
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = x.ACCOUNT
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            ORDER BY x.pire ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |'
+                || LPAD(fmt_m(d.moyen),15) || ' |' || LPAD(fmt_m(d.pire),15) || ' |'
+                || LPAD(fmt_m(d.dernier),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,9,16,16,16');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

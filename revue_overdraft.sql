@@ -3604,6 +3604,297 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 12 : COMPTES PRESENTANT DES DEPASSEMENTS RECURRENTS
+    -- =========================================================
+    -- La recurrence se mesure en episodes distincts de position
+    -- debitrice, reconstitues a partir des soldes journaliers : un
+    -- nouvel episode commence des que le solde repasse sous zero apres
+    -- un retour a l'equilibre. Un compte qui alterne sans cesse traduit
+    -- soit un besoin de financement structurel non formalise, soit un
+    -- pilotage du compte pour eviter le declassement.
+    -- =========================================================
+    print_section('12. COMPTES PRESENTANT DES DEPASSEMENTS RECURRENTS');
+
+    -- 12.1 Comptes cumulant plusieurs episodes distincts de decouvert
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT ACCOUNT
+        FROM (
+            SELECT ACCOUNT, ACY_CLOSING_BAL,
+                   LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+            FROM ACTB_ACCBAL_HISTORY
+            WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        )
+        WHERE ACY_CLOSING_BAL < 0
+        GROUP BY ACCOUNT
+        HAVING SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) >= c_nb_episodes
+    );
+    print_test('Comptes avec au moins ' || c_nb_episodes || ' episodes de decouvert', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,10,10,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' NB EPIS.',10) || '|' || RPAD(' NB JOURS',10) || '|'
+            || RPAD(' PIRE SOLDE',17) || '|' || RPAD(' SOLDE ACTUEL',17) || '|');
+        tbl_line('4,12,22,20,10,10,17,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, ep.ACCOUNT,
+                   ep.nb_ep, ep.nb_j, ep.pire, NVL(a.ACY_CURR_BALANCE,0) AS solde
+            FROM (
+                SELECT ACCOUNT,
+                       SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) AS nb_ep,
+                       COUNT(*) AS nb_j, MIN(ACY_CLOSING_BAL) AS pire
+                FROM (
+                    SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                           LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+                    FROM ACTB_ACCBAL_HISTORY
+                    WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                )
+                WHERE ACY_CLOSING_BAL < 0
+                GROUP BY ACCOUNT
+                HAVING SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) >= c_nb_episodes
+            ) ep
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = ep.ACCOUNT
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            ORDER BY ep.nb_ep DESC, ep.nb_j DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || LPAD(fmt_n(d.nb_ep),9) || ' |' || LPAD(fmt_n(d.nb_j),9) || ' |'
+                || LPAD(fmt_m(d.pire),16) || ' |' || LPAD(fmt_m(d.solde),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,20,10,10,17,17');
+    END IF;
+
+    -- 12.2 Comptes passant une part importante de l'annee en position
+    --      debitrice
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT ACCOUNT
+        FROM ACTB_ACCBAL_HISTORY
+        WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+          AND ACY_CLOSING_BAL < 0
+        GROUP BY ACCOUNT
+        HAVING COUNT(*) > c_jours_recur
+    );
+    print_test('Comptes debiteurs plus de ' || c_jours_recur || ' jours sur la periode', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,10,17,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' NB JOURS',10) || '|'
+            || RPAD(' ENCOURS MOYEN',17) || '|' || RPAD(' PIRE SOLDE',17) || '|' || RPAD(' SOLDE ACTUEL',17) || '|');
+        tbl_line('4,12,22,20,10,17,17,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, s.ACCOUNT,
+                   s.nb_j, s.moyen, s.pire, NVL(a.ACY_CURR_BALANCE,0) AS solde
+            FROM (
+                SELECT ACCOUNT, COUNT(*) AS nb_j, AVG(ACY_CLOSING_BAL) AS moyen,
+                       MIN(ACY_CLOSING_BAL) AS pire
+                FROM ACTB_ACCBAL_HISTORY
+                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND ACY_CLOSING_BAL < 0
+                GROUP BY ACCOUNT
+                HAVING COUNT(*) > c_jours_recur
+            ) s
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            ORDER BY s.nb_j DESC, s.pire ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || LPAD(fmt_n(d.nb_j),9) || ' |'
+                || LPAD(fmt_m(d.moyen),16) || ' |' || LPAD(fmt_m(d.pire),16) || ' |'
+                || LPAD(fmt_m(d.solde),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,20,10,17,17,17');
+    END IF;
+
+    -- 12.3 Comptes en recidive selon FLEXCUBE (decouvert precedent
+    --      documente ET nouveau decouvert en cours)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.PREV_OVD_DATE IS NOT NULL
+      AND a.OVERDRAFT_SINCE IS NOT NULL;
+    print_test('Comptes en recidive (PREV_OVD_DATE et OVERDRAFT_SINCE)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,5,16,13,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',16) || '|' || RPAD(' OD PRECEDENT',13) || '|' || RPAD(' OD ACTUEL',13) || '|'
+            || RPAD(' ECART(j)',10) || '|');
+        tbl_line('4,12,22,20,5,16,13,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.PREV_OVD_DATE, a.OVERDRAFT_SINCE,
+                   TRUNC(a.OVERDRAFT_SINCE) - TRUNC(a.PREV_OVD_DATE) AS ecart
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.PREV_OVD_DATE IS NOT NULL
+              AND a.OVERDRAFT_SINCE IS NOT NULL
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || fmt_d(d.PREV_OVD_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+                || LPAD(fmt_n(d.ecart),9) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,20,5,16,13,13,10');
+    END IF;
+
+    -- 12.4 Comptes a decouverts temporaires repetes (TOD precedent
+    --      documente)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.PREV_TOD_SINCE IS NOT NULL;
+    print_test('Comptes a TOD repetes (PREV_TOD_SINCE renseigne)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,16,16,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' TOD',16) || '|' || RPAD(' SOLDE',16) || '|'
+            || RPAD(' TOD PRECED.',13) || '|' || RPAD(' TOD ACTUEL',13) || '|');
+        tbl_line('4,12,22,20,16,16,13,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO,
+                   NVL(a.TOD_LIMIT,0) AS tod, a.ACY_CURR_BALANCE AS solde,
+                   a.PREV_TOD_SINCE, a.TOD_SINCE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.PREV_TOD_SINCE IS NOT NULL
+            ORDER BY NVL(a.TOD_LIMIT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|'
+                || LPAD(fmt_m(d.tod),15) || ' |' || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || fmt_d(d.PREV_TOD_SINCE),13) || '|'
+                || RPAD(' ' || fmt_d(d.TOD_SINCE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,16,16,13,13');
+    END IF;
+
+    -- 12.5 Lignes ayant connu plusieurs depassements exceptionnels
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.EXCEP_BREACH,0) >= 2;
+    print_test('Lignes avec au moins 2 depassements exceptionnels', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,10,16,16,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' NB BREACH',10) || '|' || RPAD(' LIMITE',16) || '|'
+            || RPAD(' UTILISE',16) || '|' || RPAD(' 1er OD',13) || '|' || RPAD(' DERNIER OD',13) || '|');
+        tbl_line('4,12,24,16,10,16,16,13,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, f.LINE_CODE,
+                   NVL(f.EXCEP_BREACH,0) AS nb_breach, NVL(f.LIMIT_AMOUNT,0) AS limite,
+                   NVL(f.UTILISATION,0) AS util, f.DATE_OF_FIRST_OD, f.DATE_OF_LAST_OD
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.EXCEP_BREACH,0) >= 2
+            ORDER BY NVL(f.EXCEP_BREACH,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|'
+                || LPAD(fmt_n(d.nb_breach),9) || ' |'
+                || LPAD(fmt_m(d.limite),15) || ' |' || LPAD(fmt_m(d.util),15) || ' |'
+                || RPAD(' ' || fmt_d(d.DATE_OF_FIRST_OD),13) || '|'
+                || RPAD(' ' || fmt_d(d.DATE_OF_LAST_OD),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,10,16,16,13,13');
+    END IF;
+
+    -- 12.6 Synthese : comptes cumulant plusieurs facteurs de risque
+    --      (1 point par critere) — support de priorisation des controles
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Comptes cumulant au moins 3 facteurs de risque overdraft]');
+    DBMS_OUTPUT.PUT_LINE('   Criteres : A=depassement autorisation  B=OD > ' || c_jours_long || ' j'
+        || '  C=' || c_nb_episodes || ' episodes ou +  D=aucun interet debiteur'
+        || '  E=ecritures manuelles  F=ligne expiree');
+    tbl_line('4,12,22,20,17,7,7,7,7,7,7,7');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+        || RPAD(' COMPTE',20) || '|' || RPAD(' SOLDE',17) || '|'
+        || RPAD(' A',7) || '|' || RPAD(' B',7) || '|' || RPAD(' C',7) || '|' || RPAD(' D',7) || '|'
+        || RPAD(' E',7) || '|' || RPAD(' F',7) || '|' || RPAD(' SCORE',7) || '|');
+    tbl_line('4,12,22,20,17,7,7,7,7,7,7,7');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT cif, nom, compte, solde, fa, fb, fc, fd, fe, ff,
+               fa + fb + fc + fd + fe + ff AS score
+        FROM (
+            SELECT a.CUST_NO AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO AS compte,
+                   a.ACY_CURR_BALANCE AS solde,
+                   CASE WHEN ABS(a.ACY_CURR_BALANCE) >
+                             NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                                  WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                                    AND f.RECORD_STAT = 'O'),0) + NVL(a.TOD_LIMIT,0)
+                        THEN 1 ELSE 0 END AS fa,
+                   CASE WHEN a.OVERDRAFT_SINCE IS NOT NULL
+                         AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long
+                        THEN 1 ELSE 0 END AS fb,
+                   CASE WHEN NVL(ep.nb_ep,0) >= c_nb_episodes THEN 1 ELSE 0 END AS fc,
+                   CASE WHEN NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
+                                         WHERE h.AC_NO = a.CUST_AC_NO
+                                           AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                                           AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
+                        THEN 1 ELSE 0 END AS fd,
+                   CASE WHEN EXISTS (SELECT 1 FROM ACTB_HISTORY h
+                                     WHERE h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'DE'
+                                       AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
+                        THEN 1 ELSE 0 END AS fe,
+                   CASE WHEN EXISTS (SELECT 1 FROM GETM_FACILITY f
+                                     WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                                       AND f.LINE_EXPIRY_DATE IS NOT NULL
+                                       AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE))
+                        THEN 1 ELSE 0 END AS ff
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            LEFT JOIN (
+                SELECT ACCOUNT, SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) AS nb_ep
+                FROM (
+                    SELECT ACCOUNT, ACY_CLOSING_BAL,
+                           LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+                    FROM ACTB_ACCBAL_HISTORY
+                    WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                )
+                WHERE ACY_CLOSING_BAL < 0
+                GROUP BY ACCOUNT
+            ) ep ON ep.ACCOUNT = a.CUST_AC_NO
+            WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+        )
+        WHERE fa + fb + fc + fd + fe + ff >= 3
+        ORDER BY fa + fb + fc + fd + fe + ff DESC, solde ASC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || d.compte,20) || '|'
+            || LPAD(fmt_m(d.solde),16) || ' |'
+            || LPAD(d.fa,6) || ' |' || LPAD(d.fb,6) || ' |' || LPAD(d.fc,6) || ' |'
+            || LPAD(d.fd,6) || ' |' || LPAD(d.fe,6) || ' |' || LPAD(d.ff,6) || ' |'
+            || LPAD(d.score,6) || ' |');
+    END LOOP;
+    tbl_line('4,12,22,20,17,7,7,7,7,7,7,7');
+    IF v_row_num = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('  (aucun compte ne cumule 3 facteurs de risque ou plus)');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

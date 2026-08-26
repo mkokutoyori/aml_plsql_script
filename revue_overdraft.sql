@@ -43,6 +43,32 @@
 --   - Les seuils de la revue sont parametrables dans le bloc PARAMETRES
 --     ci-dessous : ils DOIVENT etre alignes sur la grille de delegation
 --     de pouvoirs en vigueur dans l'etablissement.
+--
+-- PERIMETRE DE LA REVUE
+--   La revue porte exclusivement sur les COMPTES CLIENTELISES, c'est
+--   a dire les comptes dont le GL naturel (STTB_ACCOUNT.AC_NATURAL_GL)
+--   commence par le prefixe c_gl_client ('37'). Les comptes internes,
+--   comptes de position, comptes de passage et GL techniques sont donc
+--   exclus de tous les tests.
+--   Le rattachement s'opere par la cle (AC_GL_NO, BRANCH_CODE) de
+--   STTB_ACCOUNT vers (CUST_AC_NO, BRANCH_CODE) de STTM_CUST_ACCOUNT,
+--   et vers (AC_NO, AC_BRANCH) pour les ecritures d'ACTB_HISTORY.
+--   Une ligne de credit (GETM_FACILITY) entre dans le perimetre des
+--   qu'elle est rattachee a au moins un compte clientelise.
+--
+-- PERFORMANCE
+--   Le script a ete optimise pour limiter le cout des balayages sur les
+--   tables volumineuses (ACTB_HISTORY ~5,8 M lignes,
+--   ACTB_ACCBAL_HISTORY ~0,5 M lignes) :
+--     - chaque test est execute en UNE SEULE passe : le comptage et le
+--       detail sont obtenus par la meme requete (COUNT(*) OVER () et
+--       ROW_NUMBER()), les lignes etant bufferisees avant affichage ;
+--     - le perimetre clientelise est applique le plus tot possible,
+--       avant toute jointure sur les historiques ;
+--     - les jeux de travail partages par plusieurs tests d'une meme
+--       section sont materialises une fois (WITH ... /*+ MATERIALIZE */) ;
+--     - les sous-requetes correlees a predicat OR sur les cles de ligne
+--       ont ete remplacees par des equi-jointures sur une cle normalisee.
 -- ============================================================
 
 SET ECHO OFF
@@ -61,9 +87,23 @@ DECLARE
     v_row_num       NUMBER := 0;
     v_montant       NUMBER;
 
+    -- Buffer d'affichage : les lignes de detail d'un test sont
+    -- accumulees ici pendant le parcours du curseur, puis affichees
+    -- APRES la ligne [TEST nnn]. C'est ce buffer qui permet de ne
+    -- lancer qu'UNE SEULE requete par test (le compteur est ramene
+    -- par la requete de detail elle-meme) au lieu de deux.
+    TYPE t_lines IS TABLE OF VARCHAR2(600) INDEX BY PLS_INTEGER;
+    v_buf           t_lines;
+
     -- =========================================================
     -- PARAMETRES DE LA REVUE (a adapter au dispositif interne)
     -- =========================================================
+    -- Perimetre : prefixe du GL naturel des comptes clientelises.
+    -- Seuls les comptes dont STTB_ACCOUNT.AC_NATURAL_GL commence par ce
+    -- prefixe sont retenus dans l'ensemble des tests de la revue.
+    c_gl_client         CONSTANT VARCHAR2(10) := '37';
+    c_gl_like           CONSTANT VARCHAR2(12) := c_gl_client || '%';
+
     -- Nombre maximum de lignes affichees par test
     c_max_rows          CONSTANT NUMBER := 30;
 
@@ -171,6 +211,58 @@ DECLARE
         RETURN NVL(TO_CHAR(p_dt, 'DD/MM/YYYY'), '-');
     END;
 
+    -- =========================================================
+    -- GESTION DU BUFFER DE DETAIL (execution en une seule passe)
+    -- =========================================================
+    -- Schema d'un test :
+    --   buf_reset;
+    --   FOR d IN (... COUNT(*) OVER () AS tot_cnt,
+    --                 ROW_NUMBER() OVER (ORDER BY ...) AS rn
+    --             ... WHERE rn <= c_max_rows ORDER BY rn) LOOP
+    --       v_count := d.tot_cnt;
+    --       buf_add('  |' || ...);
+    --   END LOOP;
+    --   print_test('libelle', v_count);
+    --   buf_print('largeurs', 'entete');
+    -- La requete n'est ainsi executee qu'une fois : elle rapporte a la
+    -- fois le nombre total d'occurrences (tot_cnt, calcule avant la
+    -- troncature a c_max_rows) et les lignes de detail a afficher.
+
+    -- Reinitialise le buffer avant un test
+    PROCEDURE buf_reset IS
+    BEGIN
+        v_buf.DELETE;
+        v_row_num := 0;
+        v_count   := 0;
+    END;
+
+    -- Ajoute une ligne de detail au buffer
+    PROCEDURE buf_add(p_line VARCHAR2) IS
+    BEGIN
+        v_row_num := v_row_num + 1;
+        v_buf(v_row_num) := p_line;
+    END;
+
+    -- Affiche le tableau bufferise (entete + lignes + pied)
+    PROCEDURE buf_print(p_widths VARCHAR2, p_header VARCHAR2) IS
+    BEGIN
+        IF v_row_num = 0 THEN
+            RETURN;
+        END IF;
+        tbl_line(p_widths);
+        DBMS_OUTPUT.PUT_LINE(p_header);
+        tbl_line(p_widths);
+        FOR i IN 1 .. v_row_num LOOP
+            DBMS_OUTPUT.PUT_LINE(v_buf(i));
+        END LOOP;
+        tbl_line(p_widths);
+        IF NVL(v_count,0) > v_row_num THEN
+            DBMS_OUTPUT.PUT_LINE('  (' || fmt_n(v_count - v_row_num)
+                || ' ligne(s) supplementaire(s) non affichee(s) — limite c_max_rows = '
+                || fmt_n(c_max_rows) || ')');
+        END IF;
+    END;
+
 BEGIN
 
     DBMS_OUTPUT.PUT_LINE(v_sep);
@@ -180,11 +272,16 @@ BEGIN
     -- =========================================================
     -- SECTION 0 : PANORAMA DU PORTEFEUILLE OVERDRAFT (INFORMATIF)
     -- =========================================================
+    -- Cadrage de la revue. Chaque bloc d'indicateurs est obtenu par UNE
+    -- SEULE requete a agregation conditionnelle, au lieu d'une requete
+    -- par indicateur : le portefeuille n'est balaye qu'une fois.
+    -- =========================================================
     print_section('0. PANORAMA DU PORTEFEUILLE OVERDRAFT');
 
     -- 0.1 Rappel des parametres de la revue
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [Parametres de la revue]');
+    print_info('Perimetre : prefixe GL naturel clientelise', c_gl_client || ' (LIKE ''' || c_gl_like || ''')');
     print_info('Longue periode de depassement (jours)', fmt_n(c_jours_long));
     print_info('Tres longue periode de depassement (jours)', fmt_n(c_jours_tres_long));
     print_info('Duree maximale normale d''un TOD (jours)', fmt_n(c_jours_tod_max));
@@ -198,129 +295,174 @@ BEGIN
     print_info('Bande "juste en dessous du seuil" (%)', fmt_n(c_pct_proche) || ' %');
     print_info('Profondeur d''analyse des historiques (mois)', fmt_n(c_mois_hist));
 
-    -- 0.2 Portefeuille des lignes de credit (GETM_FACILITY)
+    -- 0.2 Cadrage du perimetre clientelise
+    --     Un compte est "clientelise" lorsque son GL naturel
+    --     (STTB_ACCOUNT.AC_NATURAL_GL) commence par c_gl_client.
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Lignes de credit — GETM_FACILITY]');
+    DBMS_OUTPUT.PUT_LINE('  [Perimetre — comptes clientelises (AC_NATURAL_GL LIKE ''' || c_gl_like || ''')]');
+    FOR s IN (
+        SELECT COUNT(*)                                              AS nb_tot,
+               COUNT(CASE WHEN g.AC_GL_NO IS NOT NULL THEN 1 END)    AS nb_per,
+               COUNT(CASE WHEN g.AC_GL_NO IS NOT NULL
+                           AND a.RECORD_STAT = 'O' THEN 1 END)       AS nb_per_ouv,
+               COUNT(CASE WHEN g.AC_GL_NO IS NOT NULL
+                           AND a.RECORD_STAT = 'O'
+                           AND NVL(a.ACY_CURR_BALANCE,0) < 0 THEN 1 END) AS nb_per_deb
+        FROM STTM_CUST_ACCOUNT a
+        LEFT JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
+                                AND g.BRANCH_CODE = a.BRANCH_CODE
+                                AND g.AC_NATURAL_GL LIKE c_gl_like
+    ) LOOP
+        print_info('Comptes STTM_CUST_ACCOUNT (toutes natures)', fmt_n(s.nb_tot));
+        print_info('dont comptes CLIENTELISES (perimetre revue)', fmt_n(s.nb_per));
+        print_info('dont clientelises et ouverts', fmt_n(s.nb_per_ouv));
+        print_info('dont clientelises, ouverts et debiteurs', fmt_n(s.nb_per_deb));
+        print_info('Comptes hors perimetre (exclus de la revue)', fmt_n(s.nb_tot - s.nb_per));
+    END LOOP;
 
-    SELECT COUNT(*) INTO v_total FROM GETM_FACILITY;
-    print_info('Nombre total de lignes', fmt_n(v_total));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE RECORD_STAT = 'O';
-    print_info('Lignes ouvertes (RECORD_STAT = O)', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE AUTH_STAT = 'A';
-    print_info('Lignes autorisees (AUTH_STAT = A)', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE NVL(AUTH_STAT,'U') != 'A';
-    print_info('Lignes NON autorisees', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE NVL(UTILISATION,0) > 0;
-    print_info('Lignes avec utilisation > 0', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY
-    WHERE LINE_EXPIRY_DATE IS NOT NULL AND LINE_EXPIRY_DATE < TRUNC(SYSDATE);
-    print_info('Lignes expirees', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY WHERE LINE_EXPIRY_DATE IS NULL;
-    print_info('Lignes sans date d''expiration', fmt_n(v_count));
-
-    SELECT NVL(SUM(LIMIT_AMOUNT),0) INTO v_montant FROM GETM_FACILITY WHERE RECORD_STAT = 'O';
-    print_info('Total des limites accordees (lignes ouvertes)', fmt_m(v_montant));
-
-    SELECT NVL(SUM(UTILISATION),0) INTO v_montant FROM GETM_FACILITY WHERE RECORD_STAT = 'O';
-    print_info('Total des utilisations (lignes ouvertes)', fmt_m(v_montant));
-
-    -- Repartition par devise de ligne
+    -- 0.3 Portefeuille des lignes de credit du perimetre (GETM_FACILITY)
+    --     Une ligne entre dans le perimetre des qu'elle est rattachee a
+    --     au moins un compte clientelise (LINE_ID = LINE_CODE ou = ID).
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Repartition des lignes par devise]');
-    FOR d IN (SELECT NVL(LINE_CURRENCY,'-') AS ccy, COUNT(*) AS nb,
-                     NVL(SUM(LIMIT_AMOUNT),0) AS mnt
-              FROM GETM_FACILITY
-              GROUP BY NVL(LINE_CURRENCY,'-')
-              ORDER BY COUNT(*) DESC) LOOP
+    DBMS_OUTPUT.PUT_LINE('  [Lignes de credit du perimetre — GETM_FACILITY]');
+    FOR s IN (
+        WITH per_line AS (
+            SELECT /*+ MATERIALIZE */ f.ID AS line_id
+            FROM GETM_FACILITY f
+            JOIN STTM_CUST_ACCOUNT a ON a.LINE_ID = f.LINE_CODE
+            JOIN STTB_ACCOUNT g ON g.AC_GL_NO = a.CUST_AC_NO
+                               AND g.BRANCH_CODE = a.BRANCH_CODE
+            WHERE g.AC_NATURAL_GL LIKE c_gl_like
+            UNION
+            SELECT f.ID
+            FROM GETM_FACILITY f
+            JOIN STTM_CUST_ACCOUNT a ON a.LINE_ID = TO_CHAR(f.ID)
+            JOIN STTB_ACCOUNT g ON g.AC_GL_NO = a.CUST_AC_NO
+                               AND g.BRANCH_CODE = a.BRANCH_CODE
+            WHERE g.AC_NATURAL_GL LIKE c_gl_like
+        )
+        SELECT COUNT(*)                                                        AS nb_tot,
+               COUNT(CASE WHEN f.RECORD_STAT = 'O' THEN 1 END)                 AS nb_open,
+               COUNT(CASE WHEN f.AUTH_STAT = 'A' THEN 1 END)                   AS nb_auth,
+               COUNT(CASE WHEN NVL(f.AUTH_STAT,'U') != 'A' THEN 1 END)         AS nb_nauth,
+               COUNT(CASE WHEN NVL(f.UTILISATION,0) > 0 THEN 1 END)            AS nb_util,
+               COUNT(CASE WHEN f.LINE_EXPIRY_DATE < TRUNC(SYSDATE) THEN 1 END) AS nb_exp,
+               COUNT(CASE WHEN f.LINE_EXPIRY_DATE IS NULL THEN 1 END)          AS nb_sans_exp,
+               NVL(SUM(CASE WHEN f.RECORD_STAT = 'O'
+                            THEN f.LIMIT_AMOUNT END),0)                        AS mnt_limite,
+               NVL(SUM(CASE WHEN f.RECORD_STAT = 'O'
+                            THEN f.UTILISATION END),0)                         AS mnt_util
+        FROM GETM_FACILITY f
+        WHERE f.ID IN (SELECT line_id FROM per_line)
+    ) LOOP
+        print_info('Nombre total de lignes du perimetre', fmt_n(s.nb_tot));
+        print_info('Lignes ouvertes (RECORD_STAT = O)', fmt_n(s.nb_open));
+        print_info('Lignes autorisees (AUTH_STAT = A)', fmt_n(s.nb_auth));
+        print_info('Lignes NON autorisees', fmt_n(s.nb_nauth));
+        print_info('Lignes avec utilisation > 0', fmt_n(s.nb_util));
+        print_info('Lignes expirees', fmt_n(s.nb_exp));
+        print_info('Lignes sans date d''expiration', fmt_n(s.nb_sans_exp));
+        print_info('Total des limites accordees (lignes ouvertes)', fmt_m(s.mnt_limite));
+        print_info('Total des utilisations (lignes ouvertes)', fmt_m(s.mnt_util));
+    END LOOP;
+
+    -- Repartition par devise de ligne (perimetre)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Repartition des lignes du perimetre par devise]');
+    FOR d IN (
+        WITH per_line AS (
+            SELECT /*+ MATERIALIZE */ f.ID AS line_id
+            FROM GETM_FACILITY f
+            JOIN STTM_CUST_ACCOUNT a ON a.LINE_ID = f.LINE_CODE
+            JOIN STTB_ACCOUNT g ON g.AC_GL_NO = a.CUST_AC_NO
+                               AND g.BRANCH_CODE = a.BRANCH_CODE
+            WHERE g.AC_NATURAL_GL LIKE c_gl_like
+            UNION
+            SELECT f.ID
+            FROM GETM_FACILITY f
+            JOIN STTM_CUST_ACCOUNT a ON a.LINE_ID = TO_CHAR(f.ID)
+            JOIN STTB_ACCOUNT g ON g.AC_GL_NO = a.CUST_AC_NO
+                               AND g.BRANCH_CODE = a.BRANCH_CODE
+            WHERE g.AC_NATURAL_GL LIKE c_gl_like
+        )
+        SELECT NVL(f.LINE_CURRENCY,'-') AS ccy, COUNT(*) AS nb,
+               NVL(SUM(f.LIMIT_AMOUNT),0) AS mnt
+        FROM GETM_FACILITY f
+        WHERE f.ID IN (SELECT line_id FROM per_line)
+        GROUP BY NVL(f.LINE_CURRENCY,'-')
+        ORDER BY COUNT(*) DESC
+    ) LOOP
         print_info('Devise ' || d.ccy, fmt_n(d.nb) || ' ligne(s) — ' || fmt_m(d.mnt));
     END LOOP;
 
-    -- 0.3 Rattachement des lignes aux comptes (STTM_CUST_ACCOUNT.LINE_ID)
+    -- 0.4 Comptes clientelises : rattachement et position debitrice
+    --     (un seul balayage du perimetre pour tous les indicateurs)
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Rattachement lignes / comptes]');
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE LINE_ID IS NOT NULL AND TRIM(LINE_ID) IS NOT NULL;
-    print_info('Comptes portant une LINE_ID', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY f
-    WHERE EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
-                  WHERE a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID));
-    print_info('Lignes rattachees a au moins un compte', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM GETM_FACILITY f
-    WHERE NVL(f.UTILISATION,0) > 0
-      AND NOT EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
-                      WHERE a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID));
-    print_info('Lignes utilisees SANS compte rattache', fmt_n(v_count));
-
-    -- 0.4 Comptes en position debitrice
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Comptes clientele en position debitrice]');
-
-    SELECT COUNT(*) INTO v_total FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O';
-    print_info('Comptes ouverts', fmt_n(v_total));
-
-    SELECT COUNT(*), NVL(SUM(ABS(LCY_CURR_BALANCE)),0) INTO v_count, v_montant
-    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' AND NVL(ACY_CURR_BALANCE,0) < 0;
-    print_info('Comptes en solde debiteur', fmt_n(v_count));
-    print_info('Encours debiteur total (contre-valeur)', fmt_m(v_montant));
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND OVERDRAFT_SINCE IS NOT NULL;
-    print_info('Comptes avec OVERDRAFT_SINCE renseigne', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND OVERLINE_OD_SINCE IS NOT NULL;
-    print_info('Comptes en depassement de ligne (OVERLINE)', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND NVL(TOD_LIMIT,0) > 0;
-    print_info('Comptes avec un TOD (decouvert temporaire)', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND TOD_SINCE IS NOT NULL;
-    print_info('Comptes avec TOD_SINCE renseigne', fmt_n(v_count));
-
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND NVL(ACY_CURR_BALANCE,0) < 0
-      AND (LINE_ID IS NULL OR TRIM(LINE_ID) IS NULL) AND NVL(TOD_LIMIT,0) = 0;
-    print_info('Comptes debiteurs sans ligne ni TOD', fmt_n(v_count));
-
-    -- 0.5 Top 15 des encours debiteurs
-    DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Top 15 des encours debiteurs]');
-    tbl_line('4,13,30,22,6,14,18,14');
-    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',30) || '|'
-        || RPAD(' COMPTE',22) || '|' || RPAD(' CCY',6) || '|' || RPAD(' AGENCE',14) || '|'
-        || RPAD(' SOLDE (M)',18) || '|' || RPAD(' OD DEPUIS',14) || '|');
-    tbl_line('4,13,30,22,6,14,18,14');
-    v_row_num := 0;
-    FOR d IN (SELECT * FROM (
-        SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
-               NVL(a.BRANCH_CODE,'-') AS brn, a.LCY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE
+    DBMS_OUTPUT.PUT_LINE('  [Comptes clientelises — rattachement et position]');
+    FOR s IN (
+        SELECT COUNT(*)                                                       AS nb_ouv,
+               COUNT(CASE WHEN TRIM(a.LINE_ID) IS NOT NULL THEN 1 END)        AS nb_ligne,
+               COUNT(CASE WHEN NVL(a.ACY_CURR_BALANCE,0) < 0 THEN 1 END)      AS nb_deb,
+               NVL(SUM(CASE WHEN NVL(a.ACY_CURR_BALANCE,0) < 0
+                            THEN ABS(a.LCY_CURR_BALANCE) END),0)              AS mnt_deb,
+               COUNT(CASE WHEN a.OVERDRAFT_SINCE IS NOT NULL THEN 1 END)      AS nb_od_since,
+               COUNT(CASE WHEN a.OVERLINE_OD_SINCE IS NOT NULL THEN 1 END)    AS nb_overline,
+               COUNT(CASE WHEN NVL(a.TOD_LIMIT,0) > 0 THEN 1 END)             AS nb_tod,
+               COUNT(CASE WHEN a.TOD_SINCE IS NOT NULL THEN 1 END)            AS nb_tod_since,
+               COUNT(CASE WHEN NVL(a.ACY_CURR_BALANCE,0) < 0
+                           AND TRIM(a.LINE_ID) IS NULL
+                           AND NVL(a.TOD_LIMIT,0) = 0 THEN 1 END)             AS nb_deb_nu
         FROM STTM_CUST_ACCOUNT a
-        LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
-        WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
-        ORDER BY a.LCY_CURR_BALANCE ASC
-    ) WHERE ROWNUM <= 15) LOOP
-        v_row_num := v_row_num + 1;
-        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+        JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
+                           AND g.BRANCH_CODE = a.BRANCH_CODE
+                           AND g.AC_NATURAL_GL LIKE c_gl_like
+        WHERE a.RECORD_STAT = 'O'
+    ) LOOP
+        v_total := s.nb_ouv;
+        print_info('Comptes clientelises ouverts', fmt_n(s.nb_ouv));
+        print_info('Comptes portant une LINE_ID', fmt_n(s.nb_ligne));
+        print_info('Comptes en solde debiteur', fmt_n(s.nb_deb));
+        print_info('Encours debiteur total (contre-valeur)', fmt_m(s.mnt_deb));
+        print_info('Comptes avec OVERDRAFT_SINCE renseigne', fmt_n(s.nb_od_since));
+        print_info('Comptes en depassement de ligne (OVERLINE)', fmt_n(s.nb_overline));
+        print_info('Comptes avec un TOD (decouvert temporaire)', fmt_n(s.nb_tod));
+        print_info('Comptes avec TOD_SINCE renseigne', fmt_n(s.nb_tod_since));
+        print_info('Comptes debiteurs sans ligne ni TOD', fmt_n(s.nb_deb_nu));
+    END LOOP;
+
+    -- 0.5 Top 15 des encours debiteurs du perimetre
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Top 15 des encours debiteurs — perimetre clientelise]');
+    buf_reset;
+    FOR d IN (
+        SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO,
+                   NVL(a.CCY,'-') AS ccy, NVL(a.BRANCH_CODE,'-') AS brn,
+                   a.LCY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE,
+                   ROW_NUMBER() OVER (ORDER BY a.LCY_CURR_BALANCE ASC) AS rn
+            FROM STTM_CUST_ACCOUNT a
+            JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
+                               AND g.BRANCH_CODE = a.BRANCH_CODE
+                               AND g.AC_NATURAL_GL LIKE c_gl_like
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+        ) WHERE rn <= 15 ORDER BY rn
+    ) LOOP
+        buf_add('  |' || LPAD(d.rn,3) || ' |'
             || RPAD(' ' || d.CUST_NO,13) || '|' || RPAD(' ' || SUBSTR(d.nom,1,28),30) || '|'
             || RPAD(' ' || d.CUST_AC_NO,22) || '|' || RPAD(' ' || d.ccy,6) || '|'
             || RPAD(' ' || d.brn,14) || '|'
             || LPAD(fmt_m(d.solde),17) || ' |'
             || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),14) || '|');
     END LOOP;
-    tbl_line('4,13,30,22,6,14,18,14');
+    v_count := v_row_num;
     IF v_row_num = 0 THEN
-        DBMS_OUTPUT.PUT_LINE('  (aucun compte en position debitrice)');
+        DBMS_OUTPUT.PUT_LINE('  (aucun compte clientelise en position debitrice)');
+    ELSE
+        buf_print('4,13,30,22,6,14,18,14',
+            '  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',13) || '|' || RPAD(' NOM CLIENT',30) || '|'
+            || RPAD(' COMPTE',22) || '|' || RPAD(' CCY',6) || '|' || RPAD(' AGENCE',14) || '|'
+            || RPAD(' SOLDE (M)',18) || '|' || RPAD(' OD DEPUIS',14) || '|');
     END IF;
 
     -- =========================================================

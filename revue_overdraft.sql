@@ -2799,6 +2799,278 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 9 : TRANSACTIONS MANUELLES SUR COMPTES OVERDRAWN
+    -- =========================================================
+    -- Les ecritures du module DE (Data Entry / saisie manuelle) ne
+    -- proviennent d'aucun flux client automatise : sur un compte deja
+    -- debiteur, elles doivent etre justifiees, autorisees par un tiers
+    -- et rattachees a une piece. Le compte est considere comme
+    -- "overdrawn" lorsque son solde de cloture du jour de l'ecriture
+    -- (ACTB_ACCBAL_HISTORY) est negatif.
+    -- =========================================================
+    print_section('9. TRANSACTIONS MANUELLES SUR COMPTES OVERDRAWN');
+
+    -- 9.1 Synthese par compte des ecritures manuelles passees en position
+    --     debitrice
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT h.AC_NO
+        FROM ACTB_HISTORY h
+        JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+             AND b.BKG_DATE = TRUNC(h.TRN_DT)
+             AND b.ACY_CLOSING_BAL < 0
+        WHERE h.MODULE = 'DE'
+          AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        GROUP BY h.AC_NO
+    );
+    print_test('Comptes debiteurs mouvementes par ecritures manuelles (DE)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,8,16,16,9,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' NB ECR.',8) || '|'
+            || RPAD(' TOTAL DEBITS',16) || '|' || RPAD(' TOTAL CREDITS',16) || '|' || RPAD(' NB USERS',9) || '|'
+            || RPAD(' DERNIERE',13) || '|');
+        tbl_line('4,12,22,20,8,16,16,9,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT h.AC_NO, NVL(MAX(a.CUST_NO),'-') AS cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   COUNT(*) AS nb_ecr,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_deb,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_cred,
+                   COUNT(DISTINCT h.USER_ID) AS nb_users, MAX(h.TRN_DT) AS derniere
+            FROM ACTB_HISTORY h
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+                 AND b.ACY_CLOSING_BAL < 0
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE h.MODULE = 'DE'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            GROUP BY h.AC_NO
+            ORDER BY SUM(h.LCY_AMOUNT) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.AC_NO,20) || '|'
+                || LPAD(fmt_n(d.nb_ecr),7) || ' |'
+                || LPAD(fmt_m(d.tot_deb),15) || ' |' || LPAD(fmt_m(d.tot_cred),15) || ' |'
+                || LPAD(fmt_n(d.nb_users),8) || ' |'
+                || RPAD(' ' || fmt_d(d.derniere),13) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,8,16,16,9,13');
+    END IF;
+
+    -- 9.2 Ecritures manuelles significatives, detail
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT)
+         AND b.ACY_CLOSING_BAL < 0
+    WHERE h.MODULE = 'DE'
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND h.LCY_AMOUNT >= c_mnt_signif;
+    print_test('Ecritures manuelles >= ' || fmt_m(c_mnt_signif) || ' sur compte debiteur', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,20,12,4,7,16,12,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' REFERENCE',12) || '|'
+            || RPAD(' S',4) || '|' || RPAD(' CODE',7) || '|' || RPAD(' MONTANT',16) || '|'
+            || RPAD(' DATE',12) || '|' || RPAD(' UTILISATEUR',16) || '|' || RPAD(' SOLDE DU JOUR',16) || '|');
+        tbl_line('4,20,12,4,7,16,12,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, NVL(h.TRN_CODE,'-') AS trn_code,
+                   h.LCY_AMOUNT, h.TRN_DT, NVL(h.USER_ID,'-') AS usr, b.ACY_CLOSING_BAL AS solde
+            FROM ACTB_HISTORY h
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+                 AND b.ACY_CLOSING_BAL < 0
+            WHERE h.MODULE = 'DE'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND h.LCY_AMOUNT >= c_mnt_signif
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+                || RPAD(' ' || d.DRCR_IND,4) || '|' || RPAD(' ' || SUBSTR(d.trn_code,1,5),7) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |');
+        END LOOP;
+        tbl_line('4,20,12,4,7,16,12,16,16');
+    END IF;
+
+    -- 9.3 Ecritures manuelles saisies et autorisees par le meme utilisateur
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT)
+         AND b.ACY_CLOSING_BAL < 0
+    WHERE h.MODULE = 'DE'
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND h.USER_ID IS NOT NULL AND h.AUTH_ID IS NOT NULL
+      AND UPPER(TRIM(h.USER_ID)) = UPPER(TRIM(h.AUTH_ID));
+    print_test('Ecritures manuelles auto-autorisees (USER_ID = AUTH_ID)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,20,12,4,16,12,18,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' REFERENCE',12) || '|'
+            || RPAD(' S',4) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' DATE',12) || '|'
+            || RPAD(' UTILISATEUR',18) || '|' || RPAD(' SOLDE DU JOUR',16) || '|');
+        tbl_line('4,20,12,4,16,12,18,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT,
+                   h.USER_ID AS usr, b.ACY_CLOSING_BAL AS solde
+            FROM ACTB_HISTORY h
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+                 AND b.ACY_CLOSING_BAL < 0
+            WHERE h.MODULE = 'DE'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND h.USER_ID IS NOT NULL AND h.AUTH_ID IS NOT NULL
+              AND UPPER(TRIM(h.USER_ID)) = UPPER(TRIM(h.AUTH_ID))
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+                || RPAD(' ' || d.DRCR_IND,4) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || RPAD(' ' || SUBSTR(d.usr,1,16),18) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |');
+        END LOOP;
+        tbl_line('4,20,12,4,16,12,18,16');
+    END IF;
+
+    -- 9.4 Ecritures manuelles antidatees sur comptes debiteurs
+    --     (date de valeur anterieure a la date comptable)
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT)
+         AND b.ACY_CLOSING_BAL < 0
+    WHERE h.MODULE = 'DE'
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND h.VALUE_DT IS NOT NULL
+      AND TRUNC(h.VALUE_DT) < TRUNC(h.TRN_DT);
+    print_test('Ecritures manuelles antidatees sur compte debiteur', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,20,12,4,16,12,12,8,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' REFERENCE',12) || '|'
+            || RPAD(' S',4) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' DATE COMPT.',12) || '|'
+            || RPAD(' DATE VALEUR',12) || '|' || RPAD(' ECART',8) || '|' || RPAD(' UTILISATEUR',16) || '|');
+        tbl_line('4,20,12,4,16,12,12,8,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT, h.VALUE_DT,
+                   TRUNC(h.TRN_DT) - TRUNC(h.VALUE_DT) AS ecart, NVL(h.USER_ID,'-') AS usr
+            FROM ACTB_HISTORY h
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+                 AND b.ACY_CLOSING_BAL < 0
+            WHERE h.MODULE = 'DE'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND h.VALUE_DT IS NOT NULL
+              AND TRUNC(h.VALUE_DT) < TRUNC(h.TRN_DT)
+            ORDER BY TRUNC(h.TRN_DT) - TRUNC(h.VALUE_DT) DESC, h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+                || RPAD(' ' || d.DRCR_IND,4) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|' || RPAD(' ' || fmt_d(d.VALUE_DT),12) || '|'
+                || LPAD(fmt_n(d.ecart) || ' j',7) || ' |'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,20,12,4,16,12,12,8,16');
+    END IF;
+
+    -- 9.5 Ecritures manuelles debitrices sur comptes deja au-dela de leur
+    --     autorisation (ligne + TOD) : aggravation d'un depassement
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT)
+    WHERE h.MODULE = 'DE' AND h.DRCR_IND = 'D'
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND b.ACY_CLOSING_BAL < - (NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                                      WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0)
+                                 + NVL(a.TOD_LIMIT,0));
+    print_test('Debits manuels sur comptes deja au-dela de l''autorisation', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,12,16,12,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
+            || RPAD(' REFERENCE',12) || '|' || RPAD(' MONTANT DEBIT',16) || '|' || RPAD(' DATE',12) || '|'
+            || RPAD(' SOLDE DU JOUR',16) || '|' || RPAD(' UTILISATEUR',16) || '|');
+        tbl_line('4,12,20,12,16,12,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, h.AC_NO, h.TRN_REF_NO, h.LCY_AMOUNT, h.TRN_DT,
+                   b.ACY_CLOSING_BAL AS solde, NVL(h.USER_ID,'-') AS usr
+            FROM ACTB_HISTORY h
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+            WHERE h.MODULE = 'DE' AND h.DRCR_IND = 'D'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND b.ACY_CLOSING_BAL < - (NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                                              WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0)
+                                         + NVL(a.TOD_LIMIT,0))
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+                || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,20,12,16,12,16,16');
+    END IF;
+
+    -- 9.6 Utilisateurs les plus actifs en saisie manuelle sur comptes
+    --     debiteurs (cartographie des intervenants)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Top utilisateurs — ecritures manuelles sur comptes debiteurs]');
+    tbl_line('4,18,26,9,9,17,17');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' USER_ID',18) || '|' || RPAD(' NOM UTILISATEUR',26) || '|'
+        || RPAD(' NB ECR.',9) || '|' || RPAD(' NB CPTES',9) || '|'
+        || RPAD(' TOTAL DEBITS',17) || '|' || RPAD(' TOTAL CREDITS',17) || '|');
+    tbl_line('4,18,26,9,9,17,17');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT NVL(h.USER_ID,'-') AS usr, NVL(MAX(u.USER_NAME),'-') AS nom,
+               COUNT(*) AS nb_ecr, COUNT(DISTINCT h.AC_NO) AS nb_cptes,
+               SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_deb,
+               SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_cred
+        FROM ACTB_HISTORY h
+        JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+             AND b.BKG_DATE = TRUNC(h.TRN_DT)
+             AND b.ACY_CLOSING_BAL < 0
+        LEFT JOIN SMTB_USER u ON u.USER_ID = h.USER_ID
+        WHERE h.MODULE = 'DE'
+          AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        GROUP BY h.USER_ID
+        ORDER BY COUNT(*) DESC
+    ) WHERE ROWNUM <= 20) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || SUBSTR(d.usr,1,16),18) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_ecr),8) || ' |' || LPAD(fmt_n(d.nb_cptes),8) || ' |'
+            || LPAD(fmt_m(d.tot_deb),16) || ' |' || LPAD(fmt_m(d.tot_cred),16) || ' |');
+    END LOOP;
+    tbl_line('4,18,26,9,9,17,17');
+    IF v_row_num = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('  (aucune ecriture manuelle sur compte debiteur)');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

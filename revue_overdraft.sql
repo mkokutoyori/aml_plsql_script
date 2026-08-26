@@ -1610,6 +1610,259 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 5 : CLIENTS AVEC PLUSIEURS OVERDRAFTS
+    -- =========================================================
+    -- Le fractionnement des concours sur plusieurs lignes, comptes ou
+    -- agences masque l'exposition reelle sur un meme risque et peut
+    -- servir a contourner la grille de delegation.
+    -- =========================================================
+    print_section('5. CLIENTS AVEC PLUSIEURS OVERDRAFTS');
+
+    -- 5.1 Clients (liabilities) portant plusieurs lignes utilisees
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT f.LIAB_ID
+        FROM GETM_FACILITY f
+        WHERE NVL(f.UTILISATION,0) > 0 AND f.RECORD_STAT = 'O'
+        GROUP BY f.LIAB_ID
+        HAVING COUNT(*) > 1
+    );
+    print_test('Clients avec plusieurs lignes utilisees simultanement', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,9,16,16,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',26) || '|'
+            || RPAD(' NB LIGNES',9) || '|' || RPAD(' LIMITES CUM.',16) || '|' || RPAD(' UTIL. CUMULEE',16) || '|'
+            || RPAD(' DISPO CUM.',16) || '|' || RPAD(' 1re EXPIR.',13) || '|');
+        tbl_line('4,12,26,9,16,16,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   COUNT(*) AS nb_lignes, NVL(SUM(f.LIMIT_AMOUNT),0) AS lim_cum,
+                   NVL(SUM(f.UTILISATION),0) AS util_cum, NVL(SUM(f.AVAILABLE_AMOUNT),0) AS dispo_cum,
+                   MIN(f.LINE_EXPIRY_DATE) AS exp_min
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.UTILISATION,0) > 0 AND f.RECORD_STAT = 'O'
+            GROUP BY f.LIAB_ID, l.LIAB_NO, l.LIAB_NAME
+            HAVING COUNT(*) > 1
+            ORDER BY NVL(SUM(f.UTILISATION),0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || LPAD(fmt_n(d.nb_lignes),8) || ' |'
+                || LPAD(fmt_m(d.lim_cum),15) || ' |' || LPAD(fmt_m(d.util_cum),15) || ' |'
+                || LPAD(fmt_m(d.dispo_cum),15) || ' |'
+                || RPAD(' ' || fmt_d(d.exp_min),13) || '|');
+        END LOOP;
+        tbl_line('4,12,26,9,16,16,16,13');
+    END IF;
+
+    -- 5.2 Clients avec plusieurs comptes en position debitrice
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.CUST_NO
+        FROM STTM_CUST_ACCOUNT a
+        WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+        GROUP BY a.CUST_NO
+        HAVING COUNT(*) > 1
+    );
+    print_test('Clients avec plusieurs comptes debiteurs', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,10,17,17,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CPTES',10) || '|' || RPAD(' ENCOURS DEB.',17) || '|' || RPAD(' PIRE COMPTE',17) || '|'
+            || RPAD(' + ANCIEN OD',13) || '|' || RPAD(' NB AG.',9) || '|');
+        tbl_line('4,12,26,10,17,17,13,9');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom, COUNT(*) AS nb_cptes,
+                   SUM(a.LCY_CURR_BALANCE) AS encours, MIN(a.LCY_CURR_BALANCE) AS pire,
+                   MIN(a.OVERDRAFT_SINCE) AS od_depuis,
+                   COUNT(DISTINCT a.BRANCH_CODE) AS nb_ag
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+            GROUP BY a.CUST_NO
+            HAVING COUNT(*) > 1
+            ORDER BY SUM(a.LCY_CURR_BALANCE) ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || LPAD(fmt_n(d.nb_cptes),9) || ' |'
+                || LPAD(fmt_m(d.encours),16) || ' |' || LPAD(fmt_m(d.pire),16) || ' |'
+                || RPAD(' ' || fmt_d(d.od_depuis),13) || '|'
+                || LPAD(fmt_n(d.nb_ag),8) || ' |');
+        END LOOP;
+        tbl_line('4,12,26,10,17,17,13,9');
+    END IF;
+
+    -- 5.3 Clients dont les lignes sont portees par plusieurs agences
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT f.LIAB_ID
+        FROM GETM_FACILITY f
+        WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+        GROUP BY f.LIAB_ID
+        HAVING COUNT(DISTINCT f.BRN) > 1
+    );
+    print_test('Clients avec des lignes dans plusieurs agences', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,9,8,16,16,20');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',26) || '|'
+            || RPAD(' NB LIGNES',9) || '|' || RPAD(' NB AG.',8) || '|'
+            || RPAD(' LIMITES CUM.',16) || '|' || RPAD(' UTIL. CUMULEE',16) || '|' || RPAD(' AGENCES',20) || '|');
+        tbl_line('4,12,26,9,8,16,16,20');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   COUNT(*) AS nb_lignes, COUNT(DISTINCT f.BRN) AS nb_ag,
+                   NVL(SUM(f.LIMIT_AMOUNT),0) AS lim_cum, NVL(SUM(f.UTILISATION),0) AS util_cum,
+                   (SELECT LISTAGG(x.brn, ',') WITHIN GROUP (ORDER BY x.brn)
+                      FROM (SELECT DISTINCT f2.BRN AS brn FROM GETM_FACILITY f2
+                             WHERE f2.LIAB_ID = f.LIAB_ID AND f2.RECORD_STAT = 'O'
+                               AND NVL(f2.LIMIT_AMOUNT,0) > 0) x) AS agences
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+            GROUP BY f.LIAB_ID, l.LIAB_NO, l.LIAB_NAME
+            HAVING COUNT(DISTINCT f.BRN) > 1
+            ORDER BY NVL(SUM(f.LIMIT_AMOUNT),0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || LPAD(fmt_n(d.nb_lignes),8) || ' |' || LPAD(fmt_n(d.nb_ag),7) || ' |'
+                || LPAD(fmt_m(d.lim_cum),15) || ' |' || LPAD(fmt_m(d.util_cum),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.agences,1,18),20) || '|');
+        END LOOP;
+        tbl_line('4,12,26,9,8,16,16,20');
+    END IF;
+
+    -- 5.4 Clients dont l'utilisation cumulee depasse la limite globale
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT l.ID
+        FROM GETM_LIAB l
+        JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+        WHERE NVL(l.OVERALL_LIMIT,0) > 0
+        GROUP BY l.ID, l.OVERALL_LIMIT
+        HAVING NVL(SUM(f.UTILISATION),0) > NVL(l.OVERALL_LIMIT,0)
+    );
+    print_test('Clients : utilisation cumulee > limite globale (LIAB)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,9,17,17,17,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',26) || '|'
+            || RPAD(' NB LIGNES',9) || '|' || RPAD(' LIMITE GLOB.',17) || '|' || RPAD(' UTIL. CUMULEE',17) || '|'
+            || RPAD(' DEPASSEMENT',17) || '|' || RPAD(' RATING',7) || '|');
+        tbl_line('4,12,26,9,17,17,17,7');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, COUNT(*) AS nb_lignes,
+                   NVL(l.OVERALL_LIMIT,0) AS lim_glob, NVL(SUM(f.UTILISATION),0) AS util_cum,
+                   NVL(SUM(f.UTILISATION),0) - NVL(l.OVERALL_LIMIT,0) AS depass,
+                   NVL(MAX(l.CREDIT_RATING),'-') AS rating
+            FROM GETM_LIAB l
+            JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+            WHERE NVL(l.OVERALL_LIMIT,0) > 0
+            GROUP BY l.ID, l.LIAB_NO, l.LIAB_NAME, l.OVERALL_LIMIT
+            HAVING NVL(SUM(f.UTILISATION),0) > NVL(l.OVERALL_LIMIT,0)
+            ORDER BY NVL(SUM(f.UTILISATION),0) - NVL(l.OVERALL_LIMIT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || LPAD(fmt_n(d.nb_lignes),8) || ' |'
+                || LPAD(fmt_m(d.lim_glob),16) || ' |' || LPAD(fmt_m(d.util_cum),16) || ' |'
+                || LPAD(fmt_m(d.depass),16) || ' |'
+                || RPAD(' ' || SUBSTR(d.rating,1,5),7) || '|');
+        END LOOP;
+        tbl_line('4,12,26,9,17,17,17,7');
+    END IF;
+
+    -- 5.5 Comptes cumulant une ligne de credit ET un TOD
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
+      AND NVL(a.TOD_LIMIT,0) > 0
+      AND EXISTS (SELECT 1 FROM GETM_FACILITY f
+                  WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                    AND NVL(f.LIMIT_AMOUNT,0) > 0);
+    print_test('Comptes cumulant une ligne de credit et un TOD', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,16,15,15,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' LIGNE',16) || '|'
+            || RPAD(' LIMITE LIGNE',15) || '|' || RPAD(' TOD',15) || '|' || RPAD(' SOLDE',15) || '|');
+        tbl_line('4,12,24,20,16,15,15,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, a.LINE_ID,
+                   NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                        WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0) AS lim_ligne,
+                   NVL(a.TOD_LIMIT,0) AS tod, a.ACY_CURR_BALANCE AS solde
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
+              AND NVL(a.TOD_LIMIT,0) > 0
+              AND EXISTS (SELECT 1 FROM GETM_FACILITY f
+                          WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                            AND NVL(f.LIMIT_AMOUNT,0) > 0)
+            ORDER BY NVL(a.TOD_LIMIT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.LINE_ID,1,14),16) || '|'
+                || LPAD(fmt_m(d.lim_ligne),14) || ' |' || LPAD(fmt_m(d.tod),14) || ' |'
+                || LPAD(fmt_m(d.solde),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,16,15,15,15');
+    END IF;
+
+    -- 5.6 Groupes de risque regroupant plusieurs liabilities utilisatrices
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT l.MAIN_LIAB_ID
+        FROM GETM_LIAB l
+        JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+        WHERE l.MAIN_LIAB_ID IS NOT NULL
+          AND NVL(f.UTILISATION,0) > 0
+        GROUP BY l.MAIN_LIAB_ID
+        HAVING COUNT(DISTINCT l.ID) > 1
+    );
+    print_test('Groupes de risque avec plusieurs liabilities utilisatrices', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,9,9,17,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' GROUPE',12) || '|' || RPAD(' NOM GROUPE',26) || '|'
+            || RPAD(' NB LIAB',9) || '|' || RPAD(' NB LIGNES',9) || '|'
+            || RPAD(' LIMITES CUM.',17) || '|' || RPAD(' UTIL. CUMULEE',17) || '|' || RPAD(' LIMITE GROUPE',17) || '|');
+        tbl_line('4,12,26,9,9,17,17,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.LIAB_NO, TO_CHAR(l.MAIN_LIAB_ID)) AS groupe,
+                   NVL(m.LIAB_NAME,'-') AS nom,
+                   COUNT(DISTINCT l.ID) AS nb_liab, COUNT(*) AS nb_lignes,
+                   NVL(SUM(f.LIMIT_AMOUNT),0) AS lim_cum, NVL(SUM(f.UTILISATION),0) AS util_cum,
+                   NVL(MAX(m.OVERALL_LIMIT),0) AS lim_groupe
+            FROM GETM_LIAB l
+            JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+            LEFT JOIN GETM_LIAB m ON m.ID = l.MAIN_LIAB_ID
+            WHERE l.MAIN_LIAB_ID IS NOT NULL
+              AND NVL(f.UTILISATION,0) > 0
+            GROUP BY l.MAIN_LIAB_ID, m.LIAB_NO, m.LIAB_NAME
+            HAVING COUNT(DISTINCT l.ID) > 1
+            ORDER BY NVL(SUM(f.UTILISATION),0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || SUBSTR(d.groupe,1,10),12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || LPAD(fmt_n(d.nb_liab),8) || ' |' || LPAD(fmt_n(d.nb_lignes),8) || ' |'
+                || LPAD(fmt_m(d.lim_cum),16) || ' |' || LPAD(fmt_m(d.util_cum),16) || ' |'
+                || LPAD(fmt_m(d.lim_groupe),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,26,9,9,17,17,17');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

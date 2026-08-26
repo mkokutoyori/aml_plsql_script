@@ -320,6 +320,328 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 1 : OVERDRAFTS DEPASSANT LEUR LIMITE
+    -- =========================================================
+    -- Un depassement de limite doit faire l'objet d'une autorisation
+    -- prealable (delegation de pouvoirs) et d'un suivi rapproche.
+    -- NB : le montant effectif d'une ligne FLEXCUBE correspond a
+    --      LIMIT_AMOUNT + COLLATERAL_CONTRIBUTION.
+    -- =========================================================
+    print_section('1. OVERDRAFTS DEPASSANT LEUR LIMITE');
+
+    -- 1.1 Lignes dont l'utilisation depasse la limite nominale
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0)
+      AND NVL(f.UTILISATION,0) > 0;
+    print_test('Lignes : utilisation > limite nominale', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,5,15,15,15,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' SER',5) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' DEPASSEMENT',15) || '|'
+            || RPAD(' EXPIRE LE',12) || '|');
+        tbl_line('4,12,24,16,5,5,15,15,15,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, f.LINE_SERIAL, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.UTILISATION,0) - NVL(f.LIMIT_AMOUNT,0) AS depass,
+                   f.LINE_EXPIRY_DATE
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0)
+              AND NVL(f.UTILISATION,0) > 0
+            ORDER BY NVL(f.UTILISATION,0) - NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || LPAD(NVL(d.LINE_SERIAL,0),4) || ' |'
+                || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || LPAD(fmt_m(d.depass),14) || ' |'
+                || RPAD(' ' || fmt_d(d.LINE_EXPIRY_DATE),12) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,5,15,15,15,12');
+    END IF;
+
+    -- 1.2 Lignes dont l'utilisation depasse le montant effectif
+    --     (limite + contribution du collateral) => depassement non couvert
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0) + NVL(f.COLLATERAL_CONTRIBUTION,0)
+      AND NVL(f.UTILISATION,0) > 0;
+    print_test('Lignes : utilisation > limite + collateral', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,15,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' COLLATERAL',15) || '|' || RPAD(' UTILISE',15) || '|'
+            || RPAD(' NON COUVERT',15) || '|');
+        tbl_line('4,12,24,16,5,15,15,15,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.COLLATERAL_CONTRIBUTION,0) AS collat,
+                   NVL(f.UTILISATION,0) AS util,
+                   NVL(f.UTILISATION,0) - NVL(f.LIMIT_AMOUNT,0) - NVL(f.COLLATERAL_CONTRIBUTION,0) AS ecart
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.UTILISATION,0) > NVL(f.LIMIT_AMOUNT,0) + NVL(f.COLLATERAL_CONTRIBUTION,0)
+              AND NVL(f.UTILISATION,0) > 0
+            ORDER BY NVL(f.UTILISATION,0) - NVL(f.LIMIT_AMOUNT,0) - NVL(f.COLLATERAL_CONTRIBUTION,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.collat),14) || ' |'
+                || LPAD(fmt_m(d.util),14) || ' |' || LPAD(fmt_m(d.ecart),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,15,15');
+    END IF;
+
+    -- 1.3 Lignes dont le disponible calcule par FLEXCUBE est negatif
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.AVAILABLE_AMOUNT,0) < 0;
+    print_test('Lignes avec AVAILABLE_AMOUNT negatif', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,15,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' DISPONIBLE',15) || '|'
+            || RPAD(' STATUT',12) || '|');
+        tbl_line('4,12,24,16,5,15,15,15,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.AVAILABLE_AMOUNT,0) AS dispo,
+                   NVL(f.USER_DEFINE_STATUS,'-') AS statut
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.AVAILABLE_AMOUNT,0) < 0
+            ORDER BY NVL(f.AVAILABLE_AMOUNT,0) ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || LPAD(fmt_m(d.dispo),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.statut,1,10),12) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,15,12');
+    END IF;
+
+    -- 1.4 Comptes dont le solde debiteur excede l'autorisation
+    --     (limite de la ligne rattachee + TOD accorde)
+    --     NB : le TOD est pris en compte quelle que soit sa validite ;
+    --          les TOD expires sont traites en section 2.
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT a.CUST_AC_NO
+        FROM STTM_CUST_ACCOUNT a
+        WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+          AND ABS(a.ACY_CURR_BALANCE) >
+              NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                   WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                     AND f.RECORD_STAT = 'O'),0)
+              + NVL(a.TOD_LIMIT,0) + NVL(a.SUBLIMIT,0)
+    );
+    print_test('Comptes : solde debiteur > autorisation (ligne+TOD)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,15,15,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE DEB.',15) || '|' || RPAD(' AUTORISE',15) || '|' || RPAD(' DEPASSEMENT',15) || '|'
+            || RPAD(' OD DEPUIS',15) || '|');
+        tbl_line('4,12,24,20,5,15,15,15,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   ABS(a.ACY_CURR_BALANCE) AS solde_deb,
+                   NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                        WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                          AND f.RECORD_STAT = 'O'),0)
+                   + NVL(a.TOD_LIMIT,0) + NVL(a.SUBLIMIT,0) AS autorise,
+                   ABS(a.ACY_CURR_BALANCE)
+                   - (NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                           WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                             AND f.RECORD_STAT = 'O'),0)
+                      + NVL(a.TOD_LIMIT,0) + NVL(a.SUBLIMIT,0)) AS depass,
+                   a.OVERDRAFT_SINCE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND ABS(a.ACY_CURR_BALANCE) >
+                  NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                       WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+                         AND f.RECORD_STAT = 'O'),0)
+                  + NVL(a.TOD_LIMIT,0) + NVL(a.SUBLIMIT,0)
+            ORDER BY depass DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde_deb),14) || ' |' || LPAD(fmt_m(d.autorise),14) || ' |'
+                || LPAD(fmt_m(d.depass),14) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),15) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,15,15,15');
+    END IF;
+
+    -- 1.5 Comptes marques en depassement de ligne par FLEXCUBE (OVERLINE)
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O' AND a.OVERLINE_OD_SINCE IS NOT NULL;
+    print_test('Comptes en depassement de ligne (OVERLINE_OD_SINCE)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,14,14,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' OVERLINE LE',14) || '|' || RPAD(' OD DEPUIS',14) || '|'
+            || RPAD(' JOURS',10) || '|');
+        tbl_line('4,12,24,20,5,15,14,14,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERLINE_OD_SINCE, a.OVERDRAFT_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) AS nb_jours
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O' AND a.OVERLINE_OD_SINCE IS NOT NULL
+            ORDER BY a.OVERLINE_OD_SINCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERLINE_OD_SINCE),14) || '|'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),14) || '|'
+                || LPAD(fmt_n(d.nb_jours),9) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,14,14,10');
+    END IF;
+
+    -- 1.6 Lignes portant un depassement exceptionnel enregistre
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.EXCEP_BREACH,0) > 0 OR NVL(f.EXCEP_TXN_AMT,0) > 0;
+    print_test('Lignes avec depassement exceptionnel (EXCEP_BREACH)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,14,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' MNT EXCEPT.',15) || '|' || RPAD(' NB BREACH',14) || '|'
+            || RPAD(' DERNIER OD',14) || '|');
+        tbl_line('4,12,24,16,5,15,15,14,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.EXCEP_TXN_AMT,0) AS mnt_exc,
+                   NVL(f.EXCEP_BREACH,0) AS nb_breach, f.DATE_OF_LAST_OD
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.EXCEP_BREACH,0) > 0 OR NVL(f.EXCEP_TXN_AMT,0) > 0
+            ORDER BY NVL(f.EXCEP_TXN_AMT,0) DESC, NVL(f.EXCEP_BREACH,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.mnt_exc),14) || ' |'
+                || LPAD(fmt_n(d.nb_breach),13) || ' |'
+                || RPAD(' ' || fmt_d(d.DATE_OF_LAST_OD),14) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,14,14');
+    END IF;
+
+    -- 1.7 Lignes dont l'utilisation depasse le montant approuve
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.APPROVED_AMT,0) > 0
+      AND NVL(f.UTILISATION,0) > NVL(f.APPROVED_AMT,0);
+    print_test('Lignes : utilisation > montant approuve (APPROVED_AMT)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,15,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' APPROUVE',15) || '|' || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|'
+            || RPAD(' ECART',15) || '|');
+        tbl_line('4,12,24,16,5,15,15,15,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.APPROVED_AMT,0) AS approuve, NVL(f.LIMIT_AMOUNT,0) AS limite,
+                   NVL(f.UTILISATION,0) AS util,
+                   NVL(f.UTILISATION,0) - NVL(f.APPROVED_AMT,0) AS ecart
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.APPROVED_AMT,0) > 0
+              AND NVL(f.UTILISATION,0) > NVL(f.APPROVED_AMT,0)
+            ORDER BY NVL(f.UTILISATION,0) - NVL(f.APPROVED_AMT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.approuve),14) || ' |' || LPAD(fmt_m(d.limite),14) || ' |'
+                || LPAD(fmt_m(d.util),14) || ' |' || LPAD(fmt_m(d.ecart),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,15,15');
+    END IF;
+
+    -- 1.8 Sous-lignes dont l'utilisation cumulee depasse la ligne mere
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT f.MAIN_LINE_ID
+        FROM GETM_FACILITY f
+        JOIN GETM_FACILITY p ON p.ID = f.MAIN_LINE_ID
+        WHERE f.MAIN_LINE_ID IS NOT NULL AND f.MAIN_LINE_ID != f.ID
+        GROUP BY f.MAIN_LINE_ID, p.LIMIT_AMOUNT
+        HAVING NVL(SUM(f.UTILISATION),0) > NVL(p.LIMIT_AMOUNT,0)
+    );
+    print_test('Sous-lignes : utilisation cumulee > ligne mere', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,8,15,15,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE MERE',16) || '|' || RPAD(' NB SOUS',8) || '|'
+            || RPAD(' LIMITE MERE',15) || '|' || RPAD(' UTIL. CUMULEE',15) || '|' || RPAD(' DEPASSEMENT',15) || '|');
+        tbl_line('4,12,24,16,8,15,15,15');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   p.LINE_CODE AS ligne_mere, COUNT(*) AS nb_sous,
+                   NVL(p.LIMIT_AMOUNT,0) AS limite_mere,
+                   NVL(SUM(f.UTILISATION),0) AS util_cum,
+                   NVL(SUM(f.UTILISATION),0) - NVL(p.LIMIT_AMOUNT,0) AS depass
+            FROM GETM_FACILITY f
+            JOIN GETM_FACILITY p ON p.ID = f.MAIN_LINE_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = p.LIAB_ID
+            WHERE f.MAIN_LINE_ID IS NOT NULL AND f.MAIN_LINE_ID != f.ID
+            GROUP BY p.ID, l.LIAB_NO, l.LIAB_NAME, p.LINE_CODE, p.LIMIT_AMOUNT
+            HAVING NVL(SUM(f.UTILISATION),0) > NVL(p.LIMIT_AMOUNT,0)
+            ORDER BY NVL(SUM(f.UTILISATION),0) - NVL(p.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne_mere,1,14),16) || '|' || LPAD(fmt_n(d.nb_sous),7) || ' |'
+                || LPAD(fmt_m(d.limite_mere),14) || ' |' || LPAD(fmt_m(d.util_cum),14) || ' |'
+                || LPAD(fmt_m(d.depass),14) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,16,8,15,15,15');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

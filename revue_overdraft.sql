@@ -949,6 +949,362 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 3 : OVERDRAFTS SANS APPROBATION IDENTIFIABLE
+    -- =========================================================
+    -- Tout concours doit etre rattachable a une decision de credit
+    -- formalisee et a un valideur distinct de l'initiateur
+    -- (principe des quatre yeux / separation des taches).
+    -- =========================================================
+    print_section('3. OVERDRAFTS SANS APPROBATION IDENTIFIABLE');
+
+    -- 3.1 Lignes non autorisees dans le systeme mais deja utilisees
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.AUTH_STAT,'U') != 'A'
+      AND NVL(f.UTILISATION,0) > 0;
+    print_test('Lignes non autorisees (AUTH_STAT != A) et utilisees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,6,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' AUTH',6) || '|'
+            || RPAD(' MAKER',16) || '|' || RPAD(' SAISIE LE',13) || '|');
+        tbl_line('4,12,24,16,5,15,15,6,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.AUTH_STAT,'-') AS auth, NVL(f.MAKER_ID,'-') AS maker, f.MAKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.AUTH_STAT,'U') != 'A'
+              AND NVL(f.UTILISATION,0) > 0
+            ORDER BY NVL(f.UTILISATION,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || d.auth,6) || '|' || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,6,16,13');
+    END IF;
+
+    -- 3.2 Lignes ouvertes sans valideur identifie (CHECKER_ID absent)
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.RECORD_STAT = 'O'
+      AND (f.CHECKER_ID IS NULL OR TRIM(f.CHECKER_ID) IS NULL)
+      AND NVL(f.LIMIT_AMOUNT,0) > 0;
+    print_test('Lignes sans valideur identifie (CHECKER_ID absent)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' MAKER',16) || '|'
+            || RPAD(' SAISIE LE',13) || '|');
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.MAKER_ID,'-') AS maker, f.MAKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.RECORD_STAT = 'O'
+              AND (f.CHECKER_ID IS NULL OR TRIM(f.CHECKER_ID) IS NULL)
+              AND NVL(f.LIMIT_AMOUNT,0) > 0
+            ORDER BY NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,16,13');
+    END IF;
+
+    -- 3.3 Lignes auto-approuvees (initiateur = valideur)
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.MAKER_ID IS NOT NULL AND f.CHECKER_ID IS NOT NULL
+      AND UPPER(TRIM(f.MAKER_ID)) = UPPER(TRIM(f.CHECKER_ID))
+      AND NVL(f.LIMIT_AMOUNT,0) > 0;
+    print_test('Lignes auto-approuvees (MAKER_ID = CHECKER_ID)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' UTILISATEUR',16) || '|'
+            || RPAD(' VALIDE LE',13) || '|');
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   f.MAKER_ID AS usr, f.CHECKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.MAKER_ID IS NOT NULL AND f.CHECKER_ID IS NOT NULL
+              AND UPPER(TRIM(f.MAKER_ID)) = UPPER(TRIM(f.CHECKER_ID))
+              AND NVL(f.LIMIT_AMOUNT,0) > 0
+            ORDER BY NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,16,13');
+    END IF;
+
+    -- 3.4 Lignes accordees sans montant approuve renseigne
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE f.RECORD_STAT = 'O'
+      AND NVL(f.LIMIT_AMOUNT,0) > 0
+      AND NVL(f.APPROVED_AMT,0) = 0;
+    print_test('Lignes avec limite > 0 mais APPROVED_AMT absent', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',15) || '|' || RPAD(' UTILISE',15) || '|' || RPAD(' CHECKER',16) || '|'
+            || RPAD(' VALIDE LE',13) || '|');
+        tbl_line('4,12,24,16,5,15,15,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   f.LINE_CODE, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                   NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.CHECKER_ID,'-') AS checker, f.CHECKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.RECORD_STAT = 'O'
+              AND NVL(f.LIMIT_AMOUNT,0) > 0
+              AND NVL(f.APPROVED_AMT,0) = 0
+            ORDER BY NVL(f.LIMIT_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.limite),14) || ' |' || LPAD(fmt_m(d.util),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,5,15,15,16,13');
+    END IF;
+
+    -- 3.5 Comptes debiteurs sans aucune autorisation (ni ligne, ni TOD)
+    --     => decouvert de fait, accorde hors dispositif
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND (a.LINE_ID IS NULL OR TRIM(a.LINE_ID) IS NULL)
+      AND NVL(a.TOD_LIMIT,0) = 0
+      AND NVL(a.SUBLIMIT,0) = 0;
+    print_test('Comptes debiteurs sans ligne ni TOD (decouvert de fait)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,13,13,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' OD DEPUIS',13) || '|' || RPAD(' CL. COMPTE',13) || '|'
+            || RPAD(' AGENCE',14) || '|');
+        tbl_line('4,12,24,20,5,15,13,13,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE,
+                   NVL(a.ACCOUNT_CLASS,'-') AS cl, NVL(a.BRANCH_CODE,'-') AS brn
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND (a.LINE_ID IS NULL OR TRIM(a.LINE_ID) IS NULL)
+              AND NVL(a.TOD_LIMIT,0) = 0
+              AND NVL(a.SUBLIMIT,0) = 0
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.cl,1,11),13) || '|'
+                || RPAD(' ' || d.brn,14) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,13,13,14');
+    END IF;
+
+    -- 3.6 TOD accordes sans periode de validite renseignee
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.TOD_LIMIT,0) > 0
+      AND (a.TOD_LIMIT_START_DATE IS NULL OR a.TOD_LIMIT_END_DATE IS NULL);
+    print_test('TOD sans periode de validite (dates absentes)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,15,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' TOD',15) || '|' || RPAD(' SOLDE',15) || '|' || RPAD(' DEBUT TOD',13) || '|'
+            || RPAD(' FIN TOD',13) || '|');
+        tbl_line('4,12,24,20,5,15,15,13,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   NVL(a.TOD_LIMIT,0) AS tod, a.ACY_CURR_BALANCE AS solde,
+                   a.TOD_LIMIT_START_DATE, a.TOD_LIMIT_END_DATE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.TOD_LIMIT,0) > 0
+              AND (a.TOD_LIMIT_START_DATE IS NULL OR a.TOD_LIMIT_END_DATE IS NULL)
+            ORDER BY NVL(a.TOD_LIMIT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.tod),14) || ' |' || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || fmt_d(d.TOD_LIMIT_START_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.TOD_LIMIT_END_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,15,13,13');
+    END IF;
+
+    -- 3.7 Comptes debiteurs sur une classe n'autorisant pas le decouvert
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND NVL(ac.OVERDRAFT_FACILITY,'N') != 'Y';
+    print_test('Comptes debiteurs sur classe sans OVERDRAFT_FACILITY', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,12,26,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' CLASSE',12) || '|' || RPAD(' LIBELLE CLASSE',26) || '|'
+            || RPAD(' OD FAC.',7) || '|');
+        tbl_line('4,12,24,20,5,15,12,26,7');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.ACCOUNT_CLASS AS cl,
+                   NVL(ac.DESCRIPTION,'-') AS cl_lib, NVL(ac.OVERDRAFT_FACILITY,'-') AS od_fac
+            FROM STTM_CUST_ACCOUNT a
+            JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND NVL(ac.OVERDRAFT_FACILITY,'N') != 'Y'
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.cl,1,10),12) || '|'
+                || RPAD(' ' || SUBSTR(d.cl_lib,1,24),26) || '|'
+                || RPAD(' ' || d.od_fac,7) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,12,26,7');
+    END IF;
+
+    -- 3.8 Comptes rattaches a une LINE_ID inexistante dans GETM_FACILITY
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM GETM_FACILITY f
+                      WHERE f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID);
+    print_test('Comptes rattaches a une ligne inexistante (LINE_ID orpheline)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,15,18,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',15) || '|' || RPAD(' LINE_ID INCONNUE',18) || '|' || RPAD(' OD DEPUIS',13) || '|');
+        tbl_line('4,12,24,20,5,15,18,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.LINE_ID, a.OVERDRAFT_SINCE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM GETM_FACILITY f
+                              WHERE f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),14) || ' |'
+                || RPAD(' ' || SUBSTR(d.LINE_ID,1,16),18) || '|'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,15,18,13');
+    END IF;
+
+    -- 3.9 Liabilities non autorisees portant des lignes utilisees
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT l.ID
+        FROM GETM_LIAB l
+        JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+        WHERE NVL(l.AUTH_STAT,'U') != 'A'
+          AND NVL(f.UTILISATION,0) > 0
+        GROUP BY l.ID
+    );
+    print_test('Liabilities non autorisees avec lignes utilisees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,8,16,16,8,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' LIAB_NO',12) || '|' || RPAD(' NOM',26) || '|'
+            || RPAD(' AUTH',8) || '|' || RPAD(' LIMITE GLOB.',16) || '|' || RPAD(' UTIL. CUMULEE',16) || '|'
+            || RPAD(' NB LIGNES',8) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,26,8,16,16,8,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(l.AUTH_STAT,'-') AS auth, NVL(l.OVERALL_LIMIT,0) AS lim_glob,
+                   NVL(SUM(f.UTILISATION),0) AS util, COUNT(*) AS nb_lignes,
+                   NVL(MAX(l.MAKER_ID),'-') AS maker
+            FROM GETM_LIAB l
+            JOIN GETM_FACILITY f ON f.LIAB_ID = l.ID
+            WHERE NVL(l.AUTH_STAT,'U') != 'A'
+              AND NVL(f.UTILISATION,0) > 0
+            GROUP BY l.ID, l.LIAB_NO, l.LIAB_NAME, l.AUTH_STAT, l.OVERALL_LIMIT
+            ORDER BY NVL(SUM(f.UTILISATION),0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+                || RPAD(' ' || d.auth,8) || '|'
+                || LPAD(fmt_m(d.lim_glob),15) || ' |' || LPAD(fmt_m(d.util),15) || ' |'
+                || LPAD(fmt_n(d.nb_lignes),7) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,26,8,16,16,8,16');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

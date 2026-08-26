@@ -1715,19 +1715,22 @@ BEGIN
         tbl_line('4,12,26,9,8,16,16,20');
         v_row_num := 0;
         FOR d IN (SELECT * FROM (
-            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
-                   COUNT(*) AS nb_lignes, COUNT(DISTINCT f.BRN) AS nb_ag,
-                   NVL(SUM(f.LIMIT_AMOUNT),0) AS lim_cum, NVL(SUM(f.UTILISATION),0) AS util_cum,
-                   (SELECT LISTAGG(x.brn, ',') WITHIN GROUP (ORDER BY x.brn)
-                      FROM (SELECT DISTINCT f2.BRN AS brn FROM GETM_FACILITY f2
-                             WHERE f2.LIAB_ID = f.LIAB_ID AND f2.RECORD_STAT = 'O'
-                               AND NVL(f2.LIMIT_AMOUNT,0) > 0) x) AS agences
-            FROM GETM_FACILITY f
-            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
-            WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
-            GROUP BY f.LIAB_ID, l.LIAB_NO, l.LIAB_NAME
-            HAVING COUNT(DISTINCT f.BRN) > 1
-            ORDER BY NVL(SUM(f.LIMIT_AMOUNT),0) DESC
+            SELECT liab, nom, COUNT(*) AS nb_lignes, COUNT(DISTINCT brn) AS nb_ag,
+                   NVL(SUM(limite),0) AS lim_cum, NVL(SUM(util),0) AS util_cum,
+                   LISTAGG(CASE WHEN rn_brn = 1 THEN brn END, ',')
+                       WITHIN GROUP (ORDER BY brn) AS agences
+            FROM (
+                SELECT f.LIAB_ID AS liab_id, NVL(l.LIAB_NO,'-') AS liab,
+                       NVL(l.LIAB_NAME,'-') AS nom, NVL(f.BRN,'-') AS brn,
+                       NVL(f.LIMIT_AMOUNT,0) AS limite, NVL(f.UTILISATION,0) AS util,
+                       ROW_NUMBER() OVER (PARTITION BY f.LIAB_ID, f.BRN ORDER BY f.ID) AS rn_brn
+                FROM GETM_FACILITY f
+                LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+                WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+            )
+            GROUP BY liab_id, liab, nom
+            HAVING COUNT(DISTINCT brn) > 1
+            ORDER BY NVL(SUM(limite),0) DESC
         ) WHERE ROWNUM <= c_max_rows) LOOP
             v_row_num := v_row_num + 1;
             DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
@@ -1891,11 +1894,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE, d.MOD_NO,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE, vd.MOD_NO,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         WHERE NVL(v.lim_prec,0) > 0
           AND v.LIMIT_AMOUNT > v.lim_prec
@@ -1917,11 +1920,11 @@ BEGIN
                    ROUND((v.LIMIT_AMOUNT - v.lim_prec) * 100 / v.lim_prec, 1) AS pct,
                    v.VALUE_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -1946,11 +1949,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         WHERE v.lim_prec IS NOT NULL
           AND v.LIMIT_AMOUNT - v.lim_prec >= c_mnt_augm
@@ -1969,11 +1972,11 @@ BEGIN
                    v.lim_prec AS ancienne, v.LIMIT_AMOUNT AS nouvelle,
                    v.LIMIT_AMOUNT - v.lim_prec AS hausse, v.VALUE_DATE, v.BOOK_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -1997,11 +2000,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         WHERE NVL(v.lim_prec,0) > 0
           AND v.LIMIT_AMOUNT >= 2 * v.lim_prec
@@ -2021,11 +2024,11 @@ BEGIN
                    ROUND(v.LIMIT_AMOUNT / v.lim_prec, 1) AS coeff,
                    v.VALUE_DATE, NVL(f.UTILISATION,0) AS util
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -2049,11 +2052,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.FACILITY_ID
         FROM (
-            SELECT d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
         GROUP BY v.FACILITY_ID
@@ -2077,11 +2080,11 @@ BEGIN
                    - MIN(v.lim_prec) KEEP (DENSE_RANK FIRST ORDER BY v.VALUE_DATE) AS hausse_tot,
                    MAX(v.VALUE_DATE) AS derniere
             FROM (
-                SELECT d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -2107,11 +2110,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         WHERE v.lim_prec IS NOT NULL
@@ -2135,11 +2138,11 @@ BEGIN
                    ROUND(NVL(f.UTILISATION,0) * 100 / NULLIF(f.LIMIT_AMOUNT,0), 1) AS taux,
                    v.VALUE_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -2209,11 +2212,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
@@ -2235,11 +2238,11 @@ BEGIN
                    v.VALUE_DATE, f.DATE_OF_LAST_OD,
                    TRUNC(f.DATE_OF_LAST_OD) - TRUNC(v.VALUE_DATE) AS delai
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -2265,11 +2268,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
           AND v.BOOK_DATE IS NOT NULL AND v.VALUE_DATE < v.BOOK_DATE
@@ -2289,11 +2292,11 @@ BEGIN
                    v.VALUE_DATE, v.BOOK_DATE,
                    TRUNC(v.BOOK_DATE) - TRUNC(v.VALUE_DATE) AS retro
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE, vd.BOOK_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
@@ -2318,11 +2321,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID, a.CUST_AC_NO
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2348,11 +2351,11 @@ BEGIN
                        AND h.BKG_DATE BETWEEN v.VALUE_DATE - c_jours_avant AND v.VALUE_DATE) AS pire,
                    v.VALUE_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2380,11 +2383,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID, a.CUST_AC_NO
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2410,11 +2413,11 @@ BEGIN
                        AND h.BKG_DATE BETWEEN v.VALUE_DATE AND v.VALUE_DATE + c_jours_avant) AS pire,
                    v.VALUE_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2442,11 +2445,11 @@ BEGIN
     SELECT COUNT(*) INTO v_count FROM (
         SELECT v.ID, a.CUST_AC_NO
         FROM (
-            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-            FROM GETM_FACILITY_VD_DETAILS d
-            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2476,11 +2479,11 @@ BEGIN
                        AND h.TRN_DT BETWEEN v.VALUE_DATE AND v.VALUE_DATE + c_jours_avant) AS gros_deb,
                    v.VALUE_DATE
             FROM (
-                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
-                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
-                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
-                FROM GETM_FACILITY_VD_DETAILS d
-                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+                SELECT vd.ID, vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
@@ -2502,6 +2505,297 @@ BEGIN
                 || RPAD(' ' || fmt_d(d.VALUE_DATE),12) || '|');
         END LOOP;
         tbl_line('4,12,20,20,15,15,9,15,12');
+    END IF;
+
+    -- =========================================================
+    -- SECTION 8 : OVERDRAFTS PROCHES OU SUPERIEURS AUX SEUILS
+    --             D'APPROBATION
+    -- =========================================================
+    -- Les montants qui se logent juste sous un palier de delegation
+    -- (bande c_pct_proche, par defaut 90 %) sont un indicateur classique
+    -- de contournement du niveau d'approbation requis. Le cumul de
+    -- plusieurs concours sous le seuil produit le meme effet.
+    -- NB : pour les lignes en devise, le montant de reference retenu est
+    --      REPORTING_AMOUNT lorsqu'il est renseigne, sinon LIMIT_AMOUNT.
+    -- =========================================================
+    print_section('8. OVERDRAFTS PROCHES OU SUPERIEURS AUX SEUILS D''APPROBATION');
+
+    -- Ventilation des limites par palier de delegation (informatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Ventilation des lignes par palier de delegation]');
+    FOR d IN (SELECT palier, COUNT(*) AS nb, NVL(SUM(mnt),0) AS total,
+                     NVL(SUM(util),0) AS util
+              FROM (SELECT CASE
+                             WHEN mnt >= c_seuil_4 THEN '5. >= seuil 4'
+                             WHEN mnt >= c_seuil_3 THEN '4. seuil 3 a seuil 4'
+                             WHEN mnt >= c_seuil_2 THEN '3. seuil 2 a seuil 3'
+                             WHEN mnt >= c_seuil_1 THEN '2. seuil 1 a seuil 2'
+                             ELSE '1. < seuil 1'
+                           END AS palier, mnt, util
+                    FROM (SELECT CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                                      THEN NVL(f.LIMIT_AMOUNT,0)
+                                      ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                                 END AS mnt,
+                                 NVL(f.UTILISATION,0) AS util
+                          FROM GETM_FACILITY f
+                          WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0))
+              GROUP BY palier
+              ORDER BY palier) LOOP
+        print_info(d.palier, fmt_n(d.nb) || ' ligne(s) — limites ' || fmt_m(d.total)
+            || ' — utilise ' || fmt_m(d.util));
+    END LOOP;
+
+    -- 8.1 Lignes dont la limite se situe juste en dessous d'un seuil
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT x.ID FROM (
+            SELECT f.ID,
+                   CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                        THEN NVL(f.LIMIT_AMOUNT,0)
+                        ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                   END AS mnt
+            FROM GETM_FACILITY f
+            WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+        ) x
+        WHERE (x.mnt >= c_seuil_1 * c_pct_proche / 100 AND x.mnt < c_seuil_1)
+           OR (x.mnt >= c_seuil_2 * c_pct_proche / 100 AND x.mnt < c_seuil_2)
+           OR (x.mnt >= c_seuil_3 * c_pct_proche / 100 AND x.mnt < c_seuil_3)
+           OR (x.mnt >= c_seuil_4 * c_pct_proche / 100 AND x.mnt < c_seuil_4)
+    );
+    print_test('Limites logees juste sous un seuil (bande ' || c_pct_proche || ' %)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,5,16,16,10,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' LIMITE',16) || '|' || RPAD(' SEUIL VISE',16) || '|' || RPAD(' % SEUIL',10) || '|'
+            || RPAD(' UTILISE',16) || '|');
+        tbl_line('4,12,22,16,5,16,16,10,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT liab, nom, ligne, ccy, mnt, seuil,
+                   ROUND(mnt * 100 / seuil, 1) AS pct, util
+            FROM (
+                SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                       f.LINE_CODE AS ligne, NVL(f.LINE_CURRENCY,'-') AS ccy,
+                       NVL(f.UTILISATION,0) AS util,
+                       CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                            THEN NVL(f.LIMIT_AMOUNT,0)
+                            ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                       END AS mnt,
+                       CASE
+                         WHEN NVL(f.LIMIT_AMOUNT,0) >= c_seuil_4 * c_pct_proche / 100
+                              AND NVL(f.LIMIT_AMOUNT,0) < c_seuil_4 THEN c_seuil_4
+                         WHEN NVL(f.LIMIT_AMOUNT,0) >= c_seuil_3 * c_pct_proche / 100
+                              AND NVL(f.LIMIT_AMOUNT,0) < c_seuil_3 THEN c_seuil_3
+                         WHEN NVL(f.LIMIT_AMOUNT,0) >= c_seuil_2 * c_pct_proche / 100
+                              AND NVL(f.LIMIT_AMOUNT,0) < c_seuil_2 THEN c_seuil_2
+                         WHEN NVL(f.LIMIT_AMOUNT,0) >= c_seuil_1 * c_pct_proche / 100
+                              AND NVL(f.LIMIT_AMOUNT,0) < c_seuil_1 THEN c_seuil_1
+                       END AS seuil
+                FROM GETM_FACILITY f
+                LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+                WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+            )
+            WHERE seuil IS NOT NULL
+            ORDER BY mnt DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.mnt),15) || ' |' || LPAD(fmt_m(d.seuil),15) || ' |'
+                || LPAD(TO_CHAR(d.pct,'FM990D0') || ' %',9) || ' |'
+                || LPAD(fmt_m(d.util),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,16,5,16,16,10,16');
+    END IF;
+
+    -- 8.2 Lignes atteignant ou depassant le seuil du comite de credit
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT x.ID FROM (
+            SELECT f.ID,
+                   CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                        THEN NVL(f.LIMIT_AMOUNT,0)
+                        ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                   END AS mnt
+            FROM GETM_FACILITY f
+            WHERE f.RECORD_STAT = 'O'
+        ) x
+        WHERE x.mnt >= c_seuil_3
+    );
+    print_test('Lignes >= seuil 3 (' || fmt_m(c_seuil_3) || ') a rapprocher des PV', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,16,16,16,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' LIMITE',16) || '|' || RPAD(' APPROUVE',16) || '|'
+            || RPAD(' UTILISE',16) || '|' || RPAD(' CHECKER',16) || '|' || RPAD(' VALIDE LE',13) || '|');
+        tbl_line('4,12,22,16,16,16,16,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, f.LINE_CODE AS ligne,
+                   CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                        THEN NVL(f.LIMIT_AMOUNT,0)
+                        ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                   END AS mnt,
+                   NVL(f.APPROVED_AMT,0) AS approuve, NVL(f.UTILISATION,0) AS util,
+                   NVL(f.CHECKER_ID,'-') AS checker, f.CHECKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.RECORD_STAT = 'O'
+              AND CASE WHEN NVL(f.LINE_CURRENCY,'XAF') = 'XAF'
+                       THEN NVL(f.LIMIT_AMOUNT,0)
+                       ELSE NVL(NULLIF(f.REPORTING_AMOUNT,0), NVL(f.LIMIT_AMOUNT,0))
+                  END >= c_seuil_3
+            ORDER BY mnt DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_m(d.mnt),15) || ' |' || LPAD(fmt_m(d.approuve),15) || ' |'
+                || LPAD(fmt_m(d.util),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,16,16,16,16,13');
+    END IF;
+
+    -- 8.3 Clients dont le CUMUL des lignes franchit un seuil alors que
+    --     chaque ligne prise isolement reste en dessous (fractionnement)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT f.LIAB_ID
+        FROM GETM_FACILITY f
+        WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+        GROUP BY f.LIAB_ID
+        HAVING COUNT(*) > 1
+           AND SUM(NVL(f.LIMIT_AMOUNT,0)) >= c_seuil_2
+           AND MAX(NVL(f.LIMIT_AMOUNT,0)) < c_seuil_2
+    );
+    print_test('Cumul de lignes >= seuil 2 avec chaque ligne en dessous', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,10,17,17,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' NB LIGNES',10) || '|' || RPAD(' CUMUL LIMITES',17) || '|' || RPAD(' + GROSSE LIGNE',17) || '|'
+            || RPAD(' SEUIL 2',17) || '|' || RPAD(' UTIL. CUMULEE',17) || '|');
+        tbl_line('4,12,24,10,17,17,17,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, COUNT(*) AS nb_lignes,
+                   SUM(NVL(f.LIMIT_AMOUNT,0)) AS cumul, MAX(NVL(f.LIMIT_AMOUNT,0)) AS plus_grosse,
+                   NVL(SUM(f.UTILISATION),0) AS util_cum
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE f.RECORD_STAT = 'O' AND NVL(f.LIMIT_AMOUNT,0) > 0
+            GROUP BY f.LIAB_ID, l.LIAB_NO, l.LIAB_NAME
+            HAVING COUNT(*) > 1
+               AND SUM(NVL(f.LIMIT_AMOUNT,0)) >= c_seuil_2
+               AND MAX(NVL(f.LIMIT_AMOUNT,0)) < c_seuil_2
+            ORDER BY SUM(NVL(f.LIMIT_AMOUNT,0)) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || LPAD(fmt_n(d.nb_lignes),9) || ' |'
+                || LPAD(fmt_m(d.cumul),16) || ' |' || LPAD(fmt_m(d.plus_grosse),16) || ' |'
+                || LPAD(fmt_m(c_seuil_2),16) || ' |' || LPAD(fmt_m(d.util_cum),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,10,17,17,17,17');
+    END IF;
+
+    -- 8.4 Hausses successives sous le seuil mais cumulees au-dessus
+    --     (saucissonnage dans le temps)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.FACILITY_ID
+        FROM (
+            SELECT vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                   LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                        ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS vd
+            WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
+        GROUP BY v.FACILITY_ID
+        HAVING COUNT(*) > 1
+           AND SUM(v.LIMIT_AMOUNT - v.lim_prec) >= c_seuil_1
+           AND MAX(v.LIMIT_AMOUNT - v.lim_prec) < c_seuil_1
+    );
+    print_test('Hausses cumulees >= seuil 1, chacune en dessous', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,10,16,16,16,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' NB HAUSSES',10) || '|' || RPAD(' CUMUL HAUSSES',16) || '|'
+            || RPAD(' + GROSSE',16) || '|' || RPAD(' LIM. FINALE',16) || '|' || RPAD(' DERNIERE',12) || '|');
+        tbl_line('4,12,22,16,10,16,16,16,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   COUNT(*) AS nb_hausses,
+                   SUM(v.LIMIT_AMOUNT - v.lim_prec) AS cumul,
+                   MAX(v.LIMIT_AMOUNT - v.lim_prec) AS plus_grosse,
+                   MAX(v.LIMIT_AMOUNT) KEEP (DENSE_RANK LAST ORDER BY v.VALUE_DATE) AS lim_fin,
+                   MAX(v.VALUE_DATE) AS derniere
+            FROM (
+                SELECT vd.FACILITY_ID, vd.LIMIT_AMOUNT, vd.VALUE_DATE,
+                       LAG(vd.LIMIT_AMOUNT) OVER (PARTITION BY vd.FACILITY_ID
+                            ORDER BY vd.VALUE_DATE, vd.BOOK_DATE, vd.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS vd
+                WHERE vd.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
+            GROUP BY v.FACILITY_ID, l.LIAB_NO, l.LIAB_NAME, f.LINE_CODE
+            HAVING COUNT(*) > 1
+               AND SUM(v.LIMIT_AMOUNT - v.lim_prec) >= c_seuil_1
+               AND MAX(v.LIMIT_AMOUNT - v.lim_prec) < c_seuil_1
+            ORDER BY SUM(v.LIMIT_AMOUNT - v.lim_prec) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_n(d.nb_hausses),9) || ' |'
+                || LPAD(fmt_m(d.cumul),15) || ' |' || LPAD(fmt_m(d.plus_grosse),15) || ' |'
+                || LPAD(fmt_m(d.lim_fin),15) || ' |'
+                || RPAD(' ' || fmt_d(d.derniere),12) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,10,16,16,16,12');
+    END IF;
+
+    -- 8.5 TOD atteignant ou approchant le premier seuil de delegation
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.TOD_LIMIT,0) >= c_seuil_1 * c_pct_proche / 100;
+    print_test('TOD atteignant ' || c_pct_proche || ' % du seuil 1 ou plus', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,20,5,16,16,10,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' TOD',16) || '|' || RPAD(' SOLDE',16) || '|' || RPAD(' % SEUIL 1',10) || '|'
+            || RPAD(' FIN TOD',13) || '|');
+        tbl_line('4,12,24,20,5,16,16,10,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   NVL(a.TOD_LIMIT,0) AS tod, a.ACY_CURR_BALANCE AS solde,
+                   ROUND(NVL(a.TOD_LIMIT,0) * 100 / c_seuil_1, 1) AS pct,
+                   a.TOD_LIMIT_END_DATE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.TOD_LIMIT,0) >= c_seuil_1 * c_pct_proche / 100
+            ORDER BY NVL(a.TOD_LIMIT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.tod),15) || ' |' || LPAD(fmt_m(d.solde),15) || ' |'
+                || LPAD(TO_CHAR(d.pct,'FM99990D0') || ' %',9) || ' |'
+                || RPAD(' ' || fmt_d(d.TOD_LIMIT_END_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,20,5,16,16,10,13');
     END IF;
 
     -- =========================================================

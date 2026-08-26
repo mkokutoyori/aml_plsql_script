@@ -99,6 +99,8 @@ DECLARE
     c_nb_episodes       CONSTANT NUMBER := 4;
     -- Ecart maximum (en jours) d'un aller-retour credit/debit (habillage)
     c_jours_ar          CONSTANT NUMBER := 5;
+    -- Taux d'interet debiteur annualise minimum attendu (%)
+    c_taux_od_min       CONSTANT NUMBER := 5;
 
     PROCEDURE print_section(p_title VARCHAR2) IS
     BEGIN
@@ -3332,6 +3334,273 @@ BEGIN
                 || LPAD(fmt_m(d.bal_ouv),15) || ' |');
         END LOOP;
         tbl_line('4,12,20,20,16,12,7,16');
+    END IF;
+
+    -- =========================================================
+    -- SECTION 11 : OVERDRAFTS DONT LES INTERETS / FRAIS N'ONT PAS
+    --              ETE APPLIQUES
+    -- =========================================================
+    -- L'absence de perception des agios sur un compte durablement
+    -- debiteur constitue une perte de produit net bancaire, une rupture
+    -- d'egalite de traitement entre clients et, le cas echeant, un
+    -- avantage consenti hors delegation.
+    -- =========================================================
+    print_section('11. OVERDRAFTS DONT LES INTERETS / FRAIS N''ONT PAS ETE APPLIQUES');
+
+    -- 11.1 Comptes debiteurs de longue duree sans aucune ecriture
+    --      d'interet debiteur (module IC) sur la periode
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND a.OVERDRAFT_SINCE IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_tod_max
+      AND NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
+                      WHERE h.AC_NO = a.CUST_AC_NO
+                        AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                        AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist));
+    print_test('Comptes debiteurs > ' || c_jours_tod_max || ' j sans interets debiteurs', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,5,16,13,9,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',16) || '|' || RPAD(' OD DEPUIS',13) || '|' || RPAD(' JOURS',9) || '|'
+            || RPAD(' CLASSE',14) || '|');
+        tbl_line('4,12,22,20,5,16,13,9,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) AS nb_jours,
+                   NVL(a.ACCOUNT_CLASS,'-') AS cl
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND a.OVERDRAFT_SINCE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_tod_max
+              AND NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
+                              WHERE h.AC_NO = a.CUST_AC_NO
+                                AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                                AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+                || LPAD(fmt_n(d.nb_jours),8) || ' |'
+                || RPAD(' ' || SUBSTR(d.cl,1,12),14) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,5,16,13,9,14');
+    END IF;
+
+    -- 11.2 Comptes debiteurs significatifs sans interets courus
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND a.LCY_CURR_BALANCE < -c_mnt_signif
+      AND NVL(a.ACY_ACCRUED_DR_IC,0) = 0;
+    print_test('Comptes debiteurs significatifs sans interets courus', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,5,16,16,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' SOLDE',16) || '|' || RPAD(' INT. COURUS',16) || '|' || RPAD(' INT. DUS',16) || '|'
+            || RPAD(' OD DEPUIS',13) || '|');
+        tbl_line('4,12,22,20,5,16,16,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, NVL(a.ACY_ACCRUED_DR_IC,0) AS courus,
+                   NVL(a.DR_INT_DUE,0) AS dus, a.OVERDRAFT_SINCE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND a.LCY_CURR_BALANCE < -c_mnt_signif
+              AND NVL(a.ACY_ACCRUED_DR_IC,0) = 0
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |' || LPAD(fmt_m(d.courus),15) || ' |'
+                || LPAD(fmt_m(d.dus),15) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,5,16,16,16,13');
+    END IF;
+
+    -- 11.3 Interets debiteurs dus et non liquides
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.DR_INT_DUE,0) > 0;
+    print_test('Comptes avec interets debiteurs dus non liquides', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,5,16,16,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' INT. DUS',16) || '|' || RPAD(' FRAIS DUS',16) || '|' || RPAD(' SOLDE',16) || '|'
+            || RPAD(' OD DEPUIS',13) || '|');
+        tbl_line('4,12,22,20,5,16,16,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   NVL(a.DR_INT_DUE,0) AS dus, NVL(a.CHG_DUE,0) AS frais,
+                   a.ACY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.DR_INT_DUE,0) > 0
+            ORDER BY NVL(a.DR_INT_DUE,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.dus),15) || ' |' || LPAD(fmt_m(d.frais),15) || ' |'
+                || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,5,16,16,16,13');
+    END IF;
+
+    -- 11.4 Frais dus non preleves sur comptes debiteurs
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.CHG_DUE,0) > 0
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0;
+    print_test('Comptes debiteurs avec frais dus non preleves', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,5,16,16,13,14');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FRAIS DUS',16) || '|' || RPAD(' SOLDE',16) || '|' || RPAD(' OD DEPUIS',13) || '|'
+            || RPAD(' AGENCE',14) || '|');
+        tbl_line('4,12,22,20,5,16,16,13,14');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   NVL(a.CHG_DUE,0) AS frais, a.ACY_CURR_BALANCE AS solde,
+                   a.OVERDRAFT_SINCE, NVL(a.BRANCH_CODE,'-') AS brn
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.CHG_DUE,0) > 0
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+            ORDER BY NVL(a.CHG_DUE,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.frais),15) || ' |' || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+                || RPAD(' ' || d.brn,14) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,5,16,16,13,14');
+    END IF;
+
+    -- 11.5 Comptes debiteurs rattaches a une classe qui n'inclut pas le
+    --      calcul / suivi des interets
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
+    WHERE a.RECORD_STAT = 'O'
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND (NVL(ac.IC_INCLUSION,'N') != 'Y' OR NVL(ac.TRACK_ACCRUED_IC,'N') != 'Y');
+    print_test('Comptes debiteurs sur classe sans suivi des interets', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,16,12,24,7,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' SOLDE',16) || '|' || RPAD(' CLASSE',12) || '|'
+            || RPAD(' LIBELLE CLASSE',24) || '|' || RPAD(' IC_IN',7) || '|' || RPAD(' TRACK',7) || '|');
+        tbl_line('4,12,22,20,16,12,24,7,7');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO,
+                   a.ACY_CURR_BALANCE AS solde, a.ACCOUNT_CLASS AS cl,
+                   NVL(ac.DESCRIPTION,'-') AS cl_lib,
+                   NVL(ac.IC_INCLUSION,'-') AS ic_in, NVL(ac.TRACK_ACCRUED_IC,'-') AS track
+            FROM STTM_CUST_ACCOUNT a
+            JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND (NVL(ac.IC_INCLUSION,'N') != 'Y' OR NVL(ac.TRACK_ACCRUED_IC,'N') != 'Y')
+            ORDER BY a.LCY_CURR_BALANCE ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || d.CUST_AC_NO,20) || '|'
+                || LPAD(fmt_m(d.solde),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.cl,1,10),12) || '|' || RPAD(' ' || SUBSTR(d.cl_lib,1,22),24) || '|'
+                || RPAD(' ' || d.ic_in,7) || '|' || RPAD(' ' || d.track,7) || '|');
+        END LOOP;
+        tbl_line('4,12,22,20,16,12,24,7,7');
+    END IF;
+
+    -- 11.6 Taux d'interet debiteur effectif annualise anormalement bas
+    --      taux = interets debites / (encours debiteur moyen x jours / 365)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT s.ACCOUNT
+        FROM (
+            SELECT b.ACCOUNT, AVG(ABS(b.ACY_CLOSING_BAL)) AS enc_moy, COUNT(*) AS nb_j
+            FROM ACTB_ACCBAL_HISTORY b
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND b.ACY_CLOSING_BAL < 0
+            GROUP BY b.ACCOUNT
+            HAVING COUNT(*) >= c_jours_tod_max
+               AND AVG(ABS(b.ACY_CLOSING_BAL)) >= c_mnt_signif
+        ) s
+        WHERE NVL((SELECT SUM(h.LCY_AMOUNT) FROM ACTB_HISTORY h
+                    WHERE h.AC_NO = s.ACCOUNT AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)),0)
+              < c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365
+    );
+    print_test('Comptes : taux debiteur effectif < ' || c_taux_od_min || ' %', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,9,17,16,10,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
+            || RPAD(' NB JOURS',9) || '|' || RPAD(' ENCOURS MOYEN',17) || '|' || RPAD(' INT. DEBITES',16) || '|'
+            || RPAD(' TAUX EFF.',10) || '|' || RPAD(' INT. ATTENDUS',16) || '|');
+        tbl_line('4,12,20,9,17,16,10,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, s.ACCOUNT, s.nb_j, s.enc_moy, s.interets,
+                   ROUND(s.interets * 365 * 100 / NULLIF(s.enc_moy * s.nb_j, 0), 2) AS taux,
+                   c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365 AS attendus
+            FROM (
+                SELECT b.ACCOUNT, AVG(ABS(b.ACY_CLOSING_BAL)) AS enc_moy, COUNT(*) AS nb_j,
+                       NVL((SELECT SUM(h.LCY_AMOUNT) FROM ACTB_HISTORY h
+                             WHERE h.AC_NO = b.ACCOUNT AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                               AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)),0) AS interets
+                FROM ACTB_ACCBAL_HISTORY b
+                WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND b.ACY_CLOSING_BAL < 0
+                GROUP BY b.ACCOUNT
+                HAVING COUNT(*) >= c_jours_tod_max
+                   AND AVG(ABS(b.ACY_CLOSING_BAL)) >= c_mnt_signif
+            ) s
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
+            WHERE s.interets < c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365
+            ORDER BY s.enc_moy DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || LPAD(fmt_n(d.nb_j),8) || ' |'
+                || LPAD(fmt_m(d.enc_moy),16) || ' |' || LPAD(fmt_m(d.interets),15) || ' |'
+                || LPAD(TO_CHAR(NVL(d.taux,0),'FM990D00') || ' %',9) || ' |'
+                || LPAD(fmt_m(d.attendus),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,20,9,17,16,10,16');
     END IF;
 
     -- =========================================================

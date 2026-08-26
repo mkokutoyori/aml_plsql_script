@@ -91,6 +91,8 @@ DECLARE
     c_mnt_signif        CONSTANT NUMBER := 5000000;       -- 5 M
     -- Profondeur d'analyse des historiques (en mois)
     c_mois_hist         CONSTANT NUMBER := 12;
+    -- Profondeur d'analyse de l'historique des limites (en mois)
+    c_mois_limit        CONSTANT NUMBER := 24;
     -- Nombre de jours en depassement au-dela duquel on parle de recurrence
     c_jours_recur       CONSTANT NUMBER := 60;
     -- Nombre d'episodes distincts d'overdraft caracterisant la recurrence
@@ -1860,6 +1862,336 @@ BEGIN
                 || LPAD(fmt_m(d.lim_groupe),16) || ' |');
         END LOOP;
         tbl_line('4,12,26,9,9,17,17,17');
+    END IF;
+
+    -- =========================================================
+    -- SECTION 6 : AUGMENTATIONS DE LIMITES IMPORTANTES
+    -- =========================================================
+    -- L'historique value-date des limites (GETM_FACILITY_VD_DETAILS)
+    -- permet de reconstituer les revisions successives d'une ligne et
+    -- d'identifier les hausses qui auraient du relever d'un niveau de
+    -- delegation superieur ou d'une nouvelle decision de credit.
+    -- =========================================================
+    print_section('6. AUGMENTATIONS DE LIMITES IMPORTANTES');
+
+    -- Volumetrie des revisions de limites (informatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Revisions de limites par annee — GETM_FACILITY_VD_DETAILS]');
+    FOR d IN (SELECT TO_CHAR(VALUE_DATE,'YYYY') AS annee, COUNT(*) AS nb,
+                     COUNT(DISTINCT FACILITY_ID) AS nb_lignes
+              FROM GETM_FACILITY_VD_DETAILS
+              WHERE VALUE_DATE IS NOT NULL
+              GROUP BY TO_CHAR(VALUE_DATE,'YYYY')
+              ORDER BY 1 DESC) LOOP
+        print_info('Annee ' || d.annee, fmt_n(d.nb) || ' revision(s) sur '
+            || fmt_n(d.nb_lignes) || ' ligne(s)');
+    END LOOP;
+
+    -- 6.1 Augmentations de limite superieures a c_pct_augm %
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.ID
+        FROM (
+            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE, d.MOD_NO,
+                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS d
+            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        WHERE NVL(v.lim_prec,0) > 0
+          AND v.LIMIT_AMOUNT > v.lim_prec
+          AND (v.LIMIT_AMOUNT - v.lim_prec) * 100 / v.lim_prec >= c_pct_augm
+    );
+    print_test('Augmentations de limite >= ' || c_pct_augm || ' %', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,16,16,16,8,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' ANCIENNE LIM.',16) || '|' || RPAD(' NOUVELLE LIM.',16) || '|'
+            || RPAD(' HAUSSE',16) || '|' || RPAD(' %',8) || '|' || RPAD(' EFFET LE',12) || '|');
+        tbl_line('4,12,22,16,16,16,16,8,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   v.lim_prec AS ancienne, v.LIMIT_AMOUNT AS nouvelle,
+                   v.LIMIT_AMOUNT - v.lim_prec AS hausse,
+                   ROUND((v.LIMIT_AMOUNT - v.lim_prec) * 100 / v.lim_prec, 1) AS pct,
+                   v.VALUE_DATE
+            FROM (
+                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
+                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS d
+                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(v.lim_prec,0) > 0
+              AND v.LIMIT_AMOUNT > v.lim_prec
+              AND (v.LIMIT_AMOUNT - v.lim_prec) * 100 / v.lim_prec >= c_pct_augm
+            ORDER BY (v.LIMIT_AMOUNT - v.lim_prec) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_m(d.ancienne),15) || ' |' || LPAD(fmt_m(d.nouvelle),15) || ' |'
+                || LPAD(fmt_m(d.hausse),15) || ' |'
+                || LPAD(TO_CHAR(d.pct,'FM999G990D0'),7) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),12) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,16,16,16,8,12');
+    END IF;
+
+    -- 6.2 Augmentations de limite superieures a c_mnt_augm en valeur
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.ID
+        FROM (
+            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS d
+            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        WHERE v.lim_prec IS NOT NULL
+          AND v.LIMIT_AMOUNT - v.lim_prec >= c_mnt_augm
+    );
+    print_test('Augmentations de limite >= ' || fmt_m(c_mnt_augm), v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,16,16,16,12,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' ANCIENNE LIM.',16) || '|' || RPAD(' NOUVELLE LIM.',16) || '|'
+            || RPAD(' HAUSSE',16) || '|' || RPAD(' EFFET LE',12) || '|' || RPAD(' SAISI LE',12) || '|');
+        tbl_line('4,12,22,16,16,16,16,12,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   v.lim_prec AS ancienne, v.LIMIT_AMOUNT AS nouvelle,
+                   v.LIMIT_AMOUNT - v.lim_prec AS hausse, v.VALUE_DATE, v.BOOK_DATE
+            FROM (
+                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
+                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS d
+                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE v.lim_prec IS NOT NULL
+              AND v.LIMIT_AMOUNT - v.lim_prec >= c_mnt_augm
+            ORDER BY (v.LIMIT_AMOUNT - v.lim_prec) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_m(d.ancienne),15) || ' |' || LPAD(fmt_m(d.nouvelle),15) || ' |'
+                || LPAD(fmt_m(d.hausse),15) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),12) || '|'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),12) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,16,16,16,12,12');
+    END IF;
+
+    -- 6.3 Limites au moins doublees en une seule revision
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.ID
+        FROM (
+            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS d
+            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        WHERE NVL(v.lim_prec,0) > 0
+          AND v.LIMIT_AMOUNT >= 2 * v.lim_prec
+    );
+    print_test('Limites au moins doublees en une revision', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,16,16,10,12,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' ANCIENNE LIM.',16) || '|' || RPAD(' NOUVELLE LIM.',16) || '|'
+            || RPAD(' COEFF.',10) || '|' || RPAD(' EFFET LE',12) || '|' || RPAD(' UTILISE AUJ.',16) || '|');
+        tbl_line('4,12,22,16,16,16,10,12,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   v.lim_prec AS ancienne, v.LIMIT_AMOUNT AS nouvelle,
+                   ROUND(v.LIMIT_AMOUNT / v.lim_prec, 1) AS coeff,
+                   v.VALUE_DATE, NVL(f.UTILISATION,0) AS util
+            FROM (
+                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE, d.BOOK_DATE,
+                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS d
+                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(v.lim_prec,0) > 0
+              AND v.LIMIT_AMOUNT >= 2 * v.lim_prec
+            ORDER BY v.LIMIT_AMOUNT / v.lim_prec DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_m(d.ancienne),15) || ' |' || LPAD(fmt_m(d.nouvelle),15) || ' |'
+                || LPAD('x ' || TO_CHAR(d.coeff,'FM999G990D0'),9) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),12) || '|'
+                || LPAD(fmt_m(d.util),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,22,16,16,16,10,12,16');
+    END IF;
+
+    -- 6.4 Lignes ayant subi plusieurs augmentations sur la periode
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.FACILITY_ID
+        FROM (
+            SELECT d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS d
+            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
+        GROUP BY v.FACILITY_ID
+        HAVING COUNT(*) >= 3
+    );
+    print_test('Lignes avec au moins 3 augmentations sur ' || c_mois_limit || ' mois', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,10,16,16,16,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' NB HAUSSES',10) || '|' || RPAD(' LIM. INITIALE',16) || '|'
+            || RPAD(' LIM. FINALE',16) || '|' || RPAD(' HAUSSE TOT.',16) || '|' || RPAD(' DERNIERE',12) || '|');
+        tbl_line('4,12,22,16,10,16,16,16,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   COUNT(*) AS nb_hausses,
+                   MIN(v.lim_prec) KEEP (DENSE_RANK FIRST ORDER BY v.VALUE_DATE) AS lim_init,
+                   MAX(v.LIMIT_AMOUNT) KEEP (DENSE_RANK LAST ORDER BY v.VALUE_DATE) AS lim_fin,
+                   MAX(v.LIMIT_AMOUNT) KEEP (DENSE_RANK LAST ORDER BY v.VALUE_DATE)
+                   - MIN(v.lim_prec) KEEP (DENSE_RANK FIRST ORDER BY v.VALUE_DATE) AS hausse_tot,
+                   MAX(v.VALUE_DATE) AS derniere
+            FROM (
+                SELECT d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS d
+                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            LEFT JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
+            GROUP BY v.FACILITY_ID, l.LIAB_NO, l.LIAB_NAME, f.LINE_CODE
+            HAVING COUNT(*) >= 3
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_n(d.nb_hausses),9) || ' |'
+                || LPAD(fmt_m(d.lim_init),15) || ' |' || LPAD(fmt_m(d.lim_fin),15) || ' |'
+                || LPAD(fmt_m(d.hausse_tot),15) || ' |'
+                || RPAD(' ' || fmt_d(d.derniere),12) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,10,16,16,16,12');
+    END IF;
+
+    -- 6.5 Augmentations importantes suivies d'une utilisation marginale
+    --     (limite gonflee sans besoin economique demontre)
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT v.ID
+        FROM (
+            SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                   LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                        ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+            FROM GETM_FACILITY_VD_DETAILS d
+            WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+        ) v
+        JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+        WHERE v.lim_prec IS NOT NULL
+          AND v.LIMIT_AMOUNT - v.lim_prec >= c_mnt_augm
+          AND NVL(f.LIMIT_AMOUNT,0) > 0
+          AND NVL(f.UTILISATION,0) < 0.25 * NVL(f.LIMIT_AMOUNT,0)
+    );
+    print_test('Fortes hausses de limite peu utilisees (< 25 %)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,16,16,16,16,9,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',22) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' HAUSSE',16) || '|' || RPAD(' LIM. ACTUELLE',16) || '|'
+            || RPAD(' UTILISE',16) || '|' || RPAD(' TAUX UTIL',9) || '|' || RPAD(' EFFET LE',12) || '|');
+        tbl_line('4,12,22,16,16,16,16,9,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom,
+                   NVL(f.LINE_CODE, TO_CHAR(v.FACILITY_ID)) AS ligne,
+                   v.LIMIT_AMOUNT - v.lim_prec AS hausse,
+                   NVL(f.LIMIT_AMOUNT,0) AS lim_act, NVL(f.UTILISATION,0) AS util,
+                   ROUND(NVL(f.UTILISATION,0) * 100 / NULLIF(f.LIMIT_AMOUNT,0), 1) AS taux,
+                   v.VALUE_DATE
+            FROM (
+                SELECT d.ID, d.FACILITY_ID, d.LIMIT_AMOUNT, d.VALUE_DATE,
+                       LAG(d.LIMIT_AMOUNT) OVER (PARTITION BY d.FACILITY_ID
+                            ORDER BY d.VALUE_DATE, d.BOOK_DATE, d.ID) AS lim_prec
+                FROM GETM_FACILITY_VD_DETAILS d
+                WHERE d.VALUE_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ) v
+            JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE v.lim_prec IS NOT NULL
+              AND v.LIMIT_AMOUNT - v.lim_prec >= c_mnt_augm
+              AND NVL(f.LIMIT_AMOUNT,0) > 0
+              AND NVL(f.UTILISATION,0) < 0.25 * NVL(f.LIMIT_AMOUNT,0)
+            ORDER BY (v.LIMIT_AMOUNT - v.lim_prec) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.ligne,1,14),16) || '|'
+                || LPAD(fmt_m(d.hausse),15) || ' |' || LPAD(fmt_m(d.lim_act),15) || ' |'
+                || LPAD(fmt_m(d.util),15) || ' |'
+                || LPAD(TO_CHAR(NVL(d.taux,0),'FM990D0') || ' %',8) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),12) || '|');
+        END LOOP;
+        tbl_line('4,12,22,16,16,16,16,9,12');
+    END IF;
+
+    -- 6.6 Lignes ayant fait l'objet d'un nombre eleve de modifications
+    SELECT COUNT(*) INTO v_count
+    FROM GETM_FACILITY f
+    WHERE NVL(f.MOD_NO,0) >= 10;
+    print_test('Lignes avec 10 modifications ou plus (MOD_NO)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,16,8,16,16,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',24) || '|'
+            || RPAD(' LIGNE',16) || '|' || RPAD(' MOD_NO',8) || '|' || RPAD(' LIMITE',16) || '|'
+            || RPAD(' UTILISE',16) || '|' || RPAD(' DERN. MAKER',16) || '|' || RPAD(' MODIFIE LE',13) || '|');
+        tbl_line('4,12,24,16,8,16,16,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(l.LIAB_NO,'-') AS liab, NVL(l.LIAB_NAME,'-') AS nom, f.LINE_CODE,
+                   NVL(f.MOD_NO,0) AS mod_no, NVL(f.LIMIT_AMOUNT,0) AS limite,
+                   NVL(f.UTILISATION,0) AS util, NVL(f.MAKER_ID,'-') AS maker, f.MAKER_DT_STAMP
+            FROM GETM_FACILITY f
+            LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
+            WHERE NVL(f.MOD_NO,0) >= 10
+            ORDER BY NVL(f.MOD_NO,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.liab,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_CODE,1,14),16) || '|'
+                || LPAD(fmt_n(d.mod_no),7) || ' |'
+                || LPAD(fmt_m(d.limite),15) || ' |' || LPAD(fmt_m(d.util),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,16,8,16,16,16,13');
     END IF;
 
     -- =========================================================

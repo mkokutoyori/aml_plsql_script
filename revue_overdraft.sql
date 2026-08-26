@@ -3071,6 +3071,270 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 10 : OVERDRAFTS PRESENTANT DES REGULARISATIONS
+    --              INHABITUELLES
+    -- =========================================================
+    -- Une regularisation "de facade" consiste a ramener artificiellement
+    -- le compte a l'equilibre a une date d'arrete (fin de mois, fin
+    -- d'exercice) puis a le laisser repartir en position debitrice.
+    -- Elle fausse le declassement, le provisionnement et le reporting
+    -- prudentiel.
+    -- =========================================================
+    print_section('10. OVERDRAFTS PRESENTANT DES REGULARISATIONS INHABITUELLES');
+
+    -- 10.1 Habillage d'arrete mensuel : retour a l'equilibre en fin de
+    --      mois encadre par deux positions debitrices
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT x.ACCOUNT, x.BKG_DATE
+        FROM (
+            SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                   LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec,
+                   LEAD(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_suiv,
+                   LEAD(BKG_DATE) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS dt_suiv
+            FROM ACTB_ACCBAL_HISTORY
+            WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        ) x
+        WHERE x.ACY_CLOSING_BAL >= 0
+          AND x.bal_prec < -c_mnt_signif
+          AND x.bal_suiv < -c_mnt_signif
+          AND x.BKG_DATE >= LAST_DAY(x.BKG_DATE) - 3
+          AND x.dt_suiv <= x.BKG_DATE + 7
+    );
+    print_test('Retours a l''equilibre en fin de mois puis redebit', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,12,16,16,16,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
+            || RPAD(' ARRETE LE',12) || '|' || RPAD(' SOLDE VEILLE',16) || '|' || RPAD(' SOLDE ARRETE',16) || '|'
+            || RPAD(' SOLDE SUIVANT',16) || '|' || RPAD(' REDEBIT LE',12) || '|');
+        tbl_line('4,12,20,12,16,16,16,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, x.ACCOUNT, x.BKG_DATE, x.bal_prec,
+                   x.ACY_CLOSING_BAL AS bal_arrete, x.bal_suiv, x.dt_suiv
+            FROM (
+                SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                       LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec,
+                       LEAD(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_suiv,
+                       LEAD(BKG_DATE) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS dt_suiv
+                FROM ACTB_ACCBAL_HISTORY
+                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            ) x
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = x.ACCOUNT
+            WHERE x.ACY_CLOSING_BAL >= 0
+              AND x.bal_prec < -c_mnt_signif
+              AND x.bal_suiv < -c_mnt_signif
+              AND x.BKG_DATE >= LAST_DAY(x.BKG_DATE) - 3
+              AND x.dt_suiv <= x.BKG_DATE + 7
+            ORDER BY x.bal_prec ASC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
+                || RPAD(' ' || fmt_d(d.BKG_DATE),12) || '|'
+                || LPAD(fmt_m(d.bal_prec),15) || ' |' || LPAD(fmt_m(d.bal_arrete),15) || ' |'
+                || LPAD(fmt_m(d.bal_suiv),15) || ' |'
+                || RPAD(' ' || fmt_d(d.dt_suiv),12) || '|');
+        END LOOP;
+        tbl_line('4,12,20,12,16,16,16,12');
+    END IF;
+
+    -- 10.2 Aller-retour : credit significatif suivi d'un debit de montant
+    --      quasi identique dans les jours qui suivent
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY hc
+    JOIN ACTB_HISTORY hd ON hd.AC_NO = hc.AC_NO AND hd.DRCR_IND = 'D'
+         AND hd.TRN_DT > hc.TRN_DT AND hd.TRN_DT <= hc.TRN_DT + c_jours_ar
+         AND ABS(hd.LCY_AMOUNT - hc.LCY_AMOUNT) <= 0.05 * hc.LCY_AMOUNT
+    WHERE hc.DRCR_IND = 'C'
+      AND hc.LCY_AMOUNT >= c_mnt_signif
+      AND hc.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY b
+                  WHERE b.ACCOUNT = hc.AC_NO
+                    AND b.BKG_DATE BETWEEN TRUNC(hc.TRN_DT) - 5 AND TRUNC(hc.TRN_DT)
+                    AND b.ACY_CLOSING_BAL < 0);
+    print_test('Regularisations en aller-retour sous ' || c_jours_ar || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,20,16,12,16,12,7,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CREDIT',16) || '|'
+            || RPAD(' LE',12) || '|' || RPAD(' DEBIT RETOUR',16) || '|' || RPAD(' LE',12) || '|'
+            || RPAD(' MOD.C',7) || '|' || RPAD(' MOD.D',7) || '|');
+        tbl_line('4,20,16,12,16,12,7,7');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT hc.AC_NO, hc.LCY_AMOUNT AS mnt_cred, hc.TRN_DT AS dt_cred,
+                   hd.LCY_AMOUNT AS mnt_deb, hd.TRN_DT AS dt_deb,
+                   NVL(hc.MODULE,'-') AS mod_c, NVL(hd.MODULE,'-') AS mod_d
+            FROM ACTB_HISTORY hc
+            JOIN ACTB_HISTORY hd ON hd.AC_NO = hc.AC_NO AND hd.DRCR_IND = 'D'
+                 AND hd.TRN_DT > hc.TRN_DT AND hd.TRN_DT <= hc.TRN_DT + c_jours_ar
+                 AND ABS(hd.LCY_AMOUNT - hc.LCY_AMOUNT) <= 0.05 * hc.LCY_AMOUNT
+            WHERE hc.DRCR_IND = 'C'
+              AND hc.LCY_AMOUNT >= c_mnt_signif
+              AND hc.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY b
+                          WHERE b.ACCOUNT = hc.AC_NO
+                            AND b.BKG_DATE BETWEEN TRUNC(hc.TRN_DT) - 5 AND TRUNC(hc.TRN_DT)
+                            AND b.ACY_CLOSING_BAL < 0)
+            ORDER BY hc.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.AC_NO,20) || '|'
+                || LPAD(fmt_m(d.mnt_cred),15) || ' |' || RPAD(' ' || fmt_d(d.dt_cred),12) || '|'
+                || LPAD(fmt_m(d.mnt_deb),15) || ' |' || RPAD(' ' || fmt_d(d.dt_deb),12) || '|'
+                || RPAD(' ' || d.mod_c,7) || '|' || RPAD(' ' || d.mod_d,7) || '|');
+        END LOOP;
+        tbl_line('4,20,16,12,16,12,7,7');
+    END IF;
+
+    -- 10.3 Regularisation obtenue par ecriture interne (DE / GL) et non
+    --      par un flux client
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN (
+        SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+               LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+        FROM ACTB_ACCBAL_HISTORY
+        WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+    ) x ON x.ACCOUNT = h.AC_NO AND x.BKG_DATE = TRUNC(h.TRN_DT)
+    WHERE h.MODULE IN ('DE','GL')
+      AND h.DRCR_IND = 'C'
+      AND h.LCY_AMOUNT >= c_mnt_signif
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND x.bal_prec < 0
+      AND x.ACY_CLOSING_BAL >= 0;
+    print_test('Regularisations par ecriture interne (module DE / GL)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,20,12,7,16,12,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' REFERENCE',12) || '|'
+            || RPAD(' MODULE',7) || '|' || RPAD(' CREDIT',16) || '|' || RPAD(' LE',12) || '|'
+            || RPAD(' SOLDE VEILLE',16) || '|' || RPAD(' UTILISATEUR',16) || '|');
+        tbl_line('4,20,12,7,16,12,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.MODULE, h.LCY_AMOUNT, h.TRN_DT,
+                   x.bal_prec, NVL(h.USER_ID,'-') AS usr
+            FROM ACTB_HISTORY h
+            JOIN (
+                SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                       LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+                FROM ACTB_ACCBAL_HISTORY
+                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            ) x ON x.ACCOUNT = h.AC_NO AND x.BKG_DATE = TRUNC(h.TRN_DT)
+            WHERE h.MODULE IN ('DE','GL')
+              AND h.DRCR_IND = 'C'
+              AND h.LCY_AMOUNT >= c_mnt_signif
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND x.bal_prec < 0
+              AND x.ACY_CLOSING_BAL >= 0
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+                || RPAD(' ' || d.MODULE,7) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || LPAD(fmt_m(d.bal_prec),15) || ' |'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,20,12,7,16,12,16,16');
+    END IF;
+
+    -- 10.4 Regularisations concentrees sur la periode d'arrete annuel
+    --      (derniers jours de decembre)
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT) - 1
+         AND b.ACY_CLOSING_BAL < 0
+    WHERE h.DRCR_IND = 'C'
+      AND h.LCY_AMOUNT >= c_mnt_signif
+      AND TO_CHAR(h.TRN_DT,'MMDD') BETWEEN '1226' AND '1231'
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit);
+    print_test('Credits significatifs sur comptes debiteurs fin decembre', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,12,7,16,12,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
+            || RPAD(' REFERENCE',12) || '|' || RPAD(' MODULE',7) || '|' || RPAD(' CREDIT',16) || '|'
+            || RPAD(' LE',12) || '|' || RPAD(' SOLDE VEILLE',16) || '|');
+        tbl_line('4,12,20,12,7,16,12,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, h.AC_NO, h.TRN_REF_NO, NVL(h.MODULE,'-') AS mdl,
+                   h.LCY_AMOUNT, h.TRN_DT, b.ACY_CLOSING_BAL AS bal_veille
+            FROM ACTB_HISTORY h
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT) - 1
+                 AND b.ACY_CLOSING_BAL < 0
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            WHERE h.DRCR_IND = 'C'
+              AND h.LCY_AMOUNT >= c_mnt_signif
+              AND TO_CHAR(h.TRN_DT,'MMDD') BETWEEN '1226' AND '1231'
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+                || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|' || RPAD(' ' || d.mdl,7) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || LPAD(fmt_m(d.bal_veille),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,20,12,7,16,12,16');
+    END IF;
+
+    -- 10.5 Regularisation alimentee par un autre compte du MEME client
+    --      (transfert interne de tresorerie, cavalerie)
+    SELECT COUNT(*) INTO v_count
+    FROM ACTB_HISTORY h
+    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+    JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_AC_NO = h.RELATED_ACCOUNT
+    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+         AND b.BKG_DATE = TRUNC(h.TRN_DT)
+    WHERE h.DRCR_IND = 'C'
+      AND h.LCY_AMOUNT >= c_mnt_signif
+      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+      AND h.RELATED_ACCOUNT IS NOT NULL
+      AND a2.CUST_NO = a.CUST_NO
+      AND a2.CUST_AC_NO != a.CUST_AC_NO
+      AND b.ACY_OPENING_BAL < 0;
+    print_test('Regularisations par un autre compte du meme client', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,20,16,12,7,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE CREDITE',20) || '|'
+            || RPAD(' COMPTE SOURCE',20) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' LE',12) || '|'
+            || RPAD(' MODULE',7) || '|' || RPAD(' SOLDE OUVERT.',16) || '|');
+        tbl_line('4,12,20,20,16,12,7,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT a.CUST_NO, h.AC_NO, h.RELATED_ACCOUNT, h.LCY_AMOUNT, h.TRN_DT,
+                   NVL(h.MODULE,'-') AS mdl, b.ACY_OPENING_BAL AS bal_ouv
+            FROM ACTB_HISTORY h
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_AC_NO = h.RELATED_ACCOUNT
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
+                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
+            WHERE h.DRCR_IND = 'C'
+              AND h.LCY_AMOUNT >= c_mnt_signif
+              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND h.RELATED_ACCOUNT IS NOT NULL
+              AND a2.CUST_NO = a.CUST_NO
+              AND a2.CUST_AC_NO != a.CUST_AC_NO
+              AND b.ACY_OPENING_BAL < 0
+            ORDER BY h.LCY_AMOUNT DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+                || RPAD(' ' || SUBSTR(d.RELATED_ACCOUNT,1,18),20) || '|'
+                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+                || RPAD(' ' || d.mdl,7) || '|'
+                || LPAD(fmt_m(d.bal_ouv),15) || ' |');
+        END LOOP;
+        tbl_line('4,12,20,20,16,12,7,16');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');

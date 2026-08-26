@@ -68,7 +68,26 @@
 --     - les jeux de travail partages par plusieurs tests d'une meme
 --       section sont materialises une fois (WITH ... /*+ MATERIALIZE */) ;
 --     - les sous-requetes correlees a predicat OR sur les cles de ligne
---       ont ete remplacees par des equi-jointures sur une cle normalisee.
+--       ont ete remplacees par des equi-jointures sur une cle normalisee ;
+--     - les sous-requetes EXISTS / scalaires evaluees ligne a ligne ont
+--       ete remplacees par des jointures sur des jeux pre-agreges.
+--   Le script reste strictement en LECTURE : il ne cree aucun objet et
+--   n'ecrit dans aucune table.
+--
+-- INDEX RECOMMANDES (a verifier avec le DBA)
+--   Le facteur limitant restant est le balayage des tables d'historique.
+--   Si les temps de reponse demeurent eleves, verifier la presence des
+--   index suivants ; ils portent sur les predicats effectivement
+--   utilises par la revue :
+--     ACTB_HISTORY            (AC_NO, TRN_DT)
+--     ACTB_HISTORY            (MODULE, TRN_DT)
+--     ACTB_ACCBAL_HISTORY     (ACCOUNT, BKG_DATE)   -- souvent deja la PK
+--     STTB_ACCOUNT            (AC_NATURAL_GL)
+--     STTM_CUST_ACCOUNT       (LINE_ID)
+--     GETM_FACILITY_VD_DETAILS(FACILITY_ID, VALUE_DATE)
+--   Verifier egalement que les statistiques des tables volumineuses sont
+--   a jour (DBMS_STATS), les CTE materialisees dependant d'estimations
+--   de cardinalite correctes pour le choix des jointures.
 -- ============================================================
 
 SET ECHO OFF
@@ -1780,7 +1799,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -1846,7 +1865,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3254,7 +3273,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3312,7 +3331,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3360,7 +3379,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3410,7 +3429,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3464,7 +3483,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO, a.LINE_ID,
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO, a.LINE_ID,
                    NVL(a.TOD_LIMIT,0) AS tod_limit
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
@@ -3524,7 +3543,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3592,7 +3611,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3649,7 +3668,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3710,7 +3729,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3759,7 +3778,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3798,7 +3817,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -3858,7 +3877,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -4040,7 +4059,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -4116,7 +4135,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -4168,7 +4187,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -4325,7 +4344,7 @@ BEGIN
     buf_reset;
     FOR d IN (
         WITH per_ac AS (
-            SELECT /*+ MATERIALIZE */ a.CUST_AC_NO, a.CUST_NO
+            SELECT /*+ MATERIALIZE */ DISTINCT a.CUST_AC_NO, a.CUST_NO
             FROM STTM_CUST_ACCOUNT a
             JOIN STTB_ACCOUNT g ON g.AC_GL_NO    = a.CUST_AC_NO
                                AND g.BRANCH_CODE = a.BRANCH_CODE
@@ -4443,6 +4462,8 @@ BEGIN
     -- =========================================================
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
+    DBMS_OUTPUT.PUT_LINE('   PERIMETRE            : comptes clientelises'
+        || ' (AC_NATURAL_GL LIKE ''' || c_gl_like || ''')');
     DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);
     DBMS_OUTPUT.PUT_LINE('   TESTS AVEC ANOMALIES : ' || v_anomalies);
     DBMS_OUTPUT.PUT_LINE('   FIN — ' || TO_CHAR(SYSDATE, 'DD/MM/YYYY HH24:MI:SS'));

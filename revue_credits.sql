@@ -1684,6 +1684,330 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 5 : CLIENTS CUMULANT PLUSIEURS CREDITS
+    -- =========================================================
+    -- La multiplication des concours sur un meme client fractionne
+    -- l'analyse du risque, peut contourner la grille de delegation et
+    -- masque la realite de l'exposition. L'octroi d'un nouveau credit a
+    -- un client deja en defaut est une defaillance majeure du dispositif.
+    -- =========================================================
+    print_section('5. CLIENTS CUMULANT PLUSIEURS CREDITS');
+
+    -- 5.1 Clients titulaires de plusieurs dossiers de credit
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT m.CUSTOMER_ID, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   COUNT(*) AS nb_credits, NVL(SUM(m.AMOUNT_FINANCED),0) AS finance,
+                   NVL(SUM(m.AMOUNT_DISBURSED),0) AS decaisse,
+                   COUNT(DISTINCT m.PRODUCT_CODE) AS nb_produits,
+                   COUNT(DISTINCT m.BRANCH_CODE) AS nb_agences,
+                   MAX(m.BOOK_DATE) AS dernier_octroi
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.CUSTOMER_ID IS NOT NULL
+            GROUP BY m.CUSTOMER_ID
+            HAVING COUNT(*) > 1
+        ) q
+        ORDER BY q.finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUSTOMER_ID,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_credits),9) || ' |'
+            || LPAD(fmt_m(d.finance),17) || ' |' || LPAD(fmt_m(d.decaisse),17) || ' |'
+            || LPAD(fmt_n(d.nb_produits),7) || ' |' || LPAD(fmt_n(d.nb_agences),7) || ' |'
+            || RPAD(' ' || fmt_d(d.dernier_octroi),13) || '|';
+    END LOOP;
+    print_test('Clients titulaires de plusieurs credits', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,10,18,18,8,8,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CREDITS',10) || '|' || RPAD(' FINANCE CUM.',18) || '|' || RPAD(' DECAISSE CUM.',18) || '|'
+            || RPAD(' NB PRD',8) || '|' || RPAD(' NB AG.',8) || '|' || RPAD(' DERN. OCTROI',13) || '|');
+        tbl_line('4,12,26,10,18,18,8,8,13');
+        flush_lignes;
+        tbl_line('4,12,26,10,18,18,8,8,13');
+    END IF;
+
+    -- 5.2 Expositions cumulees atteignant le seuil du comite de credit
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT x.cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   SUM(x.nb) AS nb_concours, SUM(x.mnt) AS expo,
+                   MAX(CASE WHEN x.src = 'CL' THEN x.mnt ELSE 0 END) AS expo_cl,
+                   MAX(CASE WHEN x.src = 'LD' THEN x.mnt ELSE 0 END) AS expo_ld
+            FROM (
+                SELECT m.CUSTOMER_ID AS cif, 'CL' AS src, COUNT(*) AS nb,
+                       NVL(SUM(m.AMOUNT_DISBURSED),0) AS mnt
+                FROM CLTB_ACCOUNT_APPS_MASTER m
+                WHERE m.CUSTOMER_ID IS NOT NULL
+                GROUP BY m.CUSTOMER_ID
+                UNION ALL
+                SELECT t.COUNTERPARTY, 'LD', COUNT(*), NVL(SUM(t.LCY_AMOUNT),0)
+                FROM LDTB_CONTRACT_MASTER t
+                WHERE t.COUNTERPARTY IS NOT NULL
+                GROUP BY t.COUNTERPARTY
+            ) x
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = x.cif
+            GROUP BY x.cif
+            HAVING SUM(x.mnt) >= c_seuil_3
+        ) q
+        ORDER BY q.expo DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_concours),9) || ' |'
+            || LPAD(fmt_m(d.expo_cl),18) || ' |' || LPAD(fmt_m(d.expo_ld),18) || ' |'
+            || LPAD(fmt_m(d.expo),18) || ' |';
+    END LOOP;
+    print_test('Expositions cumulees >= seuil 3 (' || fmt_m(c_seuil_3) || ')', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,10,19,19,19');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CONC.',10) || '|' || RPAD(' EXPO CL',19) || '|' || RPAD(' EXPO LD',19) || '|'
+            || RPAD(' EXPO TOTALE',19) || '|');
+        tbl_line('4,12,26,10,19,19,19');
+        flush_lignes;
+        tbl_line('4,12,26,10,19,19,19');
+    END IF;
+
+    -- 5.3 Clients multi-credits dont au moins un dossier est en impaye
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT m.CUSTOMER_ID, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   COUNT(*) AS nb_credits,
+                   COUNT(i.ACCOUNT_NUMBER) AS nb_en_impaye,
+                   NVL(SUM(m.AMOUNT_FINANCED),0) AS finance,
+                   NVL(SUM(i.impaye),0) AS impaye,
+                   MAX(i.anciennete) AS anciennete_max
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            LEFT JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            WHERE m.CUSTOMER_ID IS NOT NULL
+            GROUP BY m.CUSTOMER_ID
+            HAVING COUNT(*) > 1 AND COUNT(i.ACCOUNT_NUMBER) > 0
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUSTOMER_ID,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_credits),9) || ' |' || LPAD(fmt_n(d.nb_en_impaye),9) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.impaye),18) || ' |'
+            || LPAD(fmt_n(d.anciennete_max),9) || ' |';
+    END LOOP;
+    print_test('Clients multi-credits avec au moins un dossier en impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,10,10,19,19,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CREDITS',10) || '|' || RPAD(' EN IMPAYE',10) || '|'
+            || RPAD(' FINANCE CUM.',19) || '|' || RPAD(' IMPAYE CUM.',19) || '|' || RPAD(' J.MAX',10) || '|');
+        tbl_line('4,12,26,10,10,19,19,10');
+        flush_lignes;
+        tbl_line('4,12,26,10,10,19,19,10');
+    END IF;
+
+    -- 5.4 Clients exposes simultanement sur les deux modules de credit
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT cl.CUSTOMER_ID AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   cl.nb_cl, cl.mnt_cl, ld.nb_ld, ld.mnt_ld,
+                   cl.mnt_cl + ld.mnt_ld AS expo
+            FROM (
+                SELECT m.CUSTOMER_ID, COUNT(*) AS nb_cl,
+                       NVL(SUM(m.AMOUNT_DISBURSED),0) AS mnt_cl
+                FROM CLTB_ACCOUNT_APPS_MASTER m
+                WHERE m.CUSTOMER_ID IS NOT NULL
+                GROUP BY m.CUSTOMER_ID
+            ) cl
+            JOIN (
+                SELECT t.COUNTERPARTY, COUNT(*) AS nb_ld,
+                       NVL(SUM(t.LCY_AMOUNT),0) AS mnt_ld
+                FROM LDTB_CONTRACT_MASTER t
+                WHERE t.COUNTERPARTY IS NOT NULL
+                GROUP BY t.COUNTERPARTY
+            ) ld ON ld.COUNTERPARTY = cl.CUSTOMER_ID
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = cl.CUSTOMER_ID
+        ) q
+        ORDER BY q.expo DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_cl),7) || ' |' || LPAD(fmt_m(d.mnt_cl),18) || ' |'
+            || LPAD(fmt_n(d.nb_ld),7) || ' |' || LPAD(fmt_m(d.mnt_ld),18) || ' |'
+            || LPAD(fmt_m(d.expo),18) || ' |';
+    END LOOP;
+    print_test('Clients exposes simultanement sur les modules CL et LD', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,8,19,8,19,19');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CL',8) || '|' || RPAD(' MONTANT CL',19) || '|'
+            || RPAD(' NB LD',8) || '|' || RPAD(' MONTANT LD',19) || '|' || RPAD(' EXPO TOTALE',19) || '|');
+        tbl_line('4,12,26,8,19,8,19,19');
+        flush_lignes;
+        tbl_line('4,12,26,8,19,8,19,19');
+    END IF;
+
+    -- 5.5 Engagement cumule superieur a la limite globale du liability
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT lb.LIAB_NO AS cif, NVL(lb.LIAB_NAME,'-') AS nom,
+                   NVL(lb.OVERALL_LIMIT,0) AS lim_glob, e.nb, e.expo,
+                   e.expo - NVL(lb.OVERALL_LIMIT,0) AS depass,
+                   NVL(lb.CREDIT_RATING,'-') AS rating
+            FROM GETM_LIAB lb
+            JOIN (
+                SELECT m.CUSTOMER_ID AS cif, COUNT(*) AS nb,
+                       NVL(SUM(m.AMOUNT_DISBURSED),0) AS expo
+                FROM CLTB_ACCOUNT_APPS_MASTER m
+                WHERE m.CUSTOMER_ID IS NOT NULL
+                GROUP BY m.CUSTOMER_ID
+            ) e ON e.cif = lb.LIAB_NO
+            WHERE NVL(lb.OVERALL_LIMIT,0) > 0
+              AND e.expo > NVL(lb.OVERALL_LIMIT,0)
+        ) q
+        ORDER BY q.depass DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb),7) || ' |'
+            || LPAD(fmt_m(d.lim_glob),18) || ' |' || LPAD(fmt_m(d.expo),18) || ' |'
+            || LPAD(fmt_m(d.depass),18) || ' |'
+            || RPAD(' ' || SUBSTR(d.rating,1,5),7) || '|';
+    END LOOP;
+    print_test('Engagement credit superieur a la limite globale (LIAB)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,8,19,19,19,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF/LIAB',12) || '|' || RPAD(' NOM',26) || '|'
+            || RPAD(' NB CR.',8) || '|' || RPAD(' LIMITE GLOB.',19) || '|' || RPAD(' ENGAGEMENT',19) || '|'
+            || RPAD(' DEPASSEMENT',19) || '|' || RPAD(' RATING',7) || '|');
+        tbl_line('4,12,26,8,19,19,19,7');
+        flush_lignes;
+        tbl_line('4,12,26,8,19,19,19,7');
+    END IF;
+
+    -- 5.6 Nouveau credit octroye alors que le client etait DEJA en impaye
+    --     Une echeance est reputee reglee a la premiere date de reglement
+    --     enregistree ; en l'absence de reglement elle reste impayee.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (
+        WITH ech AS (
+            SELECT /*+ MATERIALIZE */ s.ACCOUNT_NUMBER, s.SCHEDULE_DUE_DATE,
+                   NVL(MIN(pp.PAID_DATE), TO_DATE('31/12/2999','DD/MM/YYYY')) AS date_reglement
+            FROM CLTB_ACCOUNT_SCHEDULES s
+            LEFT JOIN CLTB_AMOUNT_PAID pp ON pp.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER
+                 AND pp.COMPONENT_NAME = s.COMPONENT_NAME
+                 AND pp.DUE_DATE = s.SCHEDULE_DUE_DATE
+            WHERE NVL(s.AMOUNT_DUE,0) > 0
+            GROUP BY s.ACCOUNT_NUMBER, s.SCHEDULE_DUE_DATE
+        )
+        SELECT * FROM (
+            SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+                SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                       m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance, m.BOOK_DATE,
+                       COUNT(*) AS nb_ech_impayees,
+                       MIN(e.SCHEDULE_DUE_DATE) AS plus_ancienne,
+                       TRUNC(m.BOOK_DATE) - TRUNC(MIN(e.SCHEDULE_DUE_DATE)) AS retard_a_l_octroi
+                FROM CLTB_ACCOUNT_APPS_MASTER m
+                JOIN CLTB_ACCOUNT_APPS_MASTER m2 ON m2.CUSTOMER_ID = m.CUSTOMER_ID
+                     AND m2.ACCOUNT_NUMBER != m.ACCOUNT_NUMBER
+                JOIN ech e ON e.ACCOUNT_NUMBER = m2.ACCOUNT_NUMBER
+                     AND e.SCHEDULE_DUE_DATE < m.BOOK_DATE
+                     AND e.date_reglement > m.BOOK_DATE
+                LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+                WHERE m.BOOK_DATE IS NOT NULL
+                  AND m.CUSTOMER_ID IS NOT NULL
+                GROUP BY m.CUSTOMER_ID, c.CUSTOMER_NAME1, m.ACCOUNT_NUMBER,
+                         m.AMOUNT_FINANCED, m.BOOK_DATE
+            ) q
+            ORDER BY q.retard_a_l_octroi DESC, q.finance DESC
+        ) WHERE ROWNUM <= c_max_rows
+    ) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),17) || ' |'
+            || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+            || LPAD(fmt_n(d.nb_ech_impayees),9) || ' |'
+            || RPAD(' ' || fmt_d(d.plus_ancienne),13) || '|'
+            || LPAD(fmt_n(d.retard_a_l_octroi),9) || ' |';
+    END LOOP;
+    print_test('Credits octroyes a un client deja en impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,18,13,10,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' NOUVEAU CREDIT',22) || '|' || RPAD(' FINANCE',18) || '|' || RPAD(' OCTROYE LE',13) || '|'
+            || RPAD(' ECH. IMP.',10) || '|' || RPAD(' + ANCIENNE',13) || '|' || RPAD(' RETARD(j)',10) || '|');
+        tbl_line('4,12,24,22,18,13,10,13,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,18,13,10,13,10');
+    END IF;
+
+    -- 5.7 Octrois rapproches : plusieurs credits accordes au meme client
+    --     dans une fenetre de 90 jours
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT m.CUSTOMER_ID AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance, m.BOOK_DATE,
+                   m2.ACCOUNT_NUMBER AS precedent, NVL(m2.AMOUNT_FINANCED,0) AS finance_prec,
+                   m2.BOOK_DATE AS book_prec,
+                   TRUNC(m.BOOK_DATE) - TRUNC(m2.BOOK_DATE) AS ecart
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN CLTB_ACCOUNT_APPS_MASTER m2 ON m2.CUSTOMER_ID = m.CUSTOMER_ID
+                 AND m2.ACCOUNT_NUMBER != m.ACCOUNT_NUMBER
+                 AND m2.BOOK_DATE < m.BOOK_DATE
+                 AND m2.BOOK_DATE >= m.BOOK_DATE - c_impaye_2
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.BOOK_DATE IS NOT NULL AND m.CUSTOMER_ID IS NOT NULL
+        ) q
+        ORDER BY q.finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,18),20) || '|'
+            || LPAD(fmt_m(d.finance),17) || ' |'
+            || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.precedent,1,18),20) || '|'
+            || LPAD(fmt_m(d.finance_prec),17) || ' |'
+            || LPAD(fmt_n(d.ecart),8) || ' |';
+    END LOOP;
+    print_test('Credits accordes a moins de ' || c_impaye_2 || ' j d''un precedent', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,18,13,20,18,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' NOUVEAU CREDIT',20) || '|' || RPAD(' FINANCE',18) || '|' || RPAD(' OCTROYE LE',13) || '|'
+            || RPAD(' CREDIT PRECEDENT',20) || '|' || RPAD(' FINANCE PREC.',18) || '|' || RPAD(' ECART(j)',9) || '|');
+        tbl_line('4,12,22,20,18,13,20,18,9');
+        flush_lignes;
+        tbl_line('4,12,22,20,18,13,20,18,9');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

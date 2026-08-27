@@ -1089,6 +1089,285 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 3 : CREDITS SANS APPROBATION IDENTIFIABLE
+    -- =========================================================
+    -- Tout concours doit etre rattachable a une decision de credit
+    -- formalisee, a un agent d'octroi et a un valideur distinct de
+    -- l'initiateur (principe des quatre yeux). Les remboursements et
+    -- leurs annulations relevent du meme principe.
+    -- NB : le module LD ne porte pas les champs maker / checker dans la
+    --      table contrat ; les tests d'approbation portent sur le
+    --      module CL.
+    -- =========================================================
+    print_section('3. CREDITS SANS APPROBATION IDENTIFIABLE');
+
+    -- 3.1 Dossiers non autorises dans le systeme mais deja decaisses
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AUTH_STAT,'U') != 'A'
+      AND NVL(m.AMOUNT_DISBURSED,0) > 0;
+    print_test('Dossiers non autorises (AUTH_STAT != A) et decaisses', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,17,6,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|'
+            || RPAD(' AUTH',6) || '|' || RPAD(' MAKER',16) || '|' || RPAD(' SAISIE LE',13) || '|');
+        tbl_line('4,12,24,22,17,17,6,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   NVL(m.AUTH_STAT,'-') AS auth, NVL(m.MAKER_ID,'-') AS maker, m.MAKER_DT_STAMP
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AUTH_STAT,'U') != 'A'
+              AND NVL(m.AMOUNT_DISBURSED,0) > 0
+            ORDER BY NVL(m.AMOUNT_DISBURSED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || d.auth,6) || '|' || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,17,6,16,13');
+    END IF;
+
+    -- 3.2 Dossiers sans valideur identifie
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE (m.CHECKER_ID IS NULL OR TRIM(m.CHECKER_ID) IS NULL)
+      AND NVL(m.AMOUNT_FINANCED,0) > 0;
+    print_test('Dossiers sans valideur identifie (CHECKER_ID absent)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,17,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|'
+            || RPAD(' MAKER',16) || '|' || RPAD(' SAISIE LE',13) || '|');
+        tbl_line('4,12,24,22,17,17,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   NVL(m.MAKER_ID,'-') AS maker, m.MAKER_DT_STAMP
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE (m.CHECKER_ID IS NULL OR TRIM(m.CHECKER_ID) IS NULL)
+              AND NVL(m.AMOUNT_FINANCED,0) > 0
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,17,16,13');
+    END IF;
+
+    -- 3.3 Dossiers auto-approuves (initiateur = valideur)
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.MAKER_ID IS NOT NULL AND m.CHECKER_ID IS NOT NULL
+      AND UPPER(TRIM(m.MAKER_ID)) = UPPER(TRIM(m.CHECKER_ID))
+      AND NVL(m.AMOUNT_FINANCED,0) > 0;
+    print_test('Dossiers auto-approuves (MAKER_ID = CHECKER_ID)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,17,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|'
+            || RPAD(' UTILISATEUR',16) || '|' || RPAD(' VALIDE LE',13) || '|');
+        tbl_line('4,12,24,22,17,17,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.MAKER_ID AS usr, m.CHECKER_DT_STAMP
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.MAKER_ID IS NOT NULL AND m.CHECKER_ID IS NOT NULL
+              AND UPPER(TRIM(m.MAKER_ID)) = UPPER(TRIM(m.CHECKER_ID))
+              AND NVL(m.AMOUNT_FINANCED,0) > 0
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,17,16,13');
+    END IF;
+
+    -- 3.4 Dossiers sans agent d'octroi identifie
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE (m.SANCTIONING_OFFICER IS NULL OR TRIM(m.SANCTIONING_OFFICER) IS NULL)
+      AND NVL(m.AMOUNT_FINANCED,0) > 0;
+    print_test('Dossiers sans agent d''octroi (SANCTIONING_OFFICER)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' OCTROI LE',13) || '|'
+            || RPAD(' MAKER',16) || '|' || RPAD(' CHECKER',16) || '|');
+        tbl_line('4,12,24,22,17,13,16,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.BOOK_DATE,
+                   NVL(m.MAKER_ID,'-') AS maker, NVL(m.CHECKER_ID,'-') AS checker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE (m.SANCTIONING_OFFICER IS NULL OR TRIM(m.SANCTIONING_OFFICER) IS NULL)
+              AND NVL(m.AMOUNT_FINANCED,0) > 0
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,13,16,16');
+    END IF;
+
+    -- 3.5 Dossiers significatifs non rattaches a une ligne de credit :
+    --     l'engagement echappe au suivi des limites
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE (m.LINE_ID IS NULL OR TRIM(m.LINE_ID) IS NULL)
+      AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif;
+    print_test('Dossiers >= ' || fmt_m(c_mnt_signif) || ' sans ligne de credit', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,17,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,5,17,17,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.CURRENCY,'-') AS ccy, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   NVL(m.AMOUNT_DISBURSED,0) AS decaisse, m.MATURITY_DATE,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE (m.LINE_ID IS NULL OR TRIM(m.LINE_ID) IS NULL)
+              AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,17,17,13,10');
+    END IF;
+
+    -- 3.6 Liquidations (remboursements) non autorisees ou auto-autorisees
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT l.ACCOUNT_NUMBER, l.EVENT_SEQ_NO, l.VALUE_DATE,
+                   NVL(pm.mnt,0) AS montant,
+                   NVL(l.AUTH_STAT,'-') AS auth, NVL(l.MAKER_ID,'-') AS maker,
+                   NVL(l.CHECKER_ID,'-') AS checker,
+                   CASE WHEN NVL(l.AUTH_STAT,'U') != 'A' THEN 'NON AUTORISE'
+                        ELSE 'AUTO-VALIDE' END AS motif
+            FROM CLTB_LIQ l
+            LEFT JOIN (
+                SELECT ACCOUNT_NUMBER, EVENT_SEQ_NO, SUM(NVL(AMOUNT_PAID,0)) AS mnt
+                FROM CLTB_AMOUNT_PAID
+                GROUP BY ACCOUNT_NUMBER, EVENT_SEQ_NO
+            ) pm ON pm.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER AND pm.EVENT_SEQ_NO = l.EVENT_SEQ_NO
+            WHERE NVL(l.AUTH_STAT,'U') != 'A'
+               OR (l.MAKER_ID IS NOT NULL AND l.CHECKER_ID IS NOT NULL
+                   AND UPPER(TRIM(l.MAKER_ID)) = UPPER(TRIM(l.CHECKER_ID)))
+        ) q
+        ORDER BY q.montant DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.EVENT_SEQ_NO),7) || ' |'
+            || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+            || LPAD(fmt_m(d.montant),16) || ' |'
+            || RPAD(' ' || d.auth,6) || '|'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+            || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+            || RPAD(' ' || d.motif,15) || '|';
+    END LOOP;
+    print_test('Liquidations non autorisees ou auto-validees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,22,8,13,17,6,16,16,15');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' DOSSIER',22) || '|' || RPAD(' ESN',8) || '|'
+            || RPAD(' DATE VALEUR',13) || '|' || RPAD(' MONTANT',17) || '|' || RPAD(' AUTH',6) || '|'
+            || RPAD(' MAKER',16) || '|' || RPAD(' CHECKER',16) || '|' || RPAD(' MOTIF',15) || '|');
+        tbl_line('4,22,8,13,17,6,16,16,15');
+        flush_lignes;
+        tbl_line('4,22,8,13,17,6,16,16,15');
+    END IF;
+
+    -- 3.7 Liquidations annulees : un remboursement enregistre puis
+    --     contre-passe efface une reduction de creance
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT l.ACCOUNT_NUMBER, l.EVENT_SEQ_NO, l.VALUE_DATE,
+                   NVL(pm.mnt,0) AS montant,
+                   NVL(l.MAKER_ID,'-') AS maker, NVL(l.REV_MAKER_ID,'-') AS rev_maker,
+                   l.REV_MAKER_DT_STAMP,
+                   CASE WHEN l.MAKER_ID IS NOT NULL AND l.REV_MAKER_ID IS NOT NULL
+                             AND UPPER(TRIM(l.MAKER_ID)) = UPPER(TRIM(l.REV_MAKER_ID))
+                        THEN 'MEME AGENT' ELSE '-' END AS alerte
+            FROM CLTB_LIQ l
+            LEFT JOIN (
+                SELECT ACCOUNT_NUMBER, EVENT_SEQ_NO, SUM(NVL(AMOUNT_PAID,0)) AS mnt
+                FROM CLTB_AMOUNT_PAID
+                GROUP BY ACCOUNT_NUMBER, EVENT_SEQ_NO
+            ) pm ON pm.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER AND pm.EVENT_SEQ_NO = l.EVENT_SEQ_NO
+            WHERE l.REV_MAKER_ID IS NOT NULL
+        ) q
+        ORDER BY q.montant DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.EVENT_SEQ_NO),7) || ' |'
+            || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+            || LPAD(fmt_m(d.montant),16) || ' |'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+            || RPAD(' ' || SUBSTR(d.rev_maker,1,14),16) || '|'
+            || RPAD(' ' || fmt_d(d.REV_MAKER_DT_STAMP),13) || '|'
+            || RPAD(' ' || d.alerte,13) || '|';
+    END LOOP;
+    print_test('Liquidations annulees (contre-passations)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,22,8,13,17,16,16,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' DOSSIER',22) || '|' || RPAD(' ESN',8) || '|'
+            || RPAD(' DATE VALEUR',13) || '|' || RPAD(' MONTANT',17) || '|' || RPAD(' MAKER',16) || '|'
+            || RPAD(' ANNULE PAR',16) || '|' || RPAD(' ANNULE LE',13) || '|' || RPAD(' ALERTE',13) || '|');
+        tbl_line('4,22,8,13,17,16,16,13,13');
+        flush_lignes;
+        tbl_line('4,22,8,13,17,16,16,13,13');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

@@ -2806,6 +2806,277 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 9 : CREDITS SANS GARANTIE, SANS ASSURANCE
+    -- =========================================================
+    -- La couverture du risque conditionne le taux de provisionnement et
+    -- la perte en cas de defaut. L'absence de garant, d'assurance ou de
+    -- statut de surete renseigne doit etre justifiee par la politique de
+    -- credit, en particulier sur les concours significatifs et sur les
+    -- dossiers deja degrades.
+    -- NB : LOAN_TO_VALUE est interprete comme un pourcentage ; verifier
+    --      l'unite retenue au parametrage avant exploitation du test 9.4.
+    -- =========================================================
+    print_section('9. CREDITS SANS GARANTIE, SANS ASSURANCE');
+
+    -- Cartographie des dispositifs de couverture (informatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Recours a un garant — USE_GUARANTOR]');
+    FOR d IN (SELECT NVL(USE_GUARANTOR,'-') AS v, COUNT(*) AS nb,
+                     NVL(SUM(AMOUNT_FINANCED),0) AS mnt
+              FROM CLTB_ACCOUNT_APPS_MASTER
+              GROUP BY NVL(USE_GUARANTOR,'-') ORDER BY COUNT(*) DESC) LOOP
+        print_info('Valeur ' || d.v, fmt_n(d.nb) || ' dossier(s) — ' || fmt_m(d.mnt));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Assurance — INSURANCE_FLAG]');
+    FOR d IN (SELECT NVL(INSURANCE_FLAG,'-') AS v, COUNT(*) AS nb,
+                     NVL(SUM(AMOUNT_FINANCED),0) AS mnt
+              FROM CLTB_ACCOUNT_APPS_MASTER
+              GROUP BY NVL(INSURANCE_FLAG,'-') ORDER BY COUNT(*) DESC) LOOP
+        print_info('Valeur ' || d.v, fmt_n(d.nb) || ' dossier(s) — ' || fmt_m(d.mnt));
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Statut de surete — SECR_STATUS]');
+    FOR d IN (SELECT NVL(SECR_STATUS,'(non renseigne)') AS v, COUNT(*) AS nb,
+                     NVL(SUM(AMOUNT_FINANCED),0) AS mnt
+              FROM CLTB_ACCOUNT_APPS_MASTER
+              GROUP BY NVL(SECR_STATUS,'(non renseigne)') ORDER BY COUNT(*) DESC) LOOP
+        print_info('Valeur ' || d.v, fmt_n(d.nb) || ' dossier(s) — ' || fmt_m(d.mnt));
+    END LOOP;
+
+    -- 9.1 Credits significatifs accordes sans garant
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.USE_GUARANTOR,'N') != 'Y'
+      AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif;
+    print_test('Credits >= ' || fmt_m(c_mnt_signif) || ' sans garant', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,19,13,8,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',19) || '|' || RPAD(' MATURITE',13) || '|' || RPAD(' ASSUR.',8) || '|'
+            || RPAD(' SURETE',8) || '|');
+        tbl_line('4,12,24,22,5,19,13,8,8');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.CURRENCY,'-') AS ccy, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   m.MATURITY_DATE, NVL(m.INSURANCE_FLAG,'-') AS assur,
+                   NVL(m.SECR_STATUS,'-') AS surete
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.USE_GUARANTOR,'N') != 'Y'
+              AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || d.assur,8) || '|' || RPAD(' ' || SUBSTR(d.surete,1,6),8) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,19,13,8,8');
+    END IF;
+
+    -- 9.2 Credits significatifs sans assurance
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE (NVL(m.INSURANCE_FLAG,'N') != 'Y'
+           OR m.INSURANCE_COMP_CODE IS NULL OR TRIM(m.INSURANCE_COMP_CODE) IS NULL)
+      AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif;
+    print_test('Credits >= ' || fmt_m(c_mnt_signif) || ' sans assurance', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,13,8,14,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' FLAG',8) || '|' || RPAD(' ASSUREUR',14) || '|' || RPAD(' GARANT',8) || '|');
+        tbl_line('4,12,24,22,19,13,8,14,8');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.MATURITY_DATE,
+                   NVL(m.INSURANCE_FLAG,'-') AS flag, NVL(m.INSURANCE_COMP_CODE,'-') AS assureur,
+                   NVL(m.USE_GUARANTOR,'-') AS garant
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE (NVL(m.INSURANCE_FLAG,'N') != 'Y'
+                   OR m.INSURANCE_COMP_CODE IS NULL OR TRIM(m.INSURANCE_COMP_CODE) IS NULL)
+              AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || d.flag,8) || '|' || RPAD(' ' || SUBSTR(d.assureur,1,12),14) || '|'
+                || RPAD(' ' || d.garant,8) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,13,8,14,8');
+    END IF;
+
+    -- 9.3 Credits sans statut de surete renseigne
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE (m.SECR_STATUS IS NULL OR TRIM(m.SECR_STATUS) IS NULL)
+      AND NVL(m.AMOUNT_FINANCED,0) > 0;
+    print_test('Credits sans statut de surete (SECR_STATUS absent)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,13,8,8,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' GARANT',8) || '|' || RPAD(' ASSUR.',8) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,13,8,8,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.MATURITY_DATE,
+                   NVL(m.USE_GUARANTOR,'-') AS garant, NVL(m.INSURANCE_FLAG,'-') AS assur,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE (m.SECR_STATUS IS NULL OR TRIM(m.SECR_STATUS) IS NULL)
+              AND NVL(m.AMOUNT_FINANCED,0) > 0
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || d.garant,8) || '|' || RPAD(' ' || d.assur,8) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,13,8,8,10');
+    END IF;
+
+    -- 9.4 Quotite de financement elevee ou non renseignee
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+      AND (NVL(m.LOAN_TO_VALUE,0) = 0 OR NVL(m.LOAN_TO_VALUE,0) > 80);
+    print_test('Credits significatifs a quotite > 80 % ou non renseignee', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,10,19,8,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' QUOTITE',10) || '|'
+            || RPAD(' APPORT',19) || '|' || RPAD(' GARANT',8) || '|' || RPAD(' ASSUR.',8) || '|');
+        tbl_line('4,12,24,22,19,10,19,8,8');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.LOAN_TO_VALUE,0) AS quotite,
+                   NVL(m.DOWNPAYMENT_AMOUNT,0) AS apport,
+                   NVL(m.USE_GUARANTOR,'-') AS garant, NVL(m.INSURANCE_FLAG,'-') AS assur
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+              AND (NVL(m.LOAN_TO_VALUE,0) = 0 OR NVL(m.LOAN_TO_VALUE,0) > 80)
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || LPAD(TO_CHAR(d.quotite,'FM9990D0') || ' %',9) || ' |'
+                || LPAD(fmt_m(d.apport),18) || ' |'
+                || RPAD(' ' || d.garant,8) || '|' || RPAD(' ' || d.assur,8) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,10,19,8,8');
+    END IF;
+
+    -- 9.5 Credits significatifs cumulant absence de garant ET d'assurance
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.USE_GUARANTOR,'N') != 'Y'
+      AND NVL(m.INSURANCE_FLAG,'N') != 'Y'
+      AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif;
+    print_test('Credits significatifs sans garant NI assurance', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,19,13,8,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' DECAISSE',19) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' SURETE',8) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,19,13,8,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.MATURITY_DATE, NVL(m.SECR_STATUS,'-') AS surete,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.USE_GUARANTOR,'N') != 'Y'
+              AND NVL(m.INSURANCE_FLAG,'N') != 'Y'
+              AND NVL(m.AMOUNT_FINANCED,0) >= c_mnt_signif
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.decaisse),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.surete,1,6),8) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,19,13,8,10');
+    END IF;
+
+    -- 9.6 Dossiers degrades et non couverts : impaye ancien sans garant
+    --     ni assurance — la perte attendue est integrale
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   i.impaye, i.anciennete, NVL(m.SECR_STATUS,'-') AS surete,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) > c_impaye_2
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.USE_GUARANTOR,'N') != 'Y'
+              AND NVL(m.INSURANCE_FLAG,'N') != 'Y'
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),19) || ' |' || LPAD(fmt_m(d.impaye),19) || ' |'
+            || LPAD(fmt_n(d.anciennete),10) || ' |'
+            || RPAD(' ' || SUBSTR(d.surete,1,6),8) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Impayes > ' || c_impaye_2 || ' j sans garant ni assurance', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,20,20,11,8,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',20) || '|' || RPAD(' IMPAYE',20) || '|'
+            || RPAD(' JOURS',11) || '|' || RPAD(' SURETE',8) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,20,20,11,8,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,20,20,11,8,10');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

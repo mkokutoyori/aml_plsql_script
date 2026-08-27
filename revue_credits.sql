@@ -2008,6 +2008,283 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 6 : CREDITS RESTRUCTURES OU REECHELONNES
+    -- =========================================================
+    -- Le reechelonnement efface l'arriere sans que le risque ait
+    -- disparu : la creance retrouve une apparence saine, l'anciennete
+    -- d'impaye est remise a zero et le provisionnement est allege. Toute
+    -- restructuration doit donc etre tracee, approuvee au bon niveau et
+    -- maintenue sous surveillance.
+    -- =========================================================
+    print_section('6. CREDITS RESTRUCTURES OU REECHELONNES');
+
+    -- 6.1 Dossiers ayant fait l'objet de nombreux amendements
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.VERSION_NO,0) >= c_nb_versions;
+    print_test('Dossiers avec au moins ' || c_nb_versions || ' versions', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,9,18,13,13,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' VERSION',9) || '|' || RPAD(' FINANCE',18) || '|'
+            || RPAD(' OCTROI',13) || '|' || RPAD(' MATURITE',13) || '|' || RPAD(' DERN. MAKER',16) || '|');
+        tbl_line('4,12,24,22,9,18,13,13,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.VERSION_NO,0) AS version_no, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   m.BOOK_DATE, m.MATURITY_DATE, NVL(m.MAKER_ID,'-') AS maker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.VERSION_NO,0) >= c_nb_versions
+            ORDER BY NVL(m.VERSION_NO,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_n(d.version_no),8) || ' |'
+                || LPAD(fmt_m(d.finance),17) || ' |'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|' || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,9,18,13,13,16');
+    END IF;
+
+    -- 6.2 Dossiers dont des echeances ont ete reajustees
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   r.ACCOUNT_NUMBER, r.nb_ech, r.readj, r.ajust,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT s.ACCOUNT_NUMBER, COUNT(*) AS nb_ech,
+                       SUM(NVL(s.AMOUNT_READJUSTED,0)) AS readj,
+                       SUM(NVL(s.ADJ_AMOUNT,0)) AS ajust
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_READJUSTED,0) <> 0 OR NVL(s.ADJ_AMOUNT,0) <> 0
+                GROUP BY s.ACCOUNT_NUMBER
+            ) r
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = r.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+        ) q
+        ORDER BY ABS(q.readj) + ABS(q.ajust) DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.nb_ech),9) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |'
+            || LPAD(fmt_m(d.readj),18) || ' |' || LPAD(fmt_m(d.ajust),18) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers avec echeances reajustees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,10,19,19,19,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' NB ECH.',10) || '|' || RPAD(' FINANCE',19) || '|'
+            || RPAD(' REAJUSTE',19) || '|' || RPAD(' AJUSTEMENT',19) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,10,19,19,19,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,10,19,19,19,10');
+    END IF;
+
+    -- 6.3 Capitalisation d'echeances : l'impaye est incorpore au capital,
+    --     ce qui efface l'arriere sans encaissement
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   cp.ACCOUNT_NUMBER, cp.nb_ech, cp.capitalise, cp.derniere,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT pp.ACCOUNT_NUMBER, COUNT(*) AS nb_ech,
+                       SUM(NVL(pp.AMOUNT_CAPITALIZED,0)) AS capitalise,
+                       MAX(pp.PAID_DATE) AS derniere
+                FROM CLTB_AMOUNT_PAID pp
+                WHERE NVL(pp.AMOUNT_CAPITALIZED,0) > 0
+                GROUP BY pp.ACCOUNT_NUMBER
+            ) cp
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = cp.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+        ) q
+        ORDER BY q.capitalise DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.nb_ech),9) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.capitalise),18) || ' |'
+            || RPAD(' ' || fmt_d(d.derniere),13) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers avec capitalisation d''echeances', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,10,19,19,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' NB ECH.',10) || '|' || RPAD(' FINANCE',19) || '|'
+            || RPAD(' CAPITALISE',19) || '|' || RPAD(' DERNIERE',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,10,19,19,13,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,10,19,19,13,10');
+    END IF;
+
+    -- 6.4 Liquidations ayant reporte la date de maturite
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   l.ACCOUNT_NUMBER, l.VALUE_DATE, l.NEW_MATURITY_DATE,
+                   m.MATURITY_DATE AS maturite_actuelle,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   NVL(l.MAKER_ID,'-') AS maker, NVL(l.CHECKER_ID,'-') AS checker
+            FROM CLTB_LIQ l
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE l.NEW_MATURITY_DATE IS NOT NULL
+        ) q
+        ORDER BY q.NEW_MATURITY_DATE DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),18) || ' |'
+            || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+            || RPAD(' ' || fmt_d(d.NEW_MATURITY_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+            || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|';
+    END LOOP;
+    print_test('Liquidations ayant reporte la date de maturite', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,13,13,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' OPERATION LE',13) || '|'
+            || RPAD(' NOUV. MATURITE',13) || '|' || RPAD(' MAKER',16) || '|' || RPAD(' CHECKER',16) || '|');
+        tbl_line('4,12,24,22,19,13,13,16,16');
+        flush_lignes;
+        tbl_line('4,12,24,22,19,13,13,16,16');
+    END IF;
+
+    -- 6.5 Dossiers autorisant l'amendement d'echeances deja reglees
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMEND_PAST_PAID_SCHEDULE,'N') = 'Y';
+    print_test('Dossiers autorisant l''amendement d''echeances reglees', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,9,13,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' VERSION',9) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,24,22,19,9,13,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.VERSION_NO,0) AS version_no,
+                   m.MATURITY_DATE, NVL(m.MAKER_ID,'-') AS maker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMEND_PAST_PAID_SCHEDULE,'N') = 'Y'
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || LPAD(fmt_n(d.version_no),8) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,9,13,16');
+    END IF;
+
+    -- 6.6 Contrats LD ayant fait l'objet de rollovers
+    SELECT COUNT(*) INTO v_count
+    FROM LDTB_CONTRACT_MASTER t
+    WHERE NVL(t.ROLLOVER_COUNT,0) > 0;
+    print_test('Contrats LD ayant fait l''objet de rollovers', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,9,19,13,13,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' CONTREPARTIE',24) || '|'
+            || RPAD(' CONTRAT',22) || '|' || RPAD(' NB ROLL',9) || '|' || RPAD(' MONTANT',19) || '|'
+            || RPAD(' DEBUT',13) || '|' || RPAD(' MATURITE',13) || '|' || RPAD(' STAT',8) || '|');
+        tbl_line('4,12,24,22,9,19,13,13,8');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(t.COUNTERPARTY,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   t.CONTRACT_REF_NO, NVL(t.ROLLOVER_COUNT,0) AS nb_roll,
+                   NVL(t.LCY_AMOUNT,0) AS montant, t.ORIGINAL_START_DATE, t.MATURITY_DATE,
+                   NVL(t.CONTRACT_STATUS,'-') AS st
+            FROM LDTB_CONTRACT_MASTER t
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = t.COUNTERPARTY
+            WHERE NVL(t.ROLLOVER_COUNT,0) > 0
+            ORDER BY NVL(t.ROLLOVER_COUNT,0) DESC, NVL(t.LCY_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.CONTRACT_REF_NO,1,20),22) || '|'
+                || LPAD(fmt_n(d.nb_roll),8) || ' |'
+                || LPAD(fmt_m(d.montant),18) || ' |'
+                || RPAD(' ' || fmt_d(d.ORIGINAL_START_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,6),8) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,9,19,13,13,8');
+    END IF;
+
+    -- 6.7 Dossiers a la fois restructures ET encore en impaye :
+    --     la restructuration n'a pas retabli la capacite de remboursement
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.VERSION_NO,0) AS version_no,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, i.impaye, i.anciennete,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.VERSION_NO,0) >= c_nb_versions
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.version_no),8) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.impaye),18) || ' |'
+            || LPAD(fmt_n(d.anciennete),9) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers restructures et toujours en impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,9,19,19,10,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' VERSION',9) || '|' || RPAD(' FINANCE',19) || '|'
+            || RPAD(' IMPAYE',19) || '|' || RPAD(' JOURS',10) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,9,19,19,10,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,9,19,19,10,10');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

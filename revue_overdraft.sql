@@ -32,6 +32,17 @@
 --   ACTB_ACCBAL_HISTORY       : soldes journaliers par compte (BKG_DATE)
 --   ICTM_ACC_UDEVALS          : parametrage des taux au niveau du compte
 --
+-- PERIMETRE : COMPTES CLIENTELISES
+--   Seuls les comptes CLIENTELISES sont retenus, c'est-a-dire ceux dont
+--   le GL naturel commence par 37 (STTB_ACCOUNT.AC_NATURAL_GL LIKE '37%',
+--   rattachement STTB_ACCOUNT.AC_GL_NO = STTM_CUST_ACCOUNT.CUST_AC_NO).
+--   Les comptes internes, comptes d'ordre et comptes techniques loges
+--   dans STTM_CUST_ACCOUNT sont ainsi exclus : un solde debiteur sur un
+--   compte interne n'est pas un decouvert client. Le prefixe est
+--   parametre par c_gl_client. La section 0 affiche le nombre de comptes
+--   retenus par cette regle : s'il ressort a zero, c'est que le prefixe
+--   ou la cle de rattachement doivent etre ajustes a l'installation.
+--
 -- CONVENTIONS
 --   - Un solde debiteur (compte en overdraft) est NEGATIF dans FLEXCUBE
 --     (ACY_CURR_BALANCE / LCY_CURR_BALANCE < 0).
@@ -43,6 +54,18 @@
 --   - Les seuils de la revue sont parametrables dans le bloc PARAMETRES
 --     ci-dessous : ils DOIVENT etre alignes sur la grille de delegation
 --     de pouvoirs en vigueur dans l'etablissement.
+--
+-- PERFORMANCE
+--   Les tests portant sur ACTB_HISTORY (5,7 M lignes) et sur les soldes
+--   journaliers sont executes en UN SEUL passage : le comptage des
+--   anomalies est obtenu par COUNT(*) OVER () dans la requete de detail,
+--   dont les lignes sont mises en tampon (v_lignes) puis restituees
+--   apres la ligne de resultat du test. Les jointures sur les dates
+--   n'appliquent aucune fonction aux colonnes indexees (pas de TRUNC sur
+--   TRN_DT) afin de rester compatibles avec les index, et les
+--   sous-requetes scalaires correlees sur les grosses tables ont ete
+--   remplacees par des jointures sur agregats pre-calcules.
+--   Le temps d'execution de chaque section est affiche en fin de section.
 -- ============================================================
 
 SET ECHO OFF
@@ -61,11 +84,24 @@ DECLARE
     v_row_num       NUMBER := 0;
     v_montant       NUMBER;
 
+    -- Tampon des lignes de detail (permet d'obtenir le nombre d'anomalies
+    -- et les lignes a afficher en un seul passage sur les grosses tables)
+    TYPE t_lignes IS TABLE OF VARCHAR2(4000) INDEX BY PLS_INTEGER;
+    v_lignes        t_lignes;
+
+    -- Chronometrage par section
+    v_sec_start     NUMBER := DBMS_UTILITY.GET_TIME;
+    v_sec_titre     VARCHAR2(200);
+
     -- =========================================================
     -- PARAMETRES DE LA REVUE (a adapter au dispositif interne)
     -- =========================================================
     -- Nombre maximum de lignes affichees par test
     c_max_rows          CONSTANT NUMBER := 30;
+
+    -- Prefixe du GL naturel identifiant les comptes CLIENTELISES
+    -- (STTB_ACCOUNT.AC_NATURAL_GL) : seul ce perimetre est analyse
+    c_gl_client         CONSTANT VARCHAR2(10) := '37';
 
     -- Anciennete consideree comme "longue periode" de depassement
     c_jours_long        CONSTANT NUMBER := 90;    -- 3 mois
@@ -102,12 +138,34 @@ DECLARE
     -- Taux d'interet debiteur annualise minimum attendu (%)
     c_taux_od_min       CONSTANT NUMBER := 5;
 
+    -- Affiche le temps d'execution de la section qui vient de s'achever
+    PROCEDURE print_temps IS
+    BEGIN
+        IF v_sec_titre IS NOT NULL THEN
+            DBMS_OUTPUT.PUT_LINE('');
+            DBMS_OUTPUT.PUT_LINE('  ... section executee en '
+                || TO_CHAR((DBMS_UTILITY.GET_TIME - v_sec_start) / 100, 'FM999G990D0') || ' s');
+        END IF;
+    END;
+
     PROCEDURE print_section(p_title VARCHAR2) IS
     BEGIN
+        print_temps;
+        v_sec_titre := p_title;
+        v_sec_start := DBMS_UTILITY.GET_TIME;
         DBMS_OUTPUT.PUT_LINE('');
         DBMS_OUTPUT.PUT_LINE(v_sep);
         DBMS_OUTPUT.PUT_LINE('>>> ' || p_title);
         DBMS_OUTPUT.PUT_LINE(v_sep);
+    END;
+
+    -- Restitue le tampon de lignes de detail puis le vide
+    PROCEDURE flush_lignes IS
+    BEGIN
+        FOR i IN 1 .. v_lignes.COUNT LOOP
+            DBMS_OUTPUT.PUT_LINE(v_lignes(i));
+        END LOOP;
+        v_lignes.DELETE;
     END;
 
     PROCEDURE print_test(p_label VARCHAR2, p_count NUMBER, p_total NUMBER DEFAULT NULL) IS
@@ -241,18 +299,53 @@ BEGIN
         print_info('Devise ' || d.ccy, fmt_n(d.nb) || ' ligne(s) — ' || fmt_m(d.mnt));
     END LOOP;
 
-    -- 0.3 Rattachement des lignes aux comptes (STTM_CUST_ACCOUNT.LINE_ID)
+    -- 0.3 Perimetre des comptes clientelises et rattachement des lignes
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Perimetre analyse — comptes clientelises]');
+
+    SELECT COUNT(*) INTO v_total FROM STTM_CUST_ACCOUNT a;
+    print_info('Comptes presents dans STTM_CUST_ACCOUNT', fmt_n(v_total));
+
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%');
+    print_info('dont comptes CLIENTELISES (GL ' || c_gl_client || 'xx)', fmt_n(v_count));
+    IF v_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('    *** ATTENTION : aucun compte ne repond a la regle du GL naturel ' || c_gl_client
+            || 'xx. Verifier le prefixe (c_gl_client) et la cle de rattachement');
+        DBMS_OUTPUT.PUT_LINE('        STTB_ACCOUNT.AC_GL_NO = STTM_CUST_ACCOUNT.CUST_AC_NO : tous les');
+        DBMS_OUTPUT.PUT_LINE('        tests portant sur les comptes ressortiront a zero. ***');
+    END IF;
+
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND NOT EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0;
+    print_info('Comptes NON clientelises en solde debiteur (exclus)', fmt_n(v_count));
+
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [Rattachement lignes / comptes]');
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE LINE_ID IS NOT NULL AND TRIM(LINE_ID) IS NOT NULL;
-    print_info('Comptes portant une LINE_ID', fmt_n(v_count));
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%');
+    print_info('Comptes clientelises portant une LINE_ID', fmt_n(v_count));
 
     SELECT COUNT(*) INTO v_count FROM GETM_FACILITY f
     WHERE EXISTS (SELECT 1 FROM STTM_CUST_ACCOUNT a
-                  WHERE a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID));
-    print_info('Lignes rattachees a au moins un compte', fmt_n(v_count));
+                  WHERE (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+                    AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                WHERE g.AC_GL_NO = a.CUST_AC_NO
+                                  AND g.AC_NATURAL_GL LIKE c_gl_client || '%'));
+    print_info('Lignes rattachees a au moins un compte client', fmt_n(v_count));
 
     SELECT COUNT(*) INTO v_count FROM GETM_FACILITY f
     WHERE NVL(f.UTILISATION,0) > 0
@@ -260,37 +353,72 @@ BEGIN
                       WHERE a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID));
     print_info('Lignes utilisees SANS compte rattache', fmt_n(v_count));
 
-    -- 0.4 Comptes en position debitrice
+    -- 0.4 Comptes clientelises en position debitrice
     DBMS_OUTPUT.PUT_LINE('');
-    DBMS_OUTPUT.PUT_LINE('  [Comptes clientele en position debitrice]');
+    DBMS_OUTPUT.PUT_LINE('  [Comptes clientelises en position debitrice]');
 
-    SELECT COUNT(*) INTO v_total FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O';
+    SELECT COUNT(*) INTO v_total
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%');
     print_info('Comptes ouverts', fmt_n(v_total));
 
-    SELECT COUNT(*), NVL(SUM(ABS(LCY_CURR_BALANCE)),0) INTO v_count, v_montant
-    FROM STTM_CUST_ACCOUNT WHERE RECORD_STAT = 'O' AND NVL(ACY_CURR_BALANCE,0) < 0;
+    SELECT COUNT(*), NVL(SUM(ABS(a.LCY_CURR_BALANCE)),0) INTO v_count, v_montant
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0;
     print_info('Comptes en solde debiteur', fmt_n(v_count));
     print_info('Encours debiteur total (contre-valeur)', fmt_m(v_montant));
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND OVERDRAFT_SINCE IS NOT NULL;
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND a.OVERDRAFT_SINCE IS NOT NULL;
     print_info('Comptes avec OVERDRAFT_SINCE renseigne', fmt_n(v_count));
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND OVERLINE_OD_SINCE IS NOT NULL;
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND a.OVERLINE_OD_SINCE IS NOT NULL;
     print_info('Comptes en depassement de ligne (OVERLINE)', fmt_n(v_count));
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND NVL(TOD_LIMIT,0) > 0;
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND NVL(a.TOD_LIMIT,0) > 0;
     print_info('Comptes avec un TOD (decouvert temporaire)', fmt_n(v_count));
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND TOD_SINCE IS NOT NULL;
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND a.TOD_SINCE IS NOT NULL;
     print_info('Comptes avec TOD_SINCE renseigne', fmt_n(v_count));
 
-    SELECT COUNT(*) INTO v_count FROM STTM_CUST_ACCOUNT
-    WHERE RECORD_STAT = 'O' AND NVL(ACY_CURR_BALANCE,0) < 0
-      AND (LINE_ID IS NULL OR TRIM(LINE_ID) IS NULL) AND NVL(TOD_LIMIT,0) = 0;
+    SELECT COUNT(*) INTO v_count
+    FROM STTM_CUST_ACCOUNT a
+    WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+      AND NVL(a.ACY_CURR_BALANCE,0) < 0
+      AND (a.LINE_ID IS NULL OR TRIM(a.LINE_ID) IS NULL) AND NVL(a.TOD_LIMIT,0) = 0;
     print_info('Comptes debiteurs sans ligne ni TOD', fmt_n(v_count));
 
     -- 0.5 Top 15 des encours debiteurs
@@ -308,6 +436,9 @@ BEGIN
         FROM STTM_CUST_ACCOUNT a
         LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
         WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         ORDER BY a.LCY_CURR_BALANCE ASC
     ) WHERE ROWNUM <= 15) LOOP
         v_row_num := v_row_num + 1;
@@ -451,6 +582,9 @@ BEGIN
         SELECT a.CUST_AC_NO
         FROM STTM_CUST_ACCOUNT a
         WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
           AND ABS(a.ACY_CURR_BALANCE) >
               NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
                    WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
@@ -482,6 +616,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND ABS(a.ACY_CURR_BALANCE) >
                   NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
                        WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
@@ -503,7 +640,10 @@ BEGIN
     -- 1.5 Comptes marques en depassement de ligne par FLEXCUBE (OVERLINE)
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
-    WHERE a.RECORD_STAT = 'O' AND a.OVERLINE_OD_SINCE IS NOT NULL;
+    WHERE a.RECORD_STAT = 'O' AND a.OVERLINE_OD_SINCE IS NOT NULL
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%');
     print_test('Comptes en depassement de ligne (OVERLINE_OD_SINCE)', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,24,20,5,15,14,14,10');
@@ -520,6 +660,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O' AND a.OVERLINE_OD_SINCE IS NOT NULL
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             ORDER BY a.OVERLINE_OD_SINCE ASC
         ) WHERE ROWNUM <= c_max_rows) LOOP
             v_row_num := v_row_num + 1;
@@ -742,6 +885,9 @@ BEGIN
         FROM STTM_CUST_ACCOUNT a
         JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
         WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         GROUP BY a.CUST_AC_NO
         HAVING MAX(f.LINE_EXPIRY_DATE) < TRUNC(SYSDATE)
            AND COUNT(CASE WHEN f.LINE_EXPIRY_DATE IS NULL THEN 1 END) = 0
@@ -765,6 +911,9 @@ BEGIN
             JOIN GETM_FACILITY f ON (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, a.CUST_AC_NO, a.CCY
             HAVING MAX(f.LINE_EXPIRY_DATE) < TRUNC(SYSDATE)
                AND COUNT(CASE WHEN f.LINE_EXPIRY_DATE IS NULL THEN 1 END) = 0
@@ -786,6 +935,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.ACY_CURR_BALANCE,0) < 0
       AND NVL(a.TOD_LIMIT,0) > 0
       AND a.TOD_LIMIT_END_DATE IS NOT NULL
@@ -807,6 +959,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
               AND NVL(a.TOD_LIMIT,0) > 0
               AND a.TOD_LIMIT_END_DATE IS NOT NULL
@@ -835,6 +990,9 @@ BEGIN
              AND h.TRN_DT > f.LINE_EXPIRY_DATE
              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
         WHERE a.RECORD_STAT = 'O'
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
           AND f.LINE_EXPIRY_DATE IS NOT NULL
           AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
         GROUP BY a.CUST_AC_NO
@@ -859,6 +1017,9 @@ BEGIN
                  AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND f.LINE_EXPIRY_DATE IS NOT NULL
               AND f.LINE_EXPIRY_DATE < TRUNC(SYSDATE)
             GROUP BY a.CUST_NO, c.CUSTOMER_NAME1, a.CUST_AC_NO
@@ -1116,6 +1277,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.ACY_CURR_BALANCE,0) < 0
       AND (a.LINE_ID IS NULL OR TRIM(a.LINE_ID) IS NULL)
       AND NVL(a.TOD_LIMIT,0) = 0
@@ -1136,6 +1300,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
               AND (a.LINE_ID IS NULL OR TRIM(a.LINE_ID) IS NULL)
               AND NVL(a.TOD_LIMIT,0) = 0
@@ -1158,6 +1325,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.TOD_LIMIT,0) > 0
       AND (a.TOD_LIMIT_START_DATE IS NULL OR a.TOD_LIMIT_END_DATE IS NULL);
     print_test('TOD sans periode de validite (dates absentes)', v_count);
@@ -1176,6 +1346,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.TOD_LIMIT,0) > 0
               AND (a.TOD_LIMIT_START_DATE IS NULL OR a.TOD_LIMIT_END_DATE IS NULL)
             ORDER BY NVL(a.TOD_LIMIT,0) DESC
@@ -1196,6 +1369,9 @@ BEGIN
     FROM STTM_CUST_ACCOUNT a
     JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.ACY_CURR_BALANCE,0) < 0
       AND NVL(ac.OVERDRAFT_FACILITY,'N') != 'Y';
     print_test('Comptes debiteurs sur classe sans OVERDRAFT_FACILITY', v_count);
@@ -1215,6 +1391,9 @@ BEGIN
             JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
               AND NVL(ac.OVERDRAFT_FACILITY,'N') != 'Y'
             ORDER BY a.LCY_CURR_BALANCE ASC
@@ -1235,6 +1414,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM GETM_FACILITY f
                       WHERE f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID);
@@ -1252,6 +1434,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM GETM_FACILITY f
                               WHERE f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
@@ -1331,6 +1516,9 @@ BEGIN
                            a.LCY_CURR_BALANCE AS solde
                     FROM STTM_CUST_ACCOUNT a
                     WHERE a.RECORD_STAT = 'O'
+                      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                       AND NVL(a.ACY_CURR_BALANCE,0) < 0
                       AND a.OVERDRAFT_SINCE IS NOT NULL)
               GROUP BY tranche
@@ -1342,6 +1530,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.ACY_CURR_BALANCE,0) < 0
       AND a.OVERDRAFT_SINCE IS NOT NULL
       AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long;
@@ -1362,6 +1553,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
               AND a.OVERDRAFT_SINCE IS NOT NULL
               AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long
@@ -1383,6 +1577,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.OVERLINE_OD_SINCE IS NOT NULL
       AND TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) > c_jours_long;
     print_test('Comptes en depassement de ligne > ' || c_jours_long || ' jours', v_count);
@@ -1402,6 +1599,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.OVERLINE_OD_SINCE IS NOT NULL
               AND TRUNC(SYSDATE) - TRUNC(a.OVERLINE_OD_SINCE) > c_jours_long
             ORDER BY a.OVERLINE_OD_SINCE ASC
@@ -1422,6 +1622,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.TOD_SINCE IS NOT NULL
       AND TRUNC(SYSDATE) - TRUNC(a.TOD_SINCE) > c_jours_tod_max;
     print_test('TOD en cours depuis plus de ' || c_jours_tod_max || ' jours', v_count);
@@ -1440,6 +1643,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.TOD_SINCE IS NOT NULL
               AND TRUNC(SYSDATE) - TRUNC(a.TOD_SINCE) > c_jours_tod_max
             ORDER BY a.TOD_SINCE ASC
@@ -1507,8 +1713,11 @@ BEGIN
                            CASE WHEN NVL(LAG(ACY_CLOSING_BAL)
                                 OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE),0) < 0
                                 THEN 0 ELSE 1 END AS top_dep
-                    FROM ACTB_ACCBAL_HISTORY
+                    FROM ACTB_ACCBAL_HISTORY bh
                     WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                  WHERE g.AC_GL_NO = bh.ACCOUNT
+                                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                 )
                 WHERE ACY_CLOSING_BAL < 0
             )
@@ -1543,8 +1752,11 @@ BEGIN
                                    CASE WHEN NVL(LAG(ACY_CLOSING_BAL)
                                         OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE),0) < 0
                                         THEN 0 ELSE 1 END AS top_dep
-                            FROM ACTB_ACCBAL_HISTORY
+                            FROM ACTB_ACCBAL_HISTORY bh
                             WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                          WHERE g.AC_GL_NO = bh.ACCOUNT
+                                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                         )
                         WHERE ACY_CLOSING_BAL < 0
                     )
@@ -1573,6 +1785,9 @@ BEGIN
         SELECT h.ACCOUNT
         FROM ACTB_ACCBAL_HISTORY h
         WHERE h.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = h.ACCOUNT
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         GROUP BY h.ACCOUNT
         HAVING MAX(h.ACY_CLOSING_BAL) < 0
            AND COUNT(*) >= c_jours_long
@@ -1594,6 +1809,9 @@ BEGIN
                        MAX(h.ACY_CLOSING_BAL) KEEP (DENSE_RANK LAST ORDER BY h.BKG_DATE) AS dernier
                 FROM ACTB_ACCBAL_HISTORY h
                 WHERE h.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = h.ACCOUNT
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                 GROUP BY h.ACCOUNT
                 HAVING MAX(h.ACY_CLOSING_BAL) < 0
                    AND COUNT(*) >= c_jours_long
@@ -1666,6 +1884,9 @@ BEGIN
         SELECT a.CUST_NO
         FROM STTM_CUST_ACCOUNT a
         WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = a.CUST_AC_NO
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         GROUP BY a.CUST_NO
         HAVING COUNT(*) > 1
     );
@@ -1685,6 +1906,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             GROUP BY a.CUST_NO
             HAVING COUNT(*) > 1
             ORDER BY SUM(a.LCY_CURR_BALANCE) ASC
@@ -1788,6 +2012,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
       AND NVL(a.TOD_LIMIT,0) > 0
       AND EXISTS (SELECT 1 FROM GETM_FACILITY f
@@ -1809,6 +2036,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.LINE_ID IS NOT NULL AND TRIM(a.LINE_ID) IS NOT NULL
               AND NVL(a.TOD_LIMIT,0) > 0
               AND EXISTS (SELECT 1 FROM GETM_FACILITY f
@@ -2331,6 +2561,9 @@ BEGIN
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
           AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY h
                       WHERE h.ACCOUNT = a.CUST_AC_NO
@@ -2361,6 +2594,9 @@ BEGIN
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
             WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
               AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY h
@@ -2393,6 +2629,9 @@ BEGIN
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
           AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY h
                       WHERE h.ACCOUNT = a.CUST_AC_NO
@@ -2423,6 +2662,9 @@ BEGIN
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
             WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
               AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY h
@@ -2455,6 +2697,9 @@ BEGIN
         ) v
         JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
         JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
           AND EXISTS (SELECT 1 FROM ACTB_HISTORY h
                       WHERE h.AC_NO = a.CUST_AC_NO AND h.DRCR_IND = 'D'
@@ -2489,6 +2734,9 @@ BEGIN
             ) v
             JOIN GETM_FACILITY f ON f.ID = v.FACILITY_ID
             JOIN STTM_CUST_ACCOUNT a ON (a.LINE_ID = f.LINE_CODE OR a.LINE_ID = TO_CHAR(f.ID))
+             AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                         WHERE g.AC_GL_NO = a.CUST_AC_NO
+                           AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             LEFT JOIN GETM_LIAB l ON l.ID = f.LIAB_ID
             WHERE v.lim_prec IS NOT NULL AND v.LIMIT_AMOUNT > v.lim_prec
               AND EXISTS (SELECT 1 FROM ACTB_HISTORY h
@@ -2768,6 +3016,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.TOD_LIMIT,0) >= c_seuil_1 * c_pct_proche / 100;
     print_test('TOD atteignant ' || c_pct_proche || ' % du seuil 1 ou plus', v_count);
     IF v_count > 0 THEN
@@ -2786,6 +3037,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.TOD_LIMIT,0) >= c_seuil_1 * c_pct_proche / 100
             ORDER BY NVL(a.TOD_LIMIT,0) DESC
         ) WHERE ROWNUM <= c_max_rows) LOOP
@@ -2809,21 +3063,53 @@ BEGIN
     -- et rattachees a une piece. Le compte est considere comme
     -- "overdrawn" lorsque son solde de cloture du jour de l'ecriture
     -- (ACTB_ACCBAL_HISTORY) est negatif.
+    --
+    -- OPTIMISATION : la jointure est pilotee par les journees debitrices
+    -- (ACTB_ACCBAL_HISTORY filtre sur ACY_CLOSING_BAL < 0, tres selectif)
+    -- et la correspondance de date s'ecrit en intervalle
+    -- (h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1) au lieu de
+    -- TRUNC(h.TRN_DT) = b.BKG_DATE, afin de laisser les index sur TRN_DT
+    -- utilisables. Chaque test ne parcourt ACTB_HISTORY qu'une seule fois.
     -- =========================================================
     print_section('9. TRANSACTIONS MANUELLES SUR COMPTES OVERDRAWN');
 
     -- 9.1 Synthese par compte des ecritures manuelles passees en position
     --     debitrice
-    SELECT COUNT(*) INTO v_count FROM (
-        SELECT h.AC_NO
-        FROM ACTB_HISTORY h
-        JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-             AND b.BKG_DATE = TRUNC(h.TRN_DT)
-             AND b.ACY_CLOSING_BAL < 0
-        WHERE h.MODULE = 'DE'
-          AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-        GROUP BY h.AC_NO
-    );
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT h.AC_NO, NVL(MAX(a.CUST_NO),'-') AS cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   COUNT(*) AS nb_ecr,
+                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_deb,
+                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_cred,
+                   COUNT(DISTINCT h.USER_ID) AS nb_users, MAX(h.TRN_DT) AS derniere,
+                   SUM(h.LCY_AMOUNT) AS tot_gen
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.MODULE = 'DE'
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+            GROUP BY h.AC_NO
+        ) q
+        ORDER BY q.tot_gen DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || d.AC_NO,20) || '|'
+            || LPAD(fmt_n(d.nb_ecr),7) || ' |'
+            || LPAD(fmt_m(d.tot_deb),15) || ' |' || LPAD(fmt_m(d.tot_cred),15) || ' |'
+            || LPAD(fmt_n(d.nb_users),8) || ' |'
+            || RPAD(' ' || fmt_d(d.derniere),13) || '|';
+    END LOOP;
     print_test('Comptes debiteurs mouvementes par ecritures manuelles (DE)', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,22,20,8,16,16,9,13');
@@ -2832,45 +3118,40 @@ BEGIN
             || RPAD(' TOTAL DEBITS',16) || '|' || RPAD(' TOTAL CREDITS',16) || '|' || RPAD(' NB USERS',9) || '|'
             || RPAD(' DERNIERE',13) || '|');
         tbl_line('4,12,22,20,8,16,16,9,13');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT h.AC_NO, NVL(MAX(a.CUST_NO),'-') AS cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
-                   COUNT(*) AS nb_ecr,
-                   SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_deb,
-                   SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_cred,
-                   COUNT(DISTINCT h.USER_ID) AS nb_users, MAX(h.TRN_DT) AS derniere
-            FROM ACTB_HISTORY h
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-                 AND b.ACY_CLOSING_BAL < 0
-            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
-            WHERE h.MODULE = 'DE'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-            GROUP BY h.AC_NO
-            ORDER BY SUM(h.LCY_AMOUNT) DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
-                || RPAD(' ' || d.AC_NO,20) || '|'
-                || LPAD(fmt_n(d.nb_ecr),7) || ' |'
-                || LPAD(fmt_m(d.tot_deb),15) || ' |' || LPAD(fmt_m(d.tot_cred),15) || ' |'
-                || LPAD(fmt_n(d.nb_users),8) || ' |'
-                || RPAD(' ' || fmt_d(d.derniere),13) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,22,20,8,16,16,9,13');
     END IF;
 
     -- 9.2 Ecritures manuelles significatives, detail
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT)
-         AND b.ACY_CLOSING_BAL < 0
-    WHERE h.MODULE = 'DE'
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND h.LCY_AMOUNT >= c_mnt_signif;
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, NVL(h.TRN_CODE,'-') AS trn_code,
+                   h.LCY_AMOUNT, h.TRN_DT, NVL(h.USER_ID,'-') AS usr, b.ACY_CLOSING_BAL AS solde
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.MODULE = 'DE'
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                 AND h.LCY_AMOUNT >= c_mnt_signif
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+            || RPAD(' ' || d.DRCR_IND,4) || '|' || RPAD(' ' || SUBSTR(d.trn_code,1,5),7) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+            || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|'
+            || LPAD(fmt_m(d.solde),15) || ' |';
+    END LOOP;
     print_test('Ecritures manuelles >= ' || fmt_m(c_mnt_signif) || ' sur compte debiteur', v_count);
     IF v_count > 0 THEN
         tbl_line('4,20,12,4,7,16,12,16,16');
@@ -2878,41 +3159,41 @@ BEGIN
             || RPAD(' S',4) || '|' || RPAD(' CODE',7) || '|' || RPAD(' MONTANT',16) || '|'
             || RPAD(' DATE',12) || '|' || RPAD(' UTILISATEUR',16) || '|' || RPAD(' SOLDE DU JOUR',16) || '|');
         tbl_line('4,20,12,4,7,16,12,16,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, NVL(h.TRN_CODE,'-') AS trn_code,
-                   h.LCY_AMOUNT, h.TRN_DT, NVL(h.USER_ID,'-') AS usr, b.ACY_CLOSING_BAL AS solde
-            FROM ACTB_HISTORY h
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-                 AND b.ACY_CLOSING_BAL < 0
-            WHERE h.MODULE = 'DE'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND h.LCY_AMOUNT >= c_mnt_signif
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
-                || RPAD(' ' || d.DRCR_IND,4) || '|' || RPAD(' ' || SUBSTR(d.trn_code,1,5),7) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
-                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|'
-                || LPAD(fmt_m(d.solde),15) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,20,12,4,7,16,12,16,16');
     END IF;
 
     -- 9.3 Ecritures manuelles saisies et autorisees par le meme utilisateur
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT)
-         AND b.ACY_CLOSING_BAL < 0
-    WHERE h.MODULE = 'DE'
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND h.USER_ID IS NOT NULL AND h.AUTH_ID IS NOT NULL
-      AND UPPER(TRIM(h.USER_ID)) = UPPER(TRIM(h.AUTH_ID));
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT,
+                   h.USER_ID AS usr, b.ACY_CLOSING_BAL AS solde
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.MODULE = 'DE'
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+              AND h.USER_ID IS NOT NULL AND h.AUTH_ID IS NOT NULL
+              AND UPPER(TRIM(h.USER_ID)) = UPPER(TRIM(h.AUTH_ID))
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+            || RPAD(' ' || d.DRCR_IND,4) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+            || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || RPAD(' ' || SUBSTR(d.usr,1,16),18) || '|'
+            || LPAD(fmt_m(d.solde),15) || ' |';
+    END LOOP;
     print_test('Ecritures manuelles auto-autorisees (USER_ID = AUTH_ID)', v_count);
     IF v_count > 0 THEN
         tbl_line('4,20,12,4,16,12,18,16');
@@ -2920,43 +3201,42 @@ BEGIN
             || RPAD(' S',4) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' DATE',12) || '|'
             || RPAD(' UTILISATEUR',18) || '|' || RPAD(' SOLDE DU JOUR',16) || '|');
         tbl_line('4,20,12,4,16,12,18,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT,
-                   h.USER_ID AS usr, b.ACY_CLOSING_BAL AS solde
-            FROM ACTB_HISTORY h
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-                 AND b.ACY_CLOSING_BAL < 0
-            WHERE h.MODULE = 'DE'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND h.USER_ID IS NOT NULL AND h.AUTH_ID IS NOT NULL
-              AND UPPER(TRIM(h.USER_ID)) = UPPER(TRIM(h.AUTH_ID))
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
-                || RPAD(' ' || d.DRCR_IND,4) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
-                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || RPAD(' ' || SUBSTR(d.usr,1,16),18) || '|'
-                || LPAD(fmt_m(d.solde),15) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,20,12,4,16,12,18,16');
     END IF;
 
     -- 9.4 Ecritures manuelles antidatees sur comptes debiteurs
     --     (date de valeur anterieure a la date comptable)
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT)
-         AND b.ACY_CLOSING_BAL < 0
-    WHERE h.MODULE = 'DE'
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND h.VALUE_DT IS NOT NULL
-      AND TRUNC(h.VALUE_DT) < TRUNC(h.TRN_DT);
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT, h.VALUE_DT,
+                   TRUNC(h.TRN_DT) - TRUNC(h.VALUE_DT) AS ecart, NVL(h.USER_ID,'-') AS usr
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.MODULE = 'DE'
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+              AND h.VALUE_DT IS NOT NULL
+              AND h.VALUE_DT < b.BKG_DATE
+        ) q
+        ORDER BY q.ecart DESC, q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+            || RPAD(' ' || d.DRCR_IND,4) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+            || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|' || RPAD(' ' || fmt_d(d.VALUE_DT),12) || '|'
+            || LPAD(fmt_n(d.ecart) || ' j',7) || ' |'
+            || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|';
+    END LOOP;
     print_test('Ecritures manuelles antidatees sur compte debiteur', v_count);
     IF v_count > 0 THEN
         tbl_line('4,20,12,4,16,12,12,8,16');
@@ -2964,44 +3244,49 @@ BEGIN
             || RPAD(' S',4) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' DATE COMPT.',12) || '|'
             || RPAD(' DATE VALEUR',12) || '|' || RPAD(' ECART',8) || '|' || RPAD(' UTILISATEUR',16) || '|');
         tbl_line('4,20,12,4,16,12,12,8,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT h.AC_NO, h.TRN_REF_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT, h.VALUE_DT,
-                   TRUNC(h.TRN_DT) - TRUNC(h.VALUE_DT) AS ecart, NVL(h.USER_ID,'-') AS usr
-            FROM ACTB_HISTORY h
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-                 AND b.ACY_CLOSING_BAL < 0
-            WHERE h.MODULE = 'DE'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND h.VALUE_DT IS NOT NULL
-              AND TRUNC(h.VALUE_DT) < TRUNC(h.TRN_DT)
-            ORDER BY TRUNC(h.TRN_DT) - TRUNC(h.VALUE_DT) DESC, h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
-                || RPAD(' ' || d.DRCR_IND,4) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
-                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|' || RPAD(' ' || fmt_d(d.VALUE_DT),12) || '|'
-                || LPAD(fmt_n(d.ecart) || ' j',7) || ' |'
-                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,20,12,4,16,12,12,8,16');
     END IF;
 
     -- 9.5 Ecritures manuelles debitrices sur comptes deja au-dela de leur
     --     autorisation (ligne + TOD) : aggravation d'un depassement
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT)
-    WHERE h.MODULE = 'DE' AND h.DRCR_IND = 'D'
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND b.ACY_CLOSING_BAL < - (NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
-                                      WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0)
-                                 + NVL(a.TOD_LIMIT,0));
+    --     L'autorisation de chaque compte est pre-calculee une seule fois
+    --     (inline view "aut") au lieu d'une sous-requete correlee par ligne.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT aut.CUST_NO, h.AC_NO, h.TRN_REF_NO, h.LCY_AMOUNT, h.TRN_DT,
+                   b.ACY_CLOSING_BAL AS solde, NVL(h.USER_ID,'-') AS usr
+            FROM (
+                SELECT a.CUST_AC_NO, a.CUST_NO,
+                       NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                            WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0)
+                       + NVL(a.TOD_LIMIT,0) AS autorise
+                FROM STTM_CUST_ACCOUNT a
+                WHERE EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = a.CUST_AC_NO
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+            ) aut
+            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = aut.CUST_AC_NO
+                 AND b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                 AND b.ACY_CLOSING_BAL < -aut.autorise
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.MODULE = 'DE' AND h.DRCR_IND = 'D'
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+            || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
+            || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || LPAD(fmt_m(d.solde),15) || ' |'
+            || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|';
+    END LOOP;
     print_test('Debits manuels sur comptes deja au-dela de l''autorisation', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,20,12,16,12,16,16');
@@ -3009,30 +3294,7 @@ BEGIN
             || RPAD(' REFERENCE',12) || '|' || RPAD(' MONTANT DEBIT',16) || '|' || RPAD(' DATE',12) || '|'
             || RPAD(' SOLDE DU JOUR',16) || '|' || RPAD(' UTILISATEUR',16) || '|');
         tbl_line('4,12,20,12,16,12,16,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT a.CUST_NO, h.AC_NO, h.TRN_REF_NO, h.LCY_AMOUNT, h.TRN_DT,
-                   b.ACY_CLOSING_BAL AS solde, NVL(h.USER_ID,'-') AS usr
-            FROM ACTB_HISTORY h
-            JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-            WHERE h.MODULE = 'DE' AND h.DRCR_IND = 'D'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND b.ACY_CLOSING_BAL < - (NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
-                                              WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)),0)
-                                         + NVL(a.TOD_LIMIT,0))
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
-                || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |'
-                || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || LPAD(fmt_m(d.solde),15) || ' |'
-                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,20,12,16,12,16,16');
     END IF;
 
@@ -3051,13 +3313,17 @@ BEGIN
                COUNT(*) AS nb_ecr, COUNT(DISTINCT h.AC_NO) AS nb_cptes,
                SUM(CASE WHEN h.DRCR_IND = 'D' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_deb,
                SUM(CASE WHEN h.DRCR_IND = 'C' THEN h.LCY_AMOUNT ELSE 0 END) AS tot_cred
-        FROM ACTB_HISTORY h
-        JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-             AND b.BKG_DATE = TRUNC(h.TRN_DT)
-             AND b.ACY_CLOSING_BAL < 0
+        FROM ACTB_ACCBAL_HISTORY b
+        JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+             AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+             AND h.MODULE = 'DE'
+             AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
         LEFT JOIN SMTB_USER u ON u.USER_ID = h.USER_ID
-        WHERE h.MODULE = 'DE'
-          AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+        WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+          AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                      WHERE g.AC_GL_NO = b.ACCOUNT
+                        AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+          AND b.ACY_CLOSING_BAL < 0
         GROUP BY h.USER_ID
         ORDER BY COUNT(*) DESC
     ) WHERE ROWNUM <= 20) LOOP
@@ -3081,36 +3347,21 @@ BEGIN
     -- d'exercice) puis a le laisser repartir en position debitrice.
     -- Elle fausse le declassement, le provisionnement et le reporting
     -- prudentiel.
+    --
+    -- OPTIMISATION : chaque test est pilote par le sous-ensemble le plus
+    -- selectif (journees debitrices, journees de retour a l'equilibre,
+    -- veilles du 26 au 31 decembre) et ACTB_HISTORY n'est atteinte qu'en
+    -- second, par intervalle de dates. Le test d'aller-retour materialise
+    -- au prealable les seuls mouvements significatifs des comptes ayant
+    -- ete debiteurs, au lieu d'auto-joindre l'integralite du journal.
     -- =========================================================
     print_section('10. OVERDRAFTS PRESENTANT DES REGULARISATIONS INHABITUELLES');
 
     -- 10.1 Habillage d'arrete mensuel : retour a l'equilibre en fin de
     --      mois encadre par deux positions debitrices
-    SELECT COUNT(*) INTO v_count FROM (
-        SELECT x.ACCOUNT, x.BKG_DATE
-        FROM (
-            SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
-                   LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec,
-                   LEAD(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_suiv,
-                   LEAD(BKG_DATE) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS dt_suiv
-            FROM ACTB_ACCBAL_HISTORY
-            WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-        ) x
-        WHERE x.ACY_CLOSING_BAL >= 0
-          AND x.bal_prec < -c_mnt_signif
-          AND x.bal_suiv < -c_mnt_signif
-          AND x.BKG_DATE >= LAST_DAY(x.BKG_DATE) - 3
-          AND x.dt_suiv <= x.BKG_DATE + 7
-    );
-    print_test('Retours a l''equilibre en fin de mois puis redebit', v_count);
-    IF v_count > 0 THEN
-        tbl_line('4,12,20,12,16,16,16,12');
-        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
-            || RPAD(' ARRETE LE',12) || '|' || RPAD(' SOLDE VEILLE',16) || '|' || RPAD(' SOLDE ARRETE',16) || '|'
-            || RPAD(' SOLDE SUIVANT',16) || '|' || RPAD(' REDEBIT LE',12) || '|');
-        tbl_line('4,12,20,12,16,16,16,12');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
             SELECT NVL(a.CUST_NO,'-') AS cif, x.ACCOUNT, x.BKG_DATE, x.bal_prec,
                    x.ACY_CLOSING_BAL AS bal_arrete, x.bal_suiv, x.dt_suiv
             FROM (
@@ -3118,8 +3369,11 @@ BEGIN
                        LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec,
                        LEAD(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_suiv,
                        LEAD(BKG_DATE) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS dt_suiv
-                FROM ACTB_ACCBAL_HISTORY
+                FROM ACTB_ACCBAL_HISTORY bh
                 WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = bh.ACCOUNT
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
             ) x
             LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = x.ACCOUNT
             WHERE x.ACY_CLOSING_BAL >= 0
@@ -3127,33 +3381,78 @@ BEGIN
               AND x.bal_suiv < -c_mnt_signif
               AND x.BKG_DATE >= LAST_DAY(x.BKG_DATE) - 3
               AND x.dt_suiv <= x.BKG_DATE + 7
-            ORDER BY x.bal_prec ASC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
-                || RPAD(' ' || fmt_d(d.BKG_DATE),12) || '|'
-                || LPAD(fmt_m(d.bal_prec),15) || ' |' || LPAD(fmt_m(d.bal_arrete),15) || ' |'
-                || LPAD(fmt_m(d.bal_suiv),15) || ' |'
-                || RPAD(' ' || fmt_d(d.dt_suiv),12) || '|');
-        END LOOP;
+        ) q
+        ORDER BY q.bal_prec ASC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
+            || RPAD(' ' || fmt_d(d.BKG_DATE),12) || '|'
+            || LPAD(fmt_m(d.bal_prec),15) || ' |' || LPAD(fmt_m(d.bal_arrete),15) || ' |'
+            || LPAD(fmt_m(d.bal_suiv),15) || ' |'
+            || RPAD(' ' || fmt_d(d.dt_suiv),12) || '|';
+    END LOOP;
+    print_test('Retours a l''equilibre en fin de mois puis redebit', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,20,12,16,16,16,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' COMPTE',20) || '|'
+            || RPAD(' ARRETE LE',12) || '|' || RPAD(' SOLDE VEILLE',16) || '|' || RPAD(' SOLDE ARRETE',16) || '|'
+            || RPAD(' SOLDE SUIVANT',16) || '|' || RPAD(' REDEBIT LE',12) || '|');
+        tbl_line('4,12,20,12,16,16,16,12');
+        flush_lignes;
         tbl_line('4,12,20,12,16,16,16,12');
     END IF;
 
     -- 10.2 Aller-retour : credit significatif suivi d'un debit de montant
     --      quasi identique dans les jours qui suivent
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY hc
-    JOIN ACTB_HISTORY hd ON hd.AC_NO = hc.AC_NO AND hd.DRCR_IND = 'D'
-         AND hd.TRN_DT > hc.TRN_DT AND hd.TRN_DT <= hc.TRN_DT + c_jours_ar
-         AND ABS(hd.LCY_AMOUNT - hc.LCY_AMOUNT) <= 0.05 * hc.LCY_AMOUNT
-    WHERE hc.DRCR_IND = 'C'
-      AND hc.LCY_AMOUNT >= c_mnt_signif
-      AND hc.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY b
-                  WHERE b.ACCOUNT = hc.AC_NO
-                    AND b.BKG_DATE BETWEEN TRUNC(hc.TRN_DT) - 5 AND TRUNC(hc.TRN_DT)
-                    AND b.ACY_CLOSING_BAL < 0);
+    --      La CTE "mvt" restreint l'auto-jointure aux seuls mouvements
+    --      significatifs des comptes ayant connu une position debitrice.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (
+        WITH cpt_od AS (
+            SELECT /*+ MATERIALIZE */ DISTINCT b.ACCOUNT
+            FROM ACTB_ACCBAL_HISTORY b
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+        ),
+        mvt AS (
+            SELECT /*+ MATERIALIZE */ h.AC_NO, h.DRCR_IND, h.LCY_AMOUNT, h.TRN_DT, h.MODULE
+            FROM ACTB_HISTORY h
+            JOIN cpt_od o ON o.ACCOUNT = h.AC_NO
+            WHERE h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND h.LCY_AMOUNT >= 0.95 * c_mnt_signif
+        )
+        SELECT * FROM (
+            SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+                SELECT hc.AC_NO, hc.LCY_AMOUNT AS mnt_cred, hc.TRN_DT AS dt_cred,
+                       hd.LCY_AMOUNT AS mnt_deb, hd.TRN_DT AS dt_deb,
+                       NVL(hc.MODULE,'-') AS mod_c, NVL(hd.MODULE,'-') AS mod_d
+                FROM mvt hc
+                JOIN mvt hd ON hd.AC_NO = hc.AC_NO AND hd.DRCR_IND = 'D'
+                     AND hd.TRN_DT > hc.TRN_DT AND hd.TRN_DT <= hc.TRN_DT + c_jours_ar
+                     AND ABS(hd.LCY_AMOUNT - hc.LCY_AMOUNT) <= 0.05 * hc.LCY_AMOUNT
+                WHERE hc.DRCR_IND = 'C'
+                  AND hc.LCY_AMOUNT >= c_mnt_signif
+                  AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY b
+                              WHERE b.ACCOUNT = hc.AC_NO
+                                AND b.BKG_DATE BETWEEN hc.TRN_DT - 5 AND hc.TRN_DT
+                                AND b.ACY_CLOSING_BAL < 0)
+            ) q
+            ORDER BY q.mnt_cred DESC
+        ) WHERE ROWNUM <= c_max_rows
+    ) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.AC_NO,20) || '|'
+            || LPAD(fmt_m(d.mnt_cred),15) || ' |' || RPAD(' ' || fmt_d(d.dt_cred),12) || '|'
+            || LPAD(fmt_m(d.mnt_deb),15) || ' |' || RPAD(' ' || fmt_d(d.dt_deb),12) || '|'
+            || RPAD(' ' || d.mod_c,7) || '|' || RPAD(' ' || d.mod_d,7) || '|';
+    END LOOP;
     print_test('Regularisations en aller-retour sous ' || c_jours_ar || ' jours', v_count);
     IF v_count > 0 THEN
         tbl_line('4,20,16,12,16,12,7,7');
@@ -3161,50 +3460,47 @@ BEGIN
             || RPAD(' LE',12) || '|' || RPAD(' DEBIT RETOUR',16) || '|' || RPAD(' LE',12) || '|'
             || RPAD(' MOD.C',7) || '|' || RPAD(' MOD.D',7) || '|');
         tbl_line('4,20,16,12,16,12,7,7');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT hc.AC_NO, hc.LCY_AMOUNT AS mnt_cred, hc.TRN_DT AS dt_cred,
-                   hd.LCY_AMOUNT AS mnt_deb, hd.TRN_DT AS dt_deb,
-                   NVL(hc.MODULE,'-') AS mod_c, NVL(hd.MODULE,'-') AS mod_d
-            FROM ACTB_HISTORY hc
-            JOIN ACTB_HISTORY hd ON hd.AC_NO = hc.AC_NO AND hd.DRCR_IND = 'D'
-                 AND hd.TRN_DT > hc.TRN_DT AND hd.TRN_DT <= hc.TRN_DT + c_jours_ar
-                 AND ABS(hd.LCY_AMOUNT - hc.LCY_AMOUNT) <= 0.05 * hc.LCY_AMOUNT
-            WHERE hc.DRCR_IND = 'C'
-              AND hc.LCY_AMOUNT >= c_mnt_signif
-              AND hc.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND EXISTS (SELECT 1 FROM ACTB_ACCBAL_HISTORY b
-                          WHERE b.ACCOUNT = hc.AC_NO
-                            AND b.BKG_DATE BETWEEN TRUNC(hc.TRN_DT) - 5 AND TRUNC(hc.TRN_DT)
-                            AND b.ACY_CLOSING_BAL < 0)
-            ORDER BY hc.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.AC_NO,20) || '|'
-                || LPAD(fmt_m(d.mnt_cred),15) || ' |' || RPAD(' ' || fmt_d(d.dt_cred),12) || '|'
-                || LPAD(fmt_m(d.mnt_deb),15) || ' |' || RPAD(' ' || fmt_d(d.dt_deb),12) || '|'
-                || RPAD(' ' || d.mod_c,7) || '|' || RPAD(' ' || d.mod_d,7) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,20,16,12,16,12,7,7');
     END IF;
 
     -- 10.3 Regularisation obtenue par ecriture interne (DE / GL) et non
     --      par un flux client
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN (
-        SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
-               LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
-        FROM ACTB_ACCBAL_HISTORY
-        WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-    ) x ON x.ACCOUNT = h.AC_NO AND x.BKG_DATE = TRUNC(h.TRN_DT)
-    WHERE h.MODULE IN ('DE','GL')
-      AND h.DRCR_IND = 'C'
-      AND h.LCY_AMOUNT >= c_mnt_signif
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND x.bal_prec < 0
-      AND x.ACY_CLOSING_BAL >= 0;
+    --      Pilote par les journees de retour a l'equilibre (tres rares).
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT h.AC_NO, h.TRN_REF_NO, h.MODULE, h.LCY_AMOUNT, h.TRN_DT,
+                   x.bal_prec, NVL(h.USER_ID,'-') AS usr
+            FROM (
+                SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
+                       LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
+                FROM ACTB_ACCBAL_HISTORY bh
+                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = bh.ACCOUNT
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+            ) x
+            JOIN ACTB_HISTORY h ON h.AC_NO = x.ACCOUNT
+                 AND h.TRN_DT >= x.BKG_DATE AND h.TRN_DT < x.BKG_DATE + 1
+                 AND h.MODULE IN ('DE','GL')
+                 AND h.DRCR_IND = 'C'
+                 AND h.LCY_AMOUNT >= c_mnt_signif
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            WHERE x.bal_prec < 0
+              AND x.ACY_CLOSING_BAL >= 0
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
+            || RPAD(' ' || d.MODULE,7) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || LPAD(fmt_m(d.bal_prec),15) || ' |'
+            || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|';
+    END LOOP;
     print_test('Regularisations par ecriture interne (module DE / GL)', v_count);
     IF v_count > 0 THEN
         tbl_line('4,20,12,7,16,12,16,16');
@@ -3212,47 +3508,41 @@ BEGIN
             || RPAD(' MODULE',7) || '|' || RPAD(' CREDIT',16) || '|' || RPAD(' LE',12) || '|'
             || RPAD(' SOLDE VEILLE',16) || '|' || RPAD(' UTILISATEUR',16) || '|');
         tbl_line('4,20,12,7,16,12,16,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT h.AC_NO, h.TRN_REF_NO, h.MODULE, h.LCY_AMOUNT, h.TRN_DT,
-                   x.bal_prec, NVL(h.USER_ID,'-') AS usr
-            FROM ACTB_HISTORY h
-            JOIN (
-                SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
-                       LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
-                FROM ACTB_ACCBAL_HISTORY
-                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-            ) x ON x.ACCOUNT = h.AC_NO AND x.BKG_DATE = TRUNC(h.TRN_DT)
-            WHERE h.MODULE IN ('DE','GL')
-              AND h.DRCR_IND = 'C'
-              AND h.LCY_AMOUNT >= c_mnt_signif
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND x.bal_prec < 0
-              AND x.ACY_CLOSING_BAL >= 0
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.AC_NO,20) || '|' || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|'
-                || RPAD(' ' || d.MODULE,7) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || LPAD(fmt_m(d.bal_prec),15) || ' |'
-                || RPAD(' ' || SUBSTR(d.usr,1,14),16) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,20,12,7,16,12,16,16');
     END IF;
 
     -- 10.4 Regularisations concentrees sur la periode d'arrete annuel
     --      (derniers jours de decembre)
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT) - 1
-         AND b.ACY_CLOSING_BAL < 0
-    WHERE h.DRCR_IND = 'C'
-      AND h.LCY_AMOUNT >= c_mnt_signif
-      AND TO_CHAR(h.TRN_DT,'MMDD') BETWEEN '1226' AND '1231'
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit);
+    --      Pilote par les veilles du 26 au 31 decembre en position debitrice.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, h.AC_NO, h.TRN_REF_NO, NVL(h.MODULE,'-') AS mdl,
+                   h.LCY_AMOUNT, h.TRN_DT, b.ACY_CLOSING_BAL AS bal_veille
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE + 1 AND h.TRN_DT < b.BKG_DATE + 2
+                 AND h.DRCR_IND = 'C'
+                 AND h.LCY_AMOUNT >= c_mnt_signif
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_CLOSING_BAL < 0
+              AND TO_CHAR(b.BKG_DATE + 1,'MMDD') BETWEEN '1226' AND '1231'
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+            || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|' || RPAD(' ' || d.mdl,7) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || LPAD(fmt_m(d.bal_veille),15) || ' |';
+    END LOOP;
     print_test('Credits significatifs sur comptes debiteurs fin decembre', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,20,12,7,16,12,16');
@@ -3260,46 +3550,45 @@ BEGIN
             || RPAD(' REFERENCE',12) || '|' || RPAD(' MODULE',7) || '|' || RPAD(' CREDIT',16) || '|'
             || RPAD(' LE',12) || '|' || RPAD(' SOLDE VEILLE',16) || '|');
         tbl_line('4,12,20,12,7,16,12,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT NVL(a.CUST_NO,'-') AS cif, h.AC_NO, h.TRN_REF_NO, NVL(h.MODULE,'-') AS mdl,
-                   h.LCY_AMOUNT, h.TRN_DT, b.ACY_CLOSING_BAL AS bal_veille
-            FROM ACTB_HISTORY h
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT) - 1
-                 AND b.ACY_CLOSING_BAL < 0
-            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-            WHERE h.DRCR_IND = 'C'
-              AND h.LCY_AMOUNT >= c_mnt_signif
-              AND TO_CHAR(h.TRN_DT,'MMDD') BETWEEN '1226' AND '1231'
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_limit)
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
-                || RPAD(' ' || SUBSTR(d.TRN_REF_NO,1,10),12) || '|' || RPAD(' ' || d.mdl,7) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || LPAD(fmt_m(d.bal_veille),15) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,20,12,7,16,12,16');
     END IF;
 
     -- 10.5 Regularisation alimentee par un autre compte du MEME client
     --      (transfert interne de tresorerie, cavalerie)
-    SELECT COUNT(*) INTO v_count
-    FROM ACTB_HISTORY h
-    JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-    JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_AC_NO = h.RELATED_ACCOUNT
-    JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-         AND b.BKG_DATE = TRUNC(h.TRN_DT)
-    WHERE h.DRCR_IND = 'C'
-      AND h.LCY_AMOUNT >= c_mnt_signif
-      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-      AND h.RELATED_ACCOUNT IS NOT NULL
-      AND a2.CUST_NO = a.CUST_NO
-      AND a2.CUST_AC_NO != a.CUST_AC_NO
-      AND b.ACY_OPENING_BAL < 0;
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT a.CUST_NO, h.AC_NO, h.RELATED_ACCOUNT, h.LCY_AMOUNT, h.TRN_DT,
+                   NVL(h.MODULE,'-') AS mdl, b.ACY_OPENING_BAL AS bal_ouv
+            FROM ACTB_ACCBAL_HISTORY b
+            JOIN ACTB_HISTORY h ON h.AC_NO = b.ACCOUNT
+                 AND h.TRN_DT >= b.BKG_DATE AND h.TRN_DT < b.BKG_DATE + 1
+                 AND h.DRCR_IND = 'C'
+                 AND h.LCY_AMOUNT >= c_mnt_signif
+                 AND h.RELATED_ACCOUNT IS NOT NULL
+                 AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
+            JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_AC_NO = h.RELATED_ACCOUNT
+                 AND a2.CUST_NO = a.CUST_NO
+                 AND a2.CUST_AC_NO != a.CUST_AC_NO
+            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = b.ACCOUNT
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND b.ACY_OPENING_BAL < 0
+        ) q
+        ORDER BY q.LCY_AMOUNT DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
+            || RPAD(' ' || SUBSTR(d.RELATED_ACCOUNT,1,18),20) || '|'
+            || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
+            || RPAD(' ' || d.mdl,7) || '|'
+            || LPAD(fmt_m(d.bal_ouv),15) || ' |';
+    END LOOP;
     print_test('Regularisations par un autre compte du meme client', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,20,20,16,12,7,16');
@@ -3307,32 +3596,7 @@ BEGIN
             || RPAD(' COMPTE SOURCE',20) || '|' || RPAD(' MONTANT',16) || '|' || RPAD(' LE',12) || '|'
             || RPAD(' MODULE',7) || '|' || RPAD(' SOLDE OUVERT.',16) || '|');
         tbl_line('4,12,20,20,16,12,7,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT a.CUST_NO, h.AC_NO, h.RELATED_ACCOUNT, h.LCY_AMOUNT, h.TRN_DT,
-                   NVL(h.MODULE,'-') AS mdl, b.ACY_OPENING_BAL AS bal_ouv
-            FROM ACTB_HISTORY h
-            JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = h.AC_NO
-            JOIN STTM_CUST_ACCOUNT a2 ON a2.CUST_AC_NO = h.RELATED_ACCOUNT
-            JOIN ACTB_ACCBAL_HISTORY b ON b.ACCOUNT = h.AC_NO
-                 AND b.BKG_DATE = TRUNC(h.TRN_DT)
-            WHERE h.DRCR_IND = 'C'
-              AND h.LCY_AMOUNT >= c_mnt_signif
-              AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND h.RELATED_ACCOUNT IS NOT NULL
-              AND a2.CUST_NO = a.CUST_NO
-              AND a2.CUST_AC_NO != a.CUST_AC_NO
-              AND b.ACY_OPENING_BAL < 0
-            ORDER BY h.LCY_AMOUNT DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || d.AC_NO,20) || '|'
-                || RPAD(' ' || SUBSTR(d.RELATED_ACCOUNT,1,18),20) || '|'
-                || LPAD(fmt_m(d.LCY_AMOUNT),15) || ' |' || RPAD(' ' || fmt_d(d.TRN_DT),12) || '|'
-                || RPAD(' ' || d.mdl,7) || '|'
-                || LPAD(fmt_m(d.bal_ouv),15) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,20,20,16,12,7,16');
     END IF;
 
@@ -3349,16 +3613,44 @@ BEGIN
 
     -- 11.1 Comptes debiteurs de longue duree sans aucune ecriture
     --      d'interet debiteur (module IC) sur la periode
-    SELECT COUNT(*) INTO v_count
-    FROM STTM_CUST_ACCOUNT a
-    WHERE a.RECORD_STAT = 'O'
-      AND NVL(a.ACY_CURR_BALANCE,0) < 0
-      AND a.OVERDRAFT_SINCE IS NOT NULL
-      AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_tod_max
-      AND NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
-                      WHERE h.AC_NO = a.CUST_AC_NO
-                        AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
-                        AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist));
+    --      L'absence d'interet est evaluee par anti-jointure sur un
+    --      agregat des comptes ayant supporte des interets debiteurs.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
+                   a.ACY_CURR_BALANCE AS solde, a.LCY_CURR_BALANCE AS solde_lcy, a.OVERDRAFT_SINCE,
+                   TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) AS nb_jours,
+                   NVL(a.ACCOUNT_CLASS,'-') AS cl
+            FROM STTM_CUST_ACCOUNT a
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+            LEFT JOIN (
+                SELECT DISTINCT h.AC_NO
+                FROM ACTB_HISTORY h
+                WHERE h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                  AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            ) ic ON ic.AC_NO = a.CUST_AC_NO
+            WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+              AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND a.OVERDRAFT_SINCE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_tod_max
+              AND ic.AC_NO IS NULL
+        ) q
+        ORDER BY q.solde_lcy ASC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
+            || LPAD(fmt_m(d.solde),15) || ' |'
+            || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
+            || LPAD(fmt_n(d.nb_jours),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.cl,1,12),14) || '|';
+    END LOOP;
     print_test('Comptes debiteurs > ' || c_jours_tod_max || ' j sans interets debiteurs', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,22,20,5,16,13,9,14');
@@ -3367,33 +3659,7 @@ BEGIN
             || RPAD(' SOLDE',16) || '|' || RPAD(' OD DEPUIS',13) || '|' || RPAD(' JOURS',9) || '|'
             || RPAD(' CLASSE',14) || '|');
         tbl_line('4,12,22,20,5,16,13,9,14');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT a.CUST_NO, NVL(c.CUSTOMER_NAME1,'-') AS nom, a.CUST_AC_NO, NVL(a.CCY,'-') AS ccy,
-                   a.ACY_CURR_BALANCE AS solde, a.OVERDRAFT_SINCE,
-                   TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) AS nb_jours,
-                   NVL(a.ACCOUNT_CLASS,'-') AS cl
-            FROM STTM_CUST_ACCOUNT a
-            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
-            WHERE a.RECORD_STAT = 'O'
-              AND NVL(a.ACY_CURR_BALANCE,0) < 0
-              AND a.OVERDRAFT_SINCE IS NOT NULL
-              AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_tod_max
-              AND NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
-                              WHERE h.AC_NO = a.CUST_AC_NO
-                                AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
-                                AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
-            ORDER BY a.LCY_CURR_BALANCE ASC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.CUST_NO,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
-                || RPAD(' ' || d.CUST_AC_NO,20) || '|' || RPAD(' ' || d.ccy,5) || '|'
-                || LPAD(fmt_m(d.solde),15) || ' |'
-                || RPAD(' ' || fmt_d(d.OVERDRAFT_SINCE),13) || '|'
-                || LPAD(fmt_n(d.nb_jours),8) || ' |'
-                || RPAD(' ' || SUBSTR(d.cl,1,12),14) || '|');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,22,20,5,16,13,9,14');
     END IF;
 
@@ -3401,6 +3667,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.LCY_CURR_BALANCE < -c_mnt_signif
       AND NVL(a.ACY_ACCRUED_DR_IC,0) = 0;
     print_test('Comptes debiteurs significatifs sans interets courus', v_count);
@@ -3419,6 +3688,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.LCY_CURR_BALANCE < -c_mnt_signif
               AND NVL(a.ACY_ACCRUED_DR_IC,0) = 0
             ORDER BY a.LCY_CURR_BALANCE ASC
@@ -3438,6 +3710,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.DR_INT_DUE,0) > 0;
     print_test('Comptes avec interets debiteurs dus non liquides', v_count);
     IF v_count > 0 THEN
@@ -3455,6 +3730,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.DR_INT_DUE,0) > 0
             ORDER BY NVL(a.DR_INT_DUE,0) DESC
         ) WHERE ROWNUM <= c_max_rows) LOOP
@@ -3473,6 +3751,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.CHG_DUE,0) > 0
       AND NVL(a.ACY_CURR_BALANCE,0) < 0;
     print_test('Comptes debiteurs avec frais dus non preleves', v_count);
@@ -3491,6 +3772,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.CHG_DUE,0) > 0
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
             ORDER BY NVL(a.CHG_DUE,0) DESC
@@ -3512,6 +3796,9 @@ BEGIN
     FROM STTM_CUST_ACCOUNT a
     JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND NVL(a.ACY_CURR_BALANCE,0) < 0
       AND (NVL(ac.IC_INCLUSION,'N') != 'Y' OR NVL(ac.TRACK_ACCRUED_IC,'N') != 'Y');
     print_test('Comptes debiteurs sur classe sans suivi des interets', v_count);
@@ -3531,6 +3818,9 @@ BEGIN
             JOIN STTM_ACCOUNT_CLASS ac ON ac.ACCOUNT_CLASS = a.ACCOUNT_CLASS
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND NVL(a.ACY_CURR_BALANCE,0) < 0
               AND (NVL(ac.IC_INCLUSION,'N') != 'Y' OR NVL(ac.TRACK_ACCRUED_IC,'N') != 'Y')
             ORDER BY a.LCY_CURR_BALANCE ASC
@@ -3548,22 +3838,49 @@ BEGIN
 
     -- 11.6 Taux d'interet debiteur effectif annualise anormalement bas
     --      taux = interets debites / (encours debiteur moyen x jours / 365)
-    SELECT COUNT(*) INTO v_count FROM (
-        SELECT s.ACCOUNT
-        FROM (
-            SELECT b.ACCOUNT, AVG(ABS(b.ACY_CLOSING_BAL)) AS enc_moy, COUNT(*) AS nb_j
-            FROM ACTB_ACCBAL_HISTORY b
-            WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-              AND b.ACY_CLOSING_BAL < 0
-            GROUP BY b.ACCOUNT
-            HAVING COUNT(*) >= c_jours_tod_max
-               AND AVG(ABS(b.ACY_CLOSING_BAL)) >= c_mnt_signif
-        ) s
-        WHERE NVL((SELECT SUM(h.LCY_AMOUNT) FROM ACTB_HISTORY h
-                    WHERE h.AC_NO = s.ACCOUNT AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
-                      AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)),0)
-              < c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365
-    );
+    --      Les interets sont agreges en UNE passe sur ACTB_HISTORY puis
+    --      joints aux encours moyens, au lieu d'une sous-requete scalaire
+    --      correlee executee compte par compte.
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, s.ACCOUNT, s.nb_j, s.enc_moy,
+                   NVL(ic.interets,0) AS interets,
+                   ROUND(NVL(ic.interets,0) * 365 * 100 / NULLIF(s.enc_moy * s.nb_j, 0), 2) AS taux,
+                   c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365 AS attendus
+            FROM (
+                SELECT b.ACCOUNT, AVG(ABS(b.ACY_CLOSING_BAL)) AS enc_moy, COUNT(*) AS nb_j
+                FROM ACTB_ACCBAL_HISTORY b
+                WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = b.ACCOUNT
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+                  AND b.ACY_CLOSING_BAL < 0
+                GROUP BY b.ACCOUNT
+                HAVING COUNT(*) >= c_jours_tod_max
+                   AND AVG(ABS(b.ACY_CLOSING_BAL)) >= c_mnt_signif
+            ) s
+            LEFT JOIN (
+                SELECT h.AC_NO, SUM(h.LCY_AMOUNT) AS interets
+                FROM ACTB_HISTORY h
+                WHERE h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                  AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                GROUP BY h.AC_NO
+            ) ic ON ic.AC_NO = s.ACCOUNT
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
+            WHERE NVL(ic.interets,0) < c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365
+        ) q
+        ORDER BY q.enc_moy DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
+            || LPAD(fmt_n(d.nb_j),8) || ' |'
+            || LPAD(fmt_m(d.enc_moy),16) || ' |' || LPAD(fmt_m(d.interets),15) || ' |'
+            || LPAD(TO_CHAR(NVL(d.taux,0),'FM990D00') || ' %',9) || ' |'
+            || LPAD(fmt_m(d.attendus),15) || ' |';
+    END LOOP;
     print_test('Comptes : taux debiteur effectif < ' || c_taux_od_min || ' %', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,20,9,17,16,10,16');
@@ -3571,35 +3888,7 @@ BEGIN
             || RPAD(' NB JOURS',9) || '|' || RPAD(' ENCOURS MOYEN',17) || '|' || RPAD(' INT. DEBITES',16) || '|'
             || RPAD(' TAUX EFF.',10) || '|' || RPAD(' INT. ATTENDUS',16) || '|');
         tbl_line('4,12,20,9,17,16,10,16');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT NVL(a.CUST_NO,'-') AS cif, s.ACCOUNT, s.nb_j, s.enc_moy, s.interets,
-                   ROUND(s.interets * 365 * 100 / NULLIF(s.enc_moy * s.nb_j, 0), 2) AS taux,
-                   c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365 AS attendus
-            FROM (
-                SELECT b.ACCOUNT, AVG(ABS(b.ACY_CLOSING_BAL)) AS enc_moy, COUNT(*) AS nb_j,
-                       NVL((SELECT SUM(h.LCY_AMOUNT) FROM ACTB_HISTORY h
-                             WHERE h.AC_NO = b.ACCOUNT AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
-                               AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)),0) AS interets
-                FROM ACTB_ACCBAL_HISTORY b
-                WHERE b.BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-                  AND b.ACY_CLOSING_BAL < 0
-                GROUP BY b.ACCOUNT
-                HAVING COUNT(*) >= c_jours_tod_max
-                   AND AVG(ABS(b.ACY_CLOSING_BAL)) >= c_mnt_signif
-            ) s
-            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
-            WHERE s.interets < c_taux_od_min / 100 * s.enc_moy * s.nb_j / 365
-            ORDER BY s.enc_moy DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || d.ACCOUNT,20) || '|'
-                || LPAD(fmt_n(d.nb_j),8) || ' |'
-                || LPAD(fmt_m(d.enc_moy),16) || ' |' || LPAD(fmt_m(d.interets),15) || ' |'
-                || LPAD(TO_CHAR(NVL(d.taux,0),'FM990D00') || ' %',9) || ' |'
-                || LPAD(fmt_m(d.attendus),15) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,20,9,17,16,10,16');
     END IF;
 
@@ -3616,27 +3905,11 @@ BEGIN
     print_section('12. COMPTES PRESENTANT DES DEPASSEMENTS RECURRENTS');
 
     -- 12.1 Comptes cumulant plusieurs episodes distincts de decouvert
-    SELECT COUNT(*) INTO v_count FROM (
-        SELECT ACCOUNT
-        FROM (
-            SELECT ACCOUNT, ACY_CLOSING_BAL,
-                   LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
-            FROM ACTB_ACCBAL_HISTORY
-            WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-        )
-        WHERE ACY_CLOSING_BAL < 0
-        GROUP BY ACCOUNT
-        HAVING SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) >= c_nb_episodes
-    );
-    print_test('Comptes avec au moins ' || c_nb_episodes || ' episodes de decouvert', v_count);
-    IF v_count > 0 THEN
-        tbl_line('4,12,22,20,10,10,17,17');
-        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
-            || RPAD(' COMPTE',20) || '|' || RPAD(' NB EPIS.',10) || '|' || RPAD(' NB JOURS',10) || '|'
-            || RPAD(' PIRE SOLDE',17) || '|' || RPAD(' SOLDE ACTUEL',17) || '|');
-        tbl_line('4,12,22,20,10,10,17,17');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
+    --      Le balayage des soldes journaliers (LAG) n'est effectue qu'une
+    --      fois : le nombre d'anomalies est obtenu par COUNT(*) OVER ().
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
             SELECT NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, ep.ACCOUNT,
                    ep.nb_ep, ep.nb_j, ep.pire, NVL(a.ACY_CURR_BALANCE,0) AS solde
             FROM (
@@ -3646,8 +3919,11 @@ BEGIN
                 FROM (
                     SELECT ACCOUNT, BKG_DATE, ACY_CLOSING_BAL,
                            LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
-                    FROM ACTB_ACCBAL_HISTORY
+                    FROM ACTB_ACCBAL_HISTORY bh
                     WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                  WHERE g.AC_GL_NO = bh.ACCOUNT
+                                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                 )
                 WHERE ACY_CLOSING_BAL < 0
                 GROUP BY ACCOUNT
@@ -3655,28 +3931,61 @@ BEGIN
             ) ep
             LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = ep.ACCOUNT
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
-            ORDER BY ep.nb_ep DESC, ep.nb_j DESC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
-                || RPAD(' ' || d.ACCOUNT,20) || '|'
-                || LPAD(fmt_n(d.nb_ep),9) || ' |' || LPAD(fmt_n(d.nb_j),9) || ' |'
-                || LPAD(fmt_m(d.pire),16) || ' |' || LPAD(fmt_m(d.solde),16) || ' |');
-        END LOOP;
+        ) q
+        ORDER BY q.nb_ep DESC, q.nb_j DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || d.ACCOUNT,20) || '|'
+            || LPAD(fmt_n(d.nb_ep),9) || ' |' || LPAD(fmt_n(d.nb_j),9) || ' |'
+            || LPAD(fmt_m(d.pire),16) || ' |' || LPAD(fmt_m(d.solde),16) || ' |';
+    END LOOP;
+    print_test('Comptes avec au moins ' || c_nb_episodes || ' episodes de decouvert', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,20,10,10,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' COMPTE',20) || '|' || RPAD(' NB EPIS.',10) || '|' || RPAD(' NB JOURS',10) || '|'
+            || RPAD(' PIRE SOLDE',17) || '|' || RPAD(' SOLDE ACTUEL',17) || '|');
+        tbl_line('4,12,22,20,10,10,17,17');
+        flush_lignes;
         tbl_line('4,12,22,20,10,10,17,17');
     END IF;
 
     -- 12.2 Comptes passant une part importante de l'annee en position
     --      debitrice
-    SELECT COUNT(*) INTO v_count FROM (
-        SELECT ACCOUNT
-        FROM ACTB_ACCBAL_HISTORY
-        WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-          AND ACY_CLOSING_BAL < 0
-        GROUP BY ACCOUNT
-        HAVING COUNT(*) > c_jours_recur
-    );
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, s.ACCOUNT,
+                   s.nb_j, s.moyen, s.pire, NVL(a.ACY_CURR_BALANCE,0) AS solde
+            FROM (
+                SELECT ACCOUNT, COUNT(*) AS nb_j, AVG(ACY_CLOSING_BAL) AS moyen,
+                       MIN(ACY_CLOSING_BAL) AS pire
+                FROM ACTB_ACCBAL_HISTORY bh
+                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                  AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                              WHERE g.AC_GL_NO = bh.ACCOUNT
+                                AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
+                  AND ACY_CLOSING_BAL < 0
+                GROUP BY ACCOUNT
+                HAVING COUNT(*) > c_jours_recur
+            ) s
+            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
+        ) q
+        ORDER BY q.nb_j DESC, q.pire ASC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || d.ACCOUNT,20) || '|'
+            || LPAD(fmt_n(d.nb_j),9) || ' |'
+            || LPAD(fmt_m(d.moyen),16) || ' |' || LPAD(fmt_m(d.pire),16) || ' |'
+            || LPAD(fmt_m(d.solde),16) || ' |';
+    END LOOP;
     print_test('Comptes debiteurs plus de ' || c_jours_recur || ' jours sur la periode', v_count);
     IF v_count > 0 THEN
         tbl_line('4,12,22,20,10,17,17,17');
@@ -3684,31 +3993,7 @@ BEGIN
             || RPAD(' COMPTE',20) || '|' || RPAD(' NB JOURS',10) || '|'
             || RPAD(' ENCOURS MOYEN',17) || '|' || RPAD(' PIRE SOLDE',17) || '|' || RPAD(' SOLDE ACTUEL',17) || '|');
         tbl_line('4,12,22,20,10,17,17,17');
-        v_row_num := 0;
-        FOR d IN (SELECT * FROM (
-            SELECT NVL(a.CUST_NO,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, s.ACCOUNT,
-                   s.nb_j, s.moyen, s.pire, NVL(a.ACY_CURR_BALANCE,0) AS solde
-            FROM (
-                SELECT ACCOUNT, COUNT(*) AS nb_j, AVG(ACY_CLOSING_BAL) AS moyen,
-                       MIN(ACY_CLOSING_BAL) AS pire
-                FROM ACTB_ACCBAL_HISTORY
-                WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
-                  AND ACY_CLOSING_BAL < 0
-                GROUP BY ACCOUNT
-                HAVING COUNT(*) > c_jours_recur
-            ) s
-            LEFT JOIN STTM_CUST_ACCOUNT a ON a.CUST_AC_NO = s.ACCOUNT
-            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
-            ORDER BY s.nb_j DESC, s.pire ASC
-        ) WHERE ROWNUM <= c_max_rows) LOOP
-            v_row_num := v_row_num + 1;
-            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
-                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
-                || RPAD(' ' || d.ACCOUNT,20) || '|'
-                || LPAD(fmt_n(d.nb_j),9) || ' |'
-                || LPAD(fmt_m(d.moyen),16) || ' |' || LPAD(fmt_m(d.pire),16) || ' |'
-                || LPAD(fmt_m(d.solde),16) || ' |');
-        END LOOP;
+        flush_lignes;
         tbl_line('4,12,22,20,10,17,17,17');
     END IF;
 
@@ -3717,6 +4002,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.PREV_OVD_DATE IS NOT NULL
       AND a.OVERDRAFT_SINCE IS NOT NULL;
     print_test('Comptes en recidive (PREV_OVD_DATE et OVERDRAFT_SINCE)', v_count);
@@ -3735,6 +4023,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.PREV_OVD_DATE IS NOT NULL
               AND a.OVERDRAFT_SINCE IS NOT NULL
             ORDER BY a.LCY_CURR_BALANCE ASC
@@ -3756,6 +4047,9 @@ BEGIN
     SELECT COUNT(*) INTO v_count
     FROM STTM_CUST_ACCOUNT a
     WHERE a.RECORD_STAT = 'O'
+      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                  WHERE g.AC_GL_NO = a.CUST_AC_NO
+                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
       AND a.PREV_TOD_SINCE IS NOT NULL;
     print_test('Comptes a TOD repetes (PREV_TOD_SINCE renseigne)', v_count);
     IF v_count > 0 THEN
@@ -3772,6 +4066,9 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             WHERE a.RECORD_STAT = 'O'
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
               AND a.PREV_TOD_SINCE IS NOT NULL
             ORDER BY NVL(a.TOD_LIMIT,0) DESC
         ) WHERE ROWNUM <= c_max_rows) LOOP
@@ -3821,6 +4118,9 @@ BEGIN
 
     -- 12.6 Synthese : comptes cumulant plusieurs facteurs de risque
     --      (1 point par critere) — support de priorisation des controles
+    --      Les criteres D (interets) et E (ecritures manuelles) sont
+    --      obtenus par jointure sur deux agregats calcules en une passe,
+    --      au lieu de deux sous-requetes correlees par compte.
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE('  [Comptes cumulant au moins 3 facteurs de risque overdraft]');
     DBMS_OUTPUT.PUT_LINE('   Criteres : A=depassement autorisation  B=OD > ' || c_jours_long || ' j'
@@ -3848,15 +4148,8 @@ BEGIN
                          AND TRUNC(SYSDATE) - TRUNC(a.OVERDRAFT_SINCE) > c_jours_long
                         THEN 1 ELSE 0 END AS fb,
                    CASE WHEN NVL(ep.nb_ep,0) >= c_nb_episodes THEN 1 ELSE 0 END AS fc,
-                   CASE WHEN NOT EXISTS (SELECT 1 FROM ACTB_HISTORY h
-                                         WHERE h.AC_NO = a.CUST_AC_NO
-                                           AND h.MODULE = 'IC' AND h.DRCR_IND = 'D'
-                                           AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
-                        THEN 1 ELSE 0 END AS fd,
-                   CASE WHEN EXISTS (SELECT 1 FROM ACTB_HISTORY h
-                                     WHERE h.AC_NO = a.CUST_AC_NO AND h.MODULE = 'DE'
-                                       AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist))
-                        THEN 1 ELSE 0 END AS fe,
+                   CASE WHEN ic.AC_NO IS NULL THEN 1 ELSE 0 END AS fd,
+                   CASE WHEN de.AC_NO IS NOT NULL THEN 1 ELSE 0 END AS fe,
                    CASE WHEN EXISTS (SELECT 1 FROM GETM_FACILITY f
                                      WHERE (f.LINE_CODE = a.LINE_ID OR TO_CHAR(f.ID) = a.LINE_ID)
                                        AND f.LINE_EXPIRY_DATE IS NOT NULL
@@ -3865,17 +4158,35 @@ BEGIN
             FROM STTM_CUST_ACCOUNT a
             LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = a.CUST_NO
             LEFT JOIN (
+                SELECT DISTINCT h.AC_NO
+                FROM ACTB_HISTORY h
+                WHERE h.MODULE = 'IC' AND h.DRCR_IND = 'D'
+                  AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            ) ic ON ic.AC_NO = a.CUST_AC_NO
+            LEFT JOIN (
+                SELECT DISTINCT h.AC_NO
+                FROM ACTB_HISTORY h
+                WHERE h.MODULE = 'DE'
+                  AND h.TRN_DT >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+            ) de ON de.AC_NO = a.CUST_AC_NO
+            LEFT JOIN (
                 SELECT ACCOUNT, SUM(CASE WHEN NVL(bal_prec,0) >= 0 THEN 1 ELSE 0 END) AS nb_ep
                 FROM (
                     SELECT ACCOUNT, ACY_CLOSING_BAL,
                            LAG(ACY_CLOSING_BAL) OVER (PARTITION BY ACCOUNT ORDER BY BKG_DATE) AS bal_prec
-                    FROM ACTB_ACCBAL_HISTORY
+                    FROM ACTB_ACCBAL_HISTORY bh
                     WHERE BKG_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -c_mois_hist)
+                      AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                                  WHERE g.AC_GL_NO = bh.ACCOUNT
+                                    AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
                 )
                 WHERE ACY_CLOSING_BAL < 0
                 GROUP BY ACCOUNT
             ) ep ON ep.ACCOUNT = a.CUST_AC_NO
             WHERE a.RECORD_STAT = 'O' AND NVL(a.ACY_CURR_BALANCE,0) < 0
+              AND EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                          WHERE g.AC_GL_NO = a.CUST_AC_NO
+                            AND g.AC_NATURAL_GL LIKE c_gl_client || '%')
         )
         WHERE fa + fb + fc + fd + fe + ff >= 3
         ORDER BY fa + fb + fc + fd + fe + ff DESC, solde ASC
@@ -3897,6 +4208,7 @@ BEGIN
     -- =========================================================
     -- FIN
     -- =========================================================
+    print_temps;
     DBMS_OUTPUT.PUT_LINE('');
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('   TOTAL TESTS EXECUTES : ' || v_test_no);

@@ -775,6 +775,320 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 2 : CREDITS ECHUS NON SOLDES
+    -- =========================================================
+    -- Un credit arrive a maturite doit etre solde, proroge par un
+    -- avenant formalise, ou declasse. Un dossier echu qui conserve un
+    -- solde restant du sans decision documentee traduit un defaut de
+    -- suivi et fausse l'anciennete du risque.
+    -- NB : les tests reposent sur la substance economique (solde restant
+    --      du apres maturite) plutot que sur les codes de statut, dont la
+    --      signification depend du parametrage de l'installation ; le
+    --      statut est affiche en colonne pour permettre le rapprochement.
+    -- =========================================================
+    print_section('2. CREDITS ECHUS NON SOLDES');
+
+    -- 2.1 Dossiers echus conservant un solde restant du
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.CURRENCY,'-') AS ccy,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, r.reste, m.MATURITY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(m.MATURITY_DATE) AS jours_echu,
+                   NVL(m.ACCOUNT_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) AS reste
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) > 0
+            ) r ON r.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.MATURITY_DATE IS NOT NULL
+              AND m.MATURITY_DATE < TRUNC(SYSDATE)
+        ) q
+        ORDER BY q.reste DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+            || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.reste),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || LPAD(fmt_n(d.jours_echu),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,6),8) || '|';
+    END LOOP;
+    print_test('Dossiers echus conservant un solde restant du', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' RESTE DU',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' J.ECHU',9) || '|' || RPAD(' STAT',8) || '|');
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+        flush_lignes;
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+    END IF;
+
+    -- 2.2 Dossiers echus de longue date et toujours non soldes
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, r.reste, m.MATURITY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(m.MATURITY_DATE) AS jours_echu,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st,
+                   NVL(m.STOP_ACCRUALS,'N') AS stop_acc
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) AS reste
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) > 0
+            ) r ON r.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.MATURITY_DATE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(m.MATURITY_DATE) > c_impaye_3
+        ) q
+        ORDER BY q.jours_echu DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.reste),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || LPAD(fmt_n(d.jours_echu),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|'
+            || RPAD(' ' || d.stop_acc,8) || '|';
+    END LOOP;
+    print_test('Dossiers echus depuis plus de ' || c_impaye_3 || ' jours non soldes', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,9,10,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' RESTE DU',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' J.ECHU',9) || '|' || RPAD(' STATUT',10) || '|' || RPAD(' STOP AC',8) || '|');
+        tbl_line('4,12,24,22,17,13,9,10,8');
+        flush_lignes;
+        tbl_line('4,12,24,22,17,13,9,10,8');
+    END IF;
+
+    -- 2.3 Dossiers echus dont la comptabilisation des interets n'est pas
+    --     arretee : les produits continuent d'etre constates sur une
+    --     creance dont le recouvrement n'est plus assure
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, r.reste, m.MATURITY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(m.MATURITY_DATE) AS jours_echu,
+                   m.NEXT_ACCR_DATE, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) AS reste
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) > 0
+            ) r ON r.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.MATURITY_DATE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(m.MATURITY_DATE) > c_impaye_2
+              AND NVL(m.STOP_ACCRUALS,'N') != 'Y'
+        ) q
+        ORDER BY q.reste DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.reste),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || LPAD(fmt_n(d.jours_echu),8) || ' |'
+            || RPAD(' ' || fmt_d(d.NEXT_ACCR_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers echus > ' || c_impaye_2 || ' j sans arret des accruals', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,9,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' RESTE DU',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' J.ECHU',9) || '|' || RPAD(' PROCH. ACCR',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,17,13,9,13,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,17,13,9,13,10');
+    END IF;
+
+    -- 2.4 Echeances programmees au-dela de la date de maturite
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, m.ACCOUNT_NUMBER, m.MATURITY_DATE,
+                   x.derniere_ech, x.nb_apres,
+                   TRUNC(x.derniere_ech) - TRUNC(m.MATURITY_DATE) AS ecart,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, MAX(s.SCHEDULE_DUE_DATE) AS derniere_ech,
+                       COUNT(*) AS nb_apres
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                JOIN CLTB_ACCOUNT_APPS_MASTER m2 ON m2.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER
+                WHERE m2.MATURITY_DATE IS NOT NULL
+                  AND s.SCHEDULE_DUE_DATE > m2.MATURITY_DATE
+                GROUP BY s.ACCOUNT_NUMBER
+            ) x ON x.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            WHERE m.MATURITY_DATE IS NOT NULL
+        ) q
+        ORDER BY q.ecart DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || RPAD(' ' || fmt_d(d.derniere_ech),13) || '|'
+            || LPAD(fmt_n(d.ecart),8) || ' |'
+            || LPAD(fmt_n(d.nb_apres),9) || ' |';
+    END LOOP;
+    print_test('Echeances programmees apres la date de maturite', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,17,13,13,9,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' DOSSIER',22) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' MATURITE',13) || '|' || RPAD(' DERN. ECH.',13) || '|'
+            || RPAD(' ECART(j)',9) || '|' || RPAD(' NB ECH.',10) || '|');
+        tbl_line('4,12,22,17,13,13,9,10');
+        flush_lignes;
+        tbl_line('4,12,22,17,13,13,9,10');
+    END IF;
+
+    -- 2.5 Contrats LD echus conservant un encours principal
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(t.COUNTERPARTY,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   t.CONTRACT_REF_NO, NVL(t.CURRENCY,'-') AS ccy,
+                   NVL(t.AMOUNT,0) AS montant, NVL(b.PRINCIPAL_OUTSTANDING_BAL,0) AS encours,
+                   t.MATURITY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(t.MATURITY_DATE) AS jours_echu,
+                   NVL(t.CONTRACT_STATUS,'-') AS st
+            FROM LDTB_CONTRACT_MASTER t
+            JOIN LDTB_CONTRACT_BALANCE b ON b.CONTRACT_REF_NO = t.CONTRACT_REF_NO
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = t.COUNTERPARTY
+            WHERE t.MATURITY_DATE IS NOT NULL
+              AND t.MATURITY_DATE < TRUNC(SYSDATE)
+              AND NVL(b.PRINCIPAL_OUTSTANDING_BAL,0) > 0
+        ) q
+        ORDER BY q.encours DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.CONTRACT_REF_NO,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+            || LPAD(fmt_m(d.montant),16) || ' |' || LPAD(fmt_m(d.encours),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || LPAD(fmt_n(d.jours_echu),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,6),8) || '|';
+    END LOOP;
+    print_test('Contrats LD echus avec encours principal residuel', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' CONTREPARTIE',24) || '|'
+            || RPAD(' CONTRAT',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' MONTANT',17) || '|' || RPAD(' ENCOURS',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' J.ECHU',9) || '|' || RPAD(' STAT',8) || '|');
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+        flush_lignes;
+        tbl_line('4,12,24,22,5,17,17,13,9,8');
+    END IF;
+
+    -- 2.6 Dossiers dont la cloture attendue est depassee
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, r.reste, m.EXPECTED_CLOSURE_DATE, m.MATURITY_DATE,
+                   TRUNC(SYSDATE) - TRUNC(m.EXPECTED_CLOSURE_DATE) AS retard,
+                   NVL(m.ACCOUNT_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) AS reste
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) > 0
+            ) r ON r.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.EXPECTED_CLOSURE_DATE IS NOT NULL
+              AND m.EXPECTED_CLOSURE_DATE < TRUNC(SYSDATE)
+        ) q
+        ORDER BY q.retard DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.reste),16) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || RPAD(' ' || fmt_d(d.EXPECTED_CLOSURE_DATE),13) || '|'
+            || LPAD(fmt_n(d.retard),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,6),8) || '|';
+    END LOOP;
+    print_test('Dossiers non soldes au-dela de la cloture attendue', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,13,9,8');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' RESTE DU',17) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' CLOTURE ATT.',13) || '|' || RPAD(' RETARD',9) || '|' || RPAD(' STAT',8) || '|');
+        tbl_line('4,12,24,22,17,13,13,9,8');
+        flush_lignes;
+        tbl_line('4,12,24,22,17,13,13,9,8');
+    END IF;
+
+    -- 2.7 Dossiers sans date de maturite renseignee
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.MATURITY_DATE IS NULL;
+    print_test('Dossiers sans date de maturite', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' DATE VALEUR',13) || '|' || RPAD(' BOOK DATE',13) || '|'
+            || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.CURRENCY,'-') AS ccy,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.VALUE_DATE, m.BOOK_DATE,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.MATURITY_DATE IS NULL
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|' || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,17,13,13,10');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

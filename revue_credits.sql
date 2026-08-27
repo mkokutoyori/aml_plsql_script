@@ -132,6 +132,10 @@ DECLARE
     -- Ecart tolere entre montant finance et montant decaisse
     c_tol_decaiss       CONSTANT NUMBER := 1;             -- 1 unite de devise
 
+    -- Categories clients sensibles (STTM_CUSTOMER.CUSTOMER_CATEGORY)
+    c_cat_staff         CONSTANT VARCHAR2(20) := 'STAF';  -- personnel
+    c_cat_pep           CONSTANT VARCHAR2(20) := 'PEP';   -- utilise avec LIKE
+
     -- Affiche le temps d'execution de la section qui vient de s'achever
     PROCEDURE print_temps IS
     BEGIN
@@ -3074,6 +3078,287 @@ BEGIN
         tbl_line('4,12,24,22,20,20,11,8,10');
         flush_lignes;
         tbl_line('4,12,24,22,20,20,11,8,10');
+    END IF;
+
+    -- =========================================================
+    -- SECTION 10 : CREDITS AU PERSONNEL ET PARTIES LIEES
+    -- =========================================================
+    -- Les concours aux dirigeants, au personnel et aux parties liees
+    -- font l'objet d'un encadrement specifique : plafonds, information
+    -- des organes sociaux et interdiction pour le beneficiaire de
+    -- participer a la decision. Le rattachement d'un utilisateur a un
+    -- client (SMTB_USER.CUSTOMER_NO) permet de detecter les dossiers
+    -- initiés ou valides par leur propre beneficiaire.
+    -- =========================================================
+    print_section('10. CREDITS AU PERSONNEL ET PARTIES LIEES');
+
+    -- 10.1 Credits identifies comme credits au personnel
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.STAFF_FINANCE,'N') = 'Y';
+    print_test('Credits au personnel (STAFF_FINANCE = Y)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,19,13,10,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' DECAISSE',19) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' CATEGORIE',10) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,19,13,10,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.MATURITY_DATE, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.STAFF_FINANCE,'N') = 'Y'
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.decaisse),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.cat,1,8),10) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,19,13,10,10');
+    END IF;
+
+    -- 10.2 Credits accordes a des clients de la categorie personnel mais
+    --      non marques comme credits au personnel
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+    WHERE c.CUSTOMER_CATEGORY = c_cat_staff
+      AND NVL(m.STAFF_FINANCE,'N') != 'Y';
+    print_test('Credits a des clients categorie ' || c_cat_staff || ' non marques', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,19,13,8,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' DECAISSE',19) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' STAFF',8) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,19,13,8,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.MATURITY_DATE, NVL(m.STAFF_FINANCE,'-') AS staff,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE c.CUSTOMER_CATEGORY = c_cat_staff
+              AND NVL(m.STAFF_FINANCE,'N') != 'Y'
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.decaisse),18) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || d.staff,8) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,19,13,8,10');
+    END IF;
+
+    -- 10.3 Dossiers inities par leur propre beneficiaire
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE EXISTS (SELECT 1 FROM SMTB_USER u
+                  WHERE u.USER_ID = m.MAKER_ID
+                    AND u.CUSTOMER_NO = m.CUSTOMER_ID);
+    print_test('Dossiers inities par leur propre beneficiaire', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,16,16,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' MAKER',16) || '|'
+            || RPAD(' CHECKER',16) || '|' || RPAD(' OCTROYE LE',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,16,16,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.MAKER_ID,'-') AS maker,
+                   NVL(m.CHECKER_ID,'-') AS checker, m.BOOK_DATE,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE EXISTS (SELECT 1 FROM SMTB_USER u
+                          WHERE u.USER_ID = m.MAKER_ID
+                            AND u.CUSTOMER_NO = m.CUSTOMER_ID)
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,16,16,13,10');
+    END IF;
+
+    -- 10.4 Dossiers valides par leur propre beneficiaire
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE EXISTS (SELECT 1 FROM SMTB_USER u
+                  WHERE u.USER_ID = m.CHECKER_ID
+                    AND u.CUSTOMER_NO = m.CUSTOMER_ID);
+    print_test('Dossiers valides par leur propre beneficiaire', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,16,16,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' MAKER',16) || '|'
+            || RPAD(' CHECKER',16) || '|' || RPAD(' VALIDE LE',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,16,16,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.MAKER_ID,'-') AS maker,
+                   NVL(m.CHECKER_ID,'-') AS checker, m.CHECKER_DT_STAMP,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE EXISTS (SELECT 1 FROM SMTB_USER u
+                          WHERE u.USER_ID = m.CHECKER_ID
+                            AND u.CUSTOMER_NO = m.CUSTOMER_ID)
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),18) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,19,16,16,13,10');
+    END IF;
+
+    -- 10.5 Credits au personnel en impaye
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   i.impaye, i.anciennete, NVL(c.CUSTOMER_CATEGORY,'-') AS cat,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.STAFF_FINANCE,'N') = 'Y'
+               OR c.CUSTOMER_CATEGORY = c_cat_staff
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),19) || ' |' || LPAD(fmt_m(d.impaye),19) || ' |'
+            || LPAD(fmt_n(d.anciennete),10) || ' |'
+            || RPAD(' ' || SUBSTR(d.cat,1,8),10) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Credits au personnel en impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,20,20,11,10,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',20) || '|' || RPAD(' IMPAYE',20) || '|'
+            || RPAD(' JOURS',11) || '|' || RPAD(' CATEGORIE',10) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,20,20,11,10,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,20,20,11,10,10');
+    END IF;
+
+    -- 10.6 Credits au personnel ayant beneficie d'un abandon
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   w.abandonne, w.perte, NVL(c.CUSTOMER_CATEGORY,'-') AS cat
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_WAIVED,0)) AS abandonne,
+                       SUM(NVL(s.WRITEOFF_AMT,0)) AS perte
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_WAIVED,0) > 0 OR NVL(s.WRITEOFF_AMT,0) > 0
+                GROUP BY s.ACCOUNT_NUMBER
+            ) w ON w.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.STAFF_FINANCE,'N') = 'Y'
+               OR c.CUSTOMER_CATEGORY = c_cat_staff
+        ) q
+        ORDER BY q.abandonne + q.perte DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),20) || ' |' || LPAD(fmt_m(d.abandonne),20) || ' |'
+            || LPAD(fmt_m(d.perte),20) || ' |'
+            || RPAD(' ' || SUBSTR(d.cat,1,8),10) || '|';
+    END LOOP;
+    print_test('Credits au personnel avec abandon ou passage en perte', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,21,21,21,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',21) || '|' || RPAD(' ABANDONNE',21) || '|'
+            || RPAD(' PASSE EN PERTE',21) || '|' || RPAD(' CATEGORIE',10) || '|');
+        tbl_line('4,12,24,22,21,21,21,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,21,21,21,10');
+    END IF;
+
+    -- 10.7 Credits accordes a des clients politiquement exposes
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+    WHERE c.CUSTOMER_CATEGORY LIKE c_cat_pep || '%';
+    print_test('Credits a des clients categorie ' || c_cat_pep || '%', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,20,20,13,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',20) || '|' || RPAD(' DECAISSE',20) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' CATEGORIE',12) || '|');
+        tbl_line('4,12,24,22,20,20,13,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.MATURITY_DATE, NVL(c.CUSTOMER_CATEGORY,'-') AS cat
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE c.CUSTOMER_CATEGORY LIKE c_cat_pep || '%'
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),19) || ' |' || LPAD(fmt_m(d.decaisse),19) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.cat,1,10),12) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,20,20,13,12');
     END IF;
 
     -- =========================================================

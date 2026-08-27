@@ -2576,6 +2576,236 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 8 : CREDITS PROCHES OU SUPERIEURS AUX SEUILS
+    --             D'APPROBATION
+    -- =========================================================
+    -- Les montants qui se logent juste sous un palier de delegation
+    -- (bande c_pct_proche, par defaut 90 %) sont un indicateur classique
+    -- de contournement du niveau d'approbation requis. Le fractionnement
+    -- d'un besoin en plusieurs concours produit le meme effet.
+    -- NB : les montants sont exprimes dans la devise du dossier ; la
+    --      colonne CCY permet d'ecarter les comparaisons non pertinentes.
+    -- =========================================================
+    print_section('8. CREDITS PROCHES OU SUPERIEURS AUX SEUILS D''APPROBATION');
+
+    -- Ventilation des credits par palier de delegation (informatif)
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Ventilation des credits par palier de delegation]');
+    FOR d IN (SELECT palier, COUNT(*) AS nb, NVL(SUM(mnt),0) AS total
+              FROM (SELECT CASE
+                             WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_4 THEN '5. >= seuil 4'
+                             WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_3 THEN '4. seuil 3 a seuil 4'
+                             WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_2 THEN '3. seuil 2 a seuil 3'
+                             WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_1 THEN '2. seuil 1 a seuil 2'
+                             ELSE '1. < seuil 1'
+                           END AS palier,
+                           NVL(m.AMOUNT_FINANCED,0) AS mnt
+                    FROM CLTB_ACCOUNT_APPS_MASTER m)
+              GROUP BY palier
+              ORDER BY palier) LOOP
+        print_info(d.palier, fmt_n(d.nb) || ' dossier(s) — ' || fmt_m(d.total));
+    END LOOP;
+
+    -- 8.1 Financements loges juste en dessous d'un seuil
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT cif, nom, compte, ccy, mnt, seuil,
+                   ROUND(mnt * 100 / seuil, 1) AS pct, book_date, maker
+            FROM (
+                SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                       m.ACCOUNT_NUMBER AS compte, NVL(m.CURRENCY,'-') AS ccy,
+                       NVL(m.AMOUNT_FINANCED,0) AS mnt, m.BOOK_DATE AS book_date,
+                       NVL(m.MAKER_ID,'-') AS maker,
+                       CASE
+                         WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_4 * c_pct_proche / 100
+                              AND NVL(m.AMOUNT_FINANCED,0) < c_seuil_4 THEN c_seuil_4
+                         WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_3 * c_pct_proche / 100
+                              AND NVL(m.AMOUNT_FINANCED,0) < c_seuil_3 THEN c_seuil_3
+                         WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_2 * c_pct_proche / 100
+                              AND NVL(m.AMOUNT_FINANCED,0) < c_seuil_2 THEN c_seuil_2
+                         WHEN NVL(m.AMOUNT_FINANCED,0) >= c_seuil_1 * c_pct_proche / 100
+                              AND NVL(m.AMOUNT_FINANCED,0) < c_seuil_1 THEN c_seuil_1
+                       END AS seuil
+                FROM CLTB_ACCOUNT_APPS_MASTER m
+                LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            )
+            WHERE seuil IS NOT NULL
+        ) q
+        ORDER BY q.mnt DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.compte,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+            || LPAD(fmt_m(d.mnt),18) || ' |' || LPAD(fmt_m(d.seuil),18) || ' |'
+            || LPAD(TO_CHAR(d.pct,'FM990D0') || ' %',9) || ' |'
+            || RPAD(' ' || fmt_d(d.book_date),13) || '|'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|';
+    END LOOP;
+    print_test('Financements loges juste sous un seuil (bande ' || c_pct_proche || ' %)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,22,5,19,19,10,13,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',19) || '|' || RPAD(' SEUIL VISE',19) || '|' || RPAD(' % SEUIL',10) || '|'
+            || RPAD(' OCTROYE LE',13) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,22,22,5,19,19,10,13,16');
+        flush_lignes;
+        tbl_line('4,12,22,22,5,19,19,10,13,16');
+    END IF;
+
+    -- 8.2 Credits atteignant le seuil du comite de credit
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.CURRENCY,'-') AS ccy,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.BOOK_DATE, NVL(m.CHECKER_ID,'-') AS checker,
+                   NVL(m.SANCTIONING_OFFICER,'-') AS officier
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_FINANCED,0) >= c_seuil_3
+        ) q
+        ORDER BY q.finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.decaisse),18) || ' |'
+            || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|'
+            || RPAD(' ' || SUBSTR(d.officier,1,14),16) || '|';
+    END LOOP;
+    print_test('Credits >= seuil 3 (' || fmt_m(c_seuil_3) || ') a rapprocher des PV', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,22,22,5,19,19,13,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',19) || '|' || RPAD(' DECAISSE',19) || '|' || RPAD(' OCTROYE LE',13) || '|'
+            || RPAD(' CHECKER',16) || '|' || RPAD(' AGENT OCTROI',16) || '|');
+        tbl_line('4,12,22,22,5,19,19,13,16,16');
+        flush_lignes;
+        tbl_line('4,12,22,22,5,19,19,13,16,16');
+    END IF;
+
+    -- 8.3 Cumul de credits franchissant un seuil alors que chaque
+    --     dossier pris isolement reste en dessous (fractionnement)
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT m.CUSTOMER_ID AS cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   COUNT(*) AS nb_credits, SUM(NVL(m.AMOUNT_FINANCED,0)) AS cumul,
+                   MAX(NVL(m.AMOUNT_FINANCED,0)) AS plus_gros,
+                   MIN(m.BOOK_DATE) AS premier, MAX(m.BOOK_DATE) AS dernier
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.CUSTOMER_ID IS NOT NULL
+            GROUP BY m.CUSTOMER_ID
+            HAVING COUNT(*) > 1
+               AND SUM(NVL(m.AMOUNT_FINANCED,0)) >= c_seuil_2
+               AND MAX(NVL(m.AMOUNT_FINANCED,0)) < c_seuil_2
+        ) q
+        ORDER BY q.cumul DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || LPAD(fmt_n(d.nb_credits),10) || ' |'
+            || LPAD(fmt_m(d.cumul),19) || ' |' || LPAD(fmt_m(d.plus_gros),19) || ' |'
+            || LPAD(fmt_m(c_seuil_2),19) || ' |'
+            || RPAD(' ' || fmt_d(d.premier),13) || '|' || RPAD(' ' || fmt_d(d.dernier),13) || '|';
+    END LOOP;
+    print_test('Cumul de credits >= seuil 2 avec chaque dossier en dessous', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,11,20,20,20,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' NB CREDITS',11) || '|' || RPAD(' CUMUL FINANCE',20) || '|' || RPAD(' + GROS DOSSIER',20) || '|'
+            || RPAD(' SEUIL 2',20) || '|' || RPAD(' PREMIER',13) || '|' || RPAD(' DERNIER',13) || '|');
+        tbl_line('4,12,26,11,20,20,20,13,13');
+        flush_lignes;
+        tbl_line('4,12,26,11,20,20,20,13,13');
+    END IF;
+
+    -- 8.4 Credits multiples accordes au meme client le MEME jour
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT m.CUSTOMER_ID AS cif, NVL(MAX(c.CUSTOMER_NAME1),'-') AS nom,
+                   m.BOOK_DATE, COUNT(*) AS nb_credits,
+                   SUM(NVL(m.AMOUNT_FINANCED,0)) AS cumul,
+                   MAX(NVL(m.AMOUNT_FINANCED,0)) AS plus_gros,
+                   COUNT(DISTINCT m.PRODUCT_CODE) AS nb_produits,
+                   NVL(MAX(m.MAKER_ID),'-') AS maker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.CUSTOMER_ID IS NOT NULL AND m.BOOK_DATE IS NOT NULL
+            GROUP BY m.CUSTOMER_ID, m.BOOK_DATE
+            HAVING COUNT(*) > 1
+        ) q
+        ORDER BY q.cumul DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,24),26) || '|'
+            || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+            || LPAD(fmt_n(d.nb_credits),10) || ' |'
+            || LPAD(fmt_m(d.cumul),19) || ' |' || LPAD(fmt_m(d.plus_gros),19) || ' |'
+            || LPAD(fmt_n(d.nb_produits),8) || ' |'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|';
+    END LOOP;
+    print_test('Credits multiples accordes le meme jour au meme client', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,26,13,11,20,20,9,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',26) || '|'
+            || RPAD(' OCTROYE LE',13) || '|' || RPAD(' NB CREDITS',11) || '|' || RPAD(' CUMUL FINANCE',20) || '|'
+            || RPAD(' + GROS DOSSIER',20) || '|' || RPAD(' NB PRD',9) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,26,13,11,20,20,9,16');
+        flush_lignes;
+        tbl_line('4,12,26,13,11,20,20,9,16');
+    END IF;
+
+    -- 8.5 Contrats LD atteignant le seuil du comite de credit
+    SELECT COUNT(*) INTO v_count
+    FROM LDTB_CONTRACT_MASTER t
+    WHERE NVL(t.LCY_AMOUNT,0) >= c_seuil_3;
+    print_test('Contrats LD >= seuil 3 (' || fmt_m(c_seuil_3) || ')', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,20,20,13,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' CONTREPARTIE',24) || '|'
+            || RPAD(' CONTRAT',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' MONTANT',20) || '|' || RPAD(' ENCOURS',20) || '|' || RPAD(' DEBUT',13) || '|'
+            || RPAD(' MATURITE',13) || '|');
+        tbl_line('4,12,24,22,5,20,20,13,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(t.COUNTERPARTY,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   t.CONTRACT_REF_NO, NVL(t.CURRENCY,'-') AS ccy, NVL(t.LCY_AMOUNT,0) AS montant,
+                   NVL(b.PRINCIPAL_OUTSTANDING_BAL,0) AS encours,
+                   t.VALUE_DATE, t.MATURITY_DATE
+            FROM LDTB_CONTRACT_MASTER t
+            LEFT JOIN LDTB_CONTRACT_BALANCE b ON b.CONTRACT_REF_NO = t.CONTRACT_REF_NO
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = t.COUNTERPARTY
+            WHERE NVL(t.LCY_AMOUNT,0) >= c_seuil_3
+            ORDER BY NVL(t.LCY_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.CONTRACT_REF_NO,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.montant),19) || ' |' || LPAD(fmt_m(d.encours),19) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|' || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,20,20,13,13');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

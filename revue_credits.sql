@@ -2285,6 +2285,297 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 7 : ABANDONS DE CREANCES — WAIVERS, PENALITES,
+    --             PASSAGES EN PERTE
+    -- =========================================================
+    -- Un abandon de creance est une perte definitive : il doit relever
+    -- d'une decision expresse, au niveau de delegation requis, et etre
+    -- distingue de la simple non-application des penalites, qui prive la
+    -- banque d'un produit sans decision formalisee.
+    -- =========================================================
+    print_section('7. ABANDONS DE CREANCES — WAIVERS, PENALITES, PERTES');
+
+    -- 7.1 Dossiers ayant beneficie d'un abandon d'echeance
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   w.ACCOUNT_NUMBER, w.nb_ech, w.abandonne, w.derniere,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT s.ACCOUNT_NUMBER, COUNT(*) AS nb_ech,
+                       SUM(NVL(s.AMOUNT_WAIVED,0)) AS abandonne,
+                       MAX(s.SCHEDULE_DUE_DATE) AS derniere
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_WAIVED,0) > 0
+                GROUP BY s.ACCOUNT_NUMBER
+            ) w
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = w.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+        ) q
+        ORDER BY q.abandonne DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.nb_ech),9) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.abandonne),18) || ' |'
+            || RPAD(' ' || fmt_d(d.derniere),13) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers avec abandon d''echeance (AMOUNT_WAIVED)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,10,19,19,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' NB ECH.',10) || '|' || RPAD(' FINANCE',19) || '|'
+            || RPAD(' ABANDONNE',19) || '|' || RPAD(' DERNIERE',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,10,19,19,13,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,10,19,19,13,10');
+    END IF;
+
+    -- 7.2 Passages en perte enregistres sur l'echeancier
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   w.ACCOUNT_NUMBER, w.nb_ech, w.perte,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   ROUND(w.perte * 100 / NULLIF(m.AMOUNT_FINANCED,0), 1) AS pct,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT s.ACCOUNT_NUMBER, COUNT(*) AS nb_ech,
+                       SUM(NVL(s.WRITEOFF_AMT,0)) AS perte
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.WRITEOFF_AMT,0) > 0
+                GROUP BY s.ACCOUNT_NUMBER
+            ) w
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = w.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+        ) q
+        ORDER BY q.perte DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_n(d.nb_ech),9) || ' |'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.perte),18) || ' |'
+            || LPAD(TO_CHAR(NVL(d.pct,0),'FM9990D0') || ' %',9) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Dossiers avec passage en perte (WRITEOFF_AMT)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,10,19,19,10,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' NB ECH.',10) || '|' || RPAD(' FINANCE',19) || '|'
+            || RPAD(' PASSE EN PERTE',19) || '|' || RPAD(' % FIN.',10) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,10,19,19,10,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,10,19,19,10,10');
+    END IF;
+
+    -- 7.3 Composantes integralement exonerees au niveau du dossier
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   k.ACCOUNT_NUMBER, k.COMPONENT_NAME, NVL(k.COMPONENT_TYPE,'-') AS typ,
+                   NVL(k.MAIN_COMPONENT,'N') AS principal,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_COMPONENTS k
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = k.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(k.WAIVE,'N') = 'Y'
+        ) q
+        ORDER BY q.finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.COMPONENT_NAME,1,16),18) || '|'
+            || RPAD(' ' || SUBSTR(d.typ,1,8),10) || '|'
+            || RPAD(' ' || d.principal,7) || '|'
+            || LPAD(fmt_m(d.finance),18) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Composantes exonerees au niveau du dossier (WAIVE = Y)', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,18,10,7,19,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' COMPOSANTE',18) || '|' || RPAD(' TYPE',10) || '|'
+            || RPAD(' PRINC.',7) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,18,10,7,19,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,18,10,7,19,10');
+    END IF;
+
+    -- 7.4 Abandons significatifs, detail par echeance
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT s.ACCOUNT_NUMBER, s.COMPONENT_NAME, s.SCHEDULE_DUE_DATE,
+                   NVL(s.AMOUNT_DUE,0) AS du, NVL(s.AMOUNT_SETTLED,0) AS regle,
+                   NVL(s.AMOUNT_WAIVED,0) AS abandonne, NVL(s.WRITEOFF_AMT,0) AS perte,
+                   NVL(s.WAIVER_FLAG,'-') AS flag
+            FROM CLTB_ACCOUNT_SCHEDULES s
+            WHERE NVL(s.AMOUNT_WAIVED,0) >= c_mnt_waiver
+               OR NVL(s.WRITEOFF_AMT,0) >= c_mnt_waiver
+        ) q
+        ORDER BY q.abandonne + q.perte DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.COMPONENT_NAME,1,16),18) || '|'
+            || RPAD(' ' || fmt_d(d.SCHEDULE_DUE_DATE),13) || '|'
+            || LPAD(fmt_m(d.du),18) || ' |' || LPAD(fmt_m(d.regle),18) || ' |'
+            || LPAD(fmt_m(d.abandonne),18) || ' |' || LPAD(fmt_m(d.perte),18) || ' |'
+            || RPAD(' ' || d.flag,7) || '|';
+    END LOOP;
+    print_test('Abandons ou pertes unitaires >= ' || fmt_m(c_mnt_waiver), v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,22,18,13,19,19,19,19,7');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' DOSSIER',22) || '|' || RPAD(' COMPOSANTE',18) || '|'
+            || RPAD(' ECHEANCE',13) || '|' || RPAD(' DU',19) || '|' || RPAD(' REGLE',19) || '|'
+            || RPAD(' ABANDONNE',19) || '|' || RPAD(' PERTE',19) || '|' || RPAD(' FLAG',7) || '|');
+        tbl_line('4,22,18,13,19,19,19,19,7');
+        flush_lignes;
+        tbl_line('4,22,18,13,19,19,19,19,7');
+    END IF;
+
+    -- 7.5 Abandons consentis sur des dossiers sans impaye : remise
+    --     commerciale non justifiee par une difficulte de recouvrement
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   w.ACCOUNT_NUMBER, w.abandonne, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   m.MATURITY_DATE, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_WAIVED,0)) AS abandonne
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_WAIVED,0) > 0
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING SUM(NVL(s.AMOUNT_WAIVED,0)) >= c_mnt_waiver
+            ) w
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = w.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_SCHEDULES s2
+                              WHERE s2.ACCOUNT_NUMBER = w.ACCOUNT_NUMBER
+                                AND NVL(s2.AMOUNT_OVERDUE,0) > 0)
+        ) q
+        ORDER BY q.abandonne DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.abandonne),18) || ' |'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Abandons sur dossiers sans aucun impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,19,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' ABANDONNE',19) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,19,13,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,19,19,13,10');
+    END IF;
+
+    -- 7.6 Ristournes accordees a l'occasion des remboursements
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   l.ACCOUNT_NUMBER, l.VALUE_DATE,
+                   NVL(l.CUST_INCENTIVE,0) AS ristourne, NVL(l.AMOUNT_EXCESS,0) AS excedent,
+                   NVL(l.MAKER_ID,'-') AS maker, NVL(l.CHECKER_ID,'-') AS checker
+            FROM CLTB_LIQ l
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = l.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(l.CUST_INCENTIVE,0) > 0
+        ) q
+        ORDER BY q.ristourne DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+            || LPAD(fmt_m(d.ristourne),18) || ' |' || LPAD(fmt_m(d.excedent),18) || ' |'
+            || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+            || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|';
+    END LOOP;
+    print_test('Ristournes accordees lors des remboursements', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,13,19,19,16,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' OPERATION LE',13) || '|' || RPAD(' RISTOURNE',19) || '|'
+            || RPAD(' EXCEDENT',19) || '|' || RPAD(' MAKER',16) || '|' || RPAD(' CHECKER',16) || '|');
+        tbl_line('4,12,24,22,13,19,19,16,16');
+        flush_lignes;
+        tbl_line('4,12,24,22,13,19,19,16,16');
+    END IF;
+
+    -- 7.7 Dossiers en impaye ancien sans dispositif de penalites :
+    --     aucune composante du dossier n'est adossee a une base de calcul
+    --     de penalites, la banque ne facture donc aucun retard
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   i.ACCOUNT_NUMBER, i.impaye, i.anciennete,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) > c_impaye_2
+            ) i
+            LEFT JOIN CLTB_ACCOUNT_APPS_MASTER m ON m.ACCOUNT_NUMBER = i.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_COMPONENTS k2
+                              WHERE k2.ACCOUNT_NUMBER = i.ACCOUNT_NUMBER
+                                AND k2.PENAL_BASIS_COMP IS NOT NULL)
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),18) || ' |' || LPAD(fmt_m(d.impaye),18) || ' |'
+            || LPAD(fmt_n(d.anciennete),9) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|';
+    END LOOP;
+    print_test('Impayes > ' || c_impaye_2 || ' j sans dispositif de penalites', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,19,19,10,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',19) || '|' || RPAD(' IMPAYE',19) || '|'
+            || RPAD(' JOURS',10) || '|' || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,19,19,10,10');
+        flush_lignes;
+        tbl_line('4,12,24,22,19,19,10,10');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

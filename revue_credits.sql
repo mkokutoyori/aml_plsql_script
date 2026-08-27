@@ -1368,6 +1368,322 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 4 : ANOMALIES DE DECAISSEMENT
+    -- =========================================================
+    -- Le decaissement est l'acte par lequel le risque se materialise :
+    -- il doit etre posterieur a l'approbation, limite au montant accorde,
+    -- adosse a un echeancier et conforme aux blocages en vigueur.
+    -- =========================================================
+    print_section('4. ANOMALIES DE DECAISSEMENT');
+
+    -- 4.1 Montant decaisse superieur au montant finance
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_DISBURSED,0) > NVL(m.AMOUNT_FINANCED,0) + c_tol_decaiss;
+    print_test('Decaissement superieur au montant finance', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,17,17,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|' || RPAD(' ECART',17) || '|'
+            || RPAD(' DATE VALEUR',13) || '|');
+        tbl_line('4,12,24,22,5,17,17,17,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.CURRENCY,'-') AS ccy, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   NVL(m.AMOUNT_DISBURSED,0) - NVL(m.AMOUNT_FINANCED,0) AS ecart, m.VALUE_DATE
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_DISBURSED,0) > NVL(m.AMOUNT_FINANCED,0) + c_tol_decaiss
+            ORDER BY NVL(m.AMOUNT_DISBURSED,0) - NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || LPAD(fmt_m(d.ecart),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,17,17,17,13');
+    END IF;
+
+    -- 4.2 Dossiers accordes mais jamais decaisses
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+      AND NVL(m.AMOUNT_DISBURSED,0) = 0;
+    print_test('Dossiers accordes mais jamais decaisses', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' FINANCE',17) || '|' || RPAD(' BOOK DATE',13) || '|' || RPAD(' ANCIENNETE',13) || '|'
+            || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.CURRENCY,'-') AS ccy, NVL(m.AMOUNT_FINANCED,0) AS finance, m.BOOK_DATE,
+                   TRUNC(SYSDATE) - TRUNC(m.BOOK_DATE) AS anciennete,
+                   NVL(m.ACCOUNT_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+              AND NVL(m.AMOUNT_DISBURSED,0) = 0
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+                || LPAD(fmt_n(d.anciennete) || ' j',12) || ' |'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,17,13,13,10');
+    END IF;
+
+    -- 4.3 Decaissements partiels anciens : une part du concours accorde
+    --     reste immobilisee sans decision de renonciation
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_DISBURSED,0) > 0
+      AND NVL(m.AMOUNT_DISBURSED,0) < NVL(m.AMOUNT_FINANCED,0) - c_tol_decaiss
+      AND m.BOOK_DATE IS NOT NULL
+      AND TRUNC(SYSDATE) - TRUNC(m.BOOK_DATE) > c_impaye_3;
+    print_test('Decaissements partiels de plus de ' || c_impaye_3 || ' jours', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,17,17,10,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|'
+            || RPAD(' RESTE A DEC.',17) || '|' || RPAD(' % DEC.',10) || '|' || RPAD(' BOOK DATE',13) || '|');
+        tbl_line('4,12,24,22,17,17,17,10,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   NVL(m.AMOUNT_FINANCED,0) - NVL(m.AMOUNT_DISBURSED,0) AS reste,
+                   ROUND(NVL(m.AMOUNT_DISBURSED,0) * 100 / NULLIF(m.AMOUNT_FINANCED,0), 1) AS pct,
+                   m.BOOK_DATE
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_DISBURSED,0) > 0
+              AND NVL(m.AMOUNT_DISBURSED,0) < NVL(m.AMOUNT_FINANCED,0) - c_tol_decaiss
+              AND m.BOOK_DATE IS NOT NULL
+              AND TRUNC(SYSDATE) - TRUNC(m.BOOK_DATE) > c_impaye_3
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) - NVL(m.AMOUNT_DISBURSED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || LPAD(fmt_m(d.reste),16) || ' |'
+                || LPAD(TO_CHAR(NVL(d.pct,0),'FM990D0') || ' %',9) || ' |'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,17,17,10,13');
+    END IF;
+
+    -- 4.4 Credits prenant effet AVANT leur validation
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.VALUE_DATE IS NOT NULL AND m.CHECKER_DT_STAMP IS NOT NULL
+      AND m.VALUE_DATE < TRUNC(m.CHECKER_DT_STAMP);
+    print_test('Credits prenant effet avant leur validation', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,13,9,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DATE VALEUR',13) || '|'
+            || RPAD(' VALIDE LE',13) || '|' || RPAD(' ECART',9) || '|' || RPAD(' CHECKER',16) || '|');
+        tbl_line('4,12,24,22,17,13,13,9,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.VALUE_DATE, m.CHECKER_DT_STAMP,
+                   TRUNC(m.CHECKER_DT_STAMP) - TRUNC(m.VALUE_DATE) AS ecart,
+                   NVL(m.CHECKER_ID,'-') AS checker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.VALUE_DATE IS NOT NULL AND m.CHECKER_DT_STAMP IS NOT NULL
+              AND m.VALUE_DATE < TRUNC(m.CHECKER_DT_STAMP)
+            ORDER BY TRUNC(m.CHECKER_DT_STAMP) - TRUNC(m.VALUE_DATE) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.CHECKER_DT_STAMP),13) || '|'
+                || LPAD(fmt_n(d.ecart) || ' j',8) || ' |'
+                || RPAD(' ' || SUBSTR(d.checker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,13,13,9,16');
+    END IF;
+
+    -- 4.5 Credits a date de valeur retroactive par rapport a la saisie
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.VALUE_DATE IS NOT NULL AND m.BOOK_DATE IS NOT NULL
+      AND m.VALUE_DATE < m.BOOK_DATE;
+    print_test('Credits a date de valeur anterieure a la saisie', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,13,13,9,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DATE VALEUR',13) || '|'
+            || RPAD(' BOOK DATE',13) || '|' || RPAD(' RETRO',9) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,24,22,17,13,13,9,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.VALUE_DATE, m.BOOK_DATE,
+                   TRUNC(m.BOOK_DATE) - TRUNC(m.VALUE_DATE) AS retro,
+                   NVL(m.MAKER_ID,'-') AS maker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.VALUE_DATE IS NOT NULL AND m.BOOK_DATE IS NOT NULL
+              AND m.VALUE_DATE < m.BOOK_DATE
+            ORDER BY TRUNC(m.BOOK_DATE) - TRUNC(m.VALUE_DATE) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+                || RPAD(' ' || fmt_d(d.BOOK_DATE),13) || '|'
+                || LPAD(fmt_n(d.retro) || ' j',8) || ' |'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,13,13,9,16');
+    END IF;
+
+    -- 4.6 Dossiers decaisses sans echeancier : aucun plan de remboursement
+    --     n'encadre le recouvrement
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_DISBURSED,0) > 0
+      AND NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_SCHEDULES s
+                      WHERE s.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER);
+    print_test('Dossiers decaisses sans echeancier', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' CCY',5) || '|'
+            || RPAD(' DECAISSE',17) || '|' || RPAD(' DATE VALEUR',13) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' STATUT',10) || '|');
+        tbl_line('4,12,24,22,5,17,13,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.CURRENCY,'-') AS ccy, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.VALUE_DATE, m.MATURITY_DATE, NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_DISBURSED,0) > 0
+              AND NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_SCHEDULES s
+                              WHERE s.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER)
+            ORDER BY NVL(m.AMOUNT_DISBURSED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|' || RPAD(' ' || d.ccy,5) || '|'
+                || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|' || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.st,1,8),10) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,5,17,13,13,10');
+    END IF;
+
+    -- 4.7 Dossiers portant un blocage de decaissement pourtant decaisses
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.STOP_DSBR,'N') = 'Y'
+      AND NVL(m.AMOUNT_DISBURSED,0) > 0;
+    print_test('Dossiers decaisses malgre un blocage de decaissement', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,17,17,13,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',17) || '|' || RPAD(' DECAISSE',17) || '|'
+            || RPAD(' DATE VALEUR',13) || '|' || RPAD(' MAKER',16) || '|' || RPAD(' MODIFIE LE',13) || '|');
+        tbl_line('4,12,24,22,17,17,13,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   m.VALUE_DATE, NVL(m.MAKER_ID,'-') AS maker, m.MAKER_DT_STAMP
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.STOP_DSBR,'N') = 'Y'
+              AND NVL(m.AMOUNT_DISBURSED,0) > 0
+            ORDER BY NVL(m.AMOUNT_DISBURSED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MAKER_DT_STAMP),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,17,17,13,16,13');
+    END IF;
+
+    -- 4.8 Decaissement superieur a la limite de la ligne rattachee
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.LINE_ID IS NOT NULL AND TRIM(m.LINE_ID) IS NOT NULL
+      AND NVL(m.AMOUNT_DISBURSED,0) >
+          NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+               WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID),0)
+      AND EXISTS (SELECT 1 FROM GETM_FACILITY f
+                  WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID);
+    print_test('Decaissement superieur a la limite de la ligne rattachee', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,16,17,17,17');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' LIGNE',16) || '|'
+            || RPAD(' LIMITE LIGNE',17) || '|' || RPAD(' DECAISSE',17) || '|' || RPAD(' DEPASSEMENT',17) || '|');
+        tbl_line('4,12,24,22,16,17,17,17');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   m.LINE_ID,
+                   NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                        WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID),0) AS limite,
+                   NVL(m.AMOUNT_DISBURSED,0) AS decaisse,
+                   NVL(m.AMOUNT_DISBURSED,0)
+                   - NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                          WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID),0) AS depass
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.LINE_ID IS NOT NULL AND TRIM(m.LINE_ID) IS NOT NULL
+              AND NVL(m.AMOUNT_DISBURSED,0) >
+                  NVL((SELECT MAX(f.LIMIT_AMOUNT) FROM GETM_FACILITY f
+                       WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID),0)
+              AND EXISTS (SELECT 1 FROM GETM_FACILITY f
+                          WHERE f.LINE_CODE = m.LINE_ID OR TO_CHAR(f.ID) = m.LINE_ID)
+            ORDER BY depass DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || RPAD(' ' || SUBSTR(d.LINE_ID,1,14),16) || '|'
+                || LPAD(fmt_m(d.limite),16) || ' |' || LPAD(fmt_m(d.decaisse),16) || ' |'
+                || LPAD(fmt_m(d.depass),16) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,22,16,17,17,17');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

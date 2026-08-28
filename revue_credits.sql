@@ -3712,6 +3712,323 @@ BEGIN
     END IF;
 
     -- =========================================================
+    -- SECTION 12 : ANOMALIES DE PARAMETRAGE ET DE DONNEES
+    -- =========================================================
+    -- Les incoherences de dates, d'echeanciers et de composantes
+    -- faussent le calcul des interets, l'anciennete d'impaye et le
+    -- declassement : elles invalident les controles amont et doivent
+    -- etre corrigees avant toute exploitation des resultats.
+    -- =========================================================
+    print_section('12. ANOMALIES DE PARAMETRAGE ET DE DONNEES');
+
+    -- 12.1 Date de maturite anterieure ou egale a la date de valeur
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.VALUE_DATE IS NOT NULL AND m.MATURITY_DATE IS NOT NULL
+      AND m.MATURITY_DATE <= m.VALUE_DATE;
+    print_test('Maturite anterieure ou egale a la date de valeur', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,13,13,10');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' DATE VALEUR',13) || '|'
+            || RPAD(' MATURITE',13) || '|' || RPAD(' NB ECH.',10) || '|');
+        tbl_line('4,12,24,22,22,13,13,10');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.VALUE_DATE, m.MATURITY_DATE,
+                   NVL(m.NO_OF_INSTALLMENTS,0) AS nb_ech
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.VALUE_DATE IS NOT NULL AND m.MATURITY_DATE IS NOT NULL
+              AND m.MATURITY_DATE <= m.VALUE_DATE
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),21) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|' || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || LPAD(fmt_n(d.nb_ech),9) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,22,22,13,13,10');
+    END IF;
+
+    -- 12.2 Premiere echeance anterieure a la date de valeur
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.VALUE_DATE IS NOT NULL AND m.FIRST_INS_DATE IS NOT NULL
+      AND m.FIRST_INS_DATE < m.VALUE_DATE;
+    print_test('Premiere echeance anterieure a la date de valeur', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,13,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' DATE VALEUR',13) || '|'
+            || RPAD(' 1re ECHEANCE',13) || '|' || RPAD(' ECART',9) || '|');
+        tbl_line('4,12,24,22,22,13,13,9');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.VALUE_DATE, m.FIRST_INS_DATE,
+                   TRUNC(m.VALUE_DATE) - TRUNC(m.FIRST_INS_DATE) AS ecart
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.VALUE_DATE IS NOT NULL AND m.FIRST_INS_DATE IS NOT NULL
+              AND m.FIRST_INS_DATE < m.VALUE_DATE
+            ORDER BY TRUNC(m.VALUE_DATE) - TRUNC(m.FIRST_INS_DATE) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),21) || ' |'
+                || RPAD(' ' || fmt_d(d.VALUE_DATE),13) || '|' || RPAD(' ' || fmt_d(d.FIRST_INS_DATE),13) || '|'
+                || LPAD(fmt_n(d.ecart) || ' j',8) || ' |');
+        END LOOP;
+        tbl_line('4,12,24,22,22,13,13,9');
+    END IF;
+
+    -- 12.3 Parametres d'amortissement absents
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+      AND (NVL(m.NO_OF_INSTALLMENTS,0) = 0
+           OR m.FREQUENCY IS NULL
+           OR m.FREQUENCY_UNIT IS NULL OR TRIM(m.FREQUENCY_UNIT) IS NULL);
+    print_test('Dossiers sans parametres d''amortissement complets', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,10,10,10,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' NB ECH.',10) || '|'
+            || RPAD(' FREQ.',10) || '|' || RPAD(' UNITE',10) || '|' || RPAD(' MATURITE',13) || '|');
+        tbl_line('4,12,24,22,22,10,10,10,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.NO_OF_INSTALLMENTS,0) AS nb_ech,
+                   NVL(TO_CHAR(m.FREQUENCY),'-') AS freq, NVL(m.FREQUENCY_UNIT,'-') AS unite,
+                   m.MATURITY_DATE
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+              AND (NVL(m.NO_OF_INSTALLMENTS,0) = 0
+                   OR m.FREQUENCY IS NULL
+                   OR m.FREQUENCY_UNIT IS NULL OR TRIM(m.FREQUENCY_UNIT) IS NULL)
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),21) || ' |'
+                || LPAD(fmt_n(d.nb_ech),9) || ' |'
+                || RPAD(' ' || SUBSTR(d.freq,1,8),10) || '|' || RPAD(' ' || SUBSTR(d.unite,1,8),10) || '|'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,22,10,10,10,13');
+    END IF;
+
+    -- 12.4 Ecart entre le nombre d'echeances declare et l'echeancier reel
+    --      de la composante principale
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   NVL(m.NO_OF_INSTALLMENTS,0) AS declare, e.nb_reel,
+                   e.nb_reel - NVL(m.NO_OF_INSTALLMENTS,0) AS ecart
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, COUNT(*) AS nb_reel
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                JOIN CLTB_ACCOUNT_COMPONENTS k ON k.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER
+                     AND k.BRANCH_CODE = s.BRANCH_CODE
+                     AND k.COMPONENT_NAME = s.COMPONENT_NAME
+                     AND NVL(k.MAIN_COMPONENT,'N') = 'Y'
+                GROUP BY s.ACCOUNT_NUMBER
+            ) e ON e.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.NO_OF_INSTALLMENTS,0) > 0
+              AND e.nb_reel != NVL(m.NO_OF_INSTALLMENTS,0)
+        ) q
+        ORDER BY ABS(q.ecart) DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),22) || ' |'
+            || LPAD(fmt_n(d.declare),11) || ' |' || LPAD(fmt_n(d.nb_reel),11) || ' |'
+            || LPAD(fmt_n(d.ecart),11) || ' |';
+    END LOOP;
+    print_test('Echeancier reel different du nombre d''echeances declare', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,23,12,12,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',23) || '|' || RPAD(' DECLARE',12) || '|'
+            || RPAD(' REEL',12) || '|' || RPAD(' ECART',12) || '|');
+        tbl_line('4,12,24,22,23,12,12,12');
+        flush_lignes;
+        tbl_line('4,12,24,22,23,12,12,12');
+    END IF;
+
+    -- 12.5 Dossiers sans composante principale identifiee : le capital
+    --      n'est rattache a aucune composante, le suivi est fausse
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+      AND NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_COMPONENTS k
+                      WHERE k.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+                        AND NVL(k.MAIN_COMPONENT,'N') = 'Y');
+    print_test('Dossiers sans composante principale identifiee', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,23,13,10,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',23) || '|' || RPAD(' MATURITE',13) || '|'
+            || RPAD(' NB COMP.',10) || '|' || RPAD(' STATUT',12) || '|');
+        tbl_line('4,12,24,22,23,13,10,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.MATURITY_DATE,
+                   (SELECT COUNT(*) FROM CLTB_ACCOUNT_COMPONENTS k2
+                     WHERE k2.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER) AS nb_comp,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.AMOUNT_FINANCED,0) > 0
+              AND NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_COMPONENTS k
+                              WHERE k.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+                                AND NVL(k.MAIN_COMPONENT,'N') = 'Y')
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),22) || ' |'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+                || LPAD(fmt_n(d.nb_comp),9) || ' |'
+                || RPAD(' ' || SUBSTR(d.st,1,10),12) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,23,13,10,12');
+    END IF;
+
+    -- 12.6 Echeances orphelines : lignes d'echeancier sans dossier maitre
+    SELECT COUNT(*) INTO v_count FROM (
+        SELECT s.ACCOUNT_NUMBER
+        FROM CLTB_ACCOUNT_SCHEDULES s
+        WHERE NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_APPS_MASTER m
+                          WHERE m.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER)
+        GROUP BY s.ACCOUNT_NUMBER
+    );
+    print_test('Comptes d''echeancier sans dossier maitre', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,24,12,23,23,23,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE ORPHELIN',24) || '|'
+            || RPAD(' NB ECH.',12) || '|' || RPAD(' TOTAL DU',23) || '|' || RPAD(' TOTAL REGLE',23) || '|'
+            || RPAD(' TOTAL IMPAYE',23) || '|' || RPAD(' DERNIERE',13) || '|');
+        tbl_line('4,24,12,23,23,23,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT s.ACCOUNT_NUMBER, COUNT(*) AS nb_ech,
+                   SUM(NVL(s.AMOUNT_DUE,0)) AS du, SUM(NVL(s.AMOUNT_SETTLED,0)) AS regle,
+                   SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                   MAX(s.SCHEDULE_DUE_DATE) AS derniere
+            FROM CLTB_ACCOUNT_SCHEDULES s
+            WHERE NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_APPS_MASTER m
+                              WHERE m.ACCOUNT_NUMBER = s.ACCOUNT_NUMBER)
+            GROUP BY s.ACCOUNT_NUMBER
+            ORDER BY SUM(NVL(s.AMOUNT_DUE,0)) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,22),24) || '|'
+                || LPAD(fmt_n(d.nb_ech),11) || ' |'
+                || LPAD(fmt_m(d.du),22) || ' |' || LPAD(fmt_m(d.regle),22) || ' |'
+                || LPAD(fmt_m(d.impaye),22) || ' |'
+                || RPAD(' ' || fmt_d(d.derniere),13) || '|');
+        END LOOP;
+        tbl_line('4,24,12,23,23,23,13');
+    END IF;
+
+    -- 12.7 Synthese : dossiers cumulant plusieurs facteurs de risque
+    --      (1 point par critere) — support de priorisation des controles
+    --      Tous les criteres sont obtenus par jointure sur des agregats
+    --      calcules en une passe, sans sous-requete correlee par dossier.
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Dossiers cumulant au moins 3 facteurs de risque credit]');
+    DBMS_OUTPUT.PUT_LINE('   Criteres : A=impaye > ' || c_impaye_2 || ' j  B=echu non solde'
+        || '  C=sans garant ni assurance  D=restructure  E=abandon ou perte'
+        || '  F=classe sain malgre impaye');
+    tbl_line('4,12,22,22,21,7,7,7,7,7,7,7');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',22) || '|'
+        || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',21) || '|'
+        || RPAD(' A',7) || '|' || RPAD(' B',7) || '|' || RPAD(' C',7) || '|' || RPAD(' D',7) || '|'
+        || RPAD(' E',7) || '|' || RPAD(' F',7) || '|' || RPAD(' SCORE',7) || '|');
+    tbl_line('4,12,22,22,21,7,7,7,7,7,7,7');
+    v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT cif, nom, compte, finance, fa, fb, fc, fd, fe, ff,
+               fa + fb + fc + fd + fe + ff AS score
+        FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER AS compte, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   CASE WHEN NVL(i.anciennete,0) > c_impaye_2 THEN 1 ELSE 0 END AS fa,
+                   CASE WHEN m.MATURITY_DATE IS NOT NULL AND m.MATURITY_DATE < TRUNC(SYSDATE)
+                             AND NVL(r.reste,0) > 0 THEN 1 ELSE 0 END AS fb,
+                   CASE WHEN NVL(m.USE_GUARANTOR,'N') != 'Y'
+                             AND NVL(m.INSURANCE_FLAG,'N') != 'Y' THEN 1 ELSE 0 END AS fc,
+                   CASE WHEN NVL(m.VERSION_NO,0) >= c_nb_versions THEN 1 ELSE 0 END AS fd,
+                   CASE WHEN NVL(w.abandonne,0) + NVL(w.perte,0) > 0 THEN 1 ELSE 0 END AS fe,
+                   CASE WHEN NVL(i.anciennete,0) > c_impaye_2
+                             AND v_statut_sain IS NOT NULL
+                             AND NVL(m.USER_DEFINED_STATUS,'-') = v_statut_sain
+                        THEN 1 ELSE 0 END AS ff
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            LEFT JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_DUE,0) - NVL(s.AMOUNT_SETTLED,0)) AS reste
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+            ) r ON r.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN (
+                SELECT s.ACCOUNT_NUMBER,
+                       SUM(NVL(s.AMOUNT_WAIVED,0)) AS abandonne,
+                       SUM(NVL(s.WRITEOFF_AMT,0)) AS perte
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                GROUP BY s.ACCOUNT_NUMBER
+            ) w ON w.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+        )
+        WHERE fa + fb + fc + fd + fe + ff >= 3
+        ORDER BY fa + fb + fc + fd + fe + ff DESC, finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_row_num := v_row_num + 1;
+        DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,20),22) || '|'
+            || RPAD(' ' || SUBSTR(d.compte,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),20) || ' |'
+            || LPAD(d.fa,6) || ' |' || LPAD(d.fb,6) || ' |' || LPAD(d.fc,6) || ' |'
+            || LPAD(d.fd,6) || ' |' || LPAD(d.fe,6) || ' |' || LPAD(d.ff,6) || ' |'
+            || LPAD(d.score,6) || ' |');
+    END LOOP;
+    tbl_line('4,12,22,22,21,7,7,7,7,7,7,7');
+    IF v_row_num = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('  (aucun dossier ne cumule 3 facteurs de risque ou plus)');
+    END IF;
+
+    -- =========================================================
     -- FIN
     -- =========================================================
     print_temps;

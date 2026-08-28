@@ -16,11 +16,17 @@
 --              limite aux 3 composantes retenues.
 --   ENCAISSE : ACTB_HISTORY, MODULE='CL',
 --              AMOUNT_TAG IN (PRINCIPAL_LIQD, MAIN_INT_LIQD, TVA_MAININT_LIQD),
---              RELATED_ACCOUNT = compte du credit,
---              restreint a la jambe "compte client" (AC_NATURAL_GL LIKE '37%')
---              pour ne compter chaque ecriture qu'une seule fois.
---              Signe : D = +LCY_AMOUNT, C = -LCY_AMOUNT
---              (les extournes s'annulent donc d'elles-memes).
+--              RELATED_ACCOUNT = compte du credit.
+--              Chaque liquidation genere DEUX ecritures de sens opposes
+--              (DRCR_IND : D = debit, C = credit). On ne retient qu'une seule
+--              jambe, celle dont le GL naturel commence par v_gl_prefixe,
+--              faute de quoi les deux jambes s'annuleraient.
+--              Le SENS de cette jambe est DETERMINE AUTOMATIQUEMENT au
+--              lancement (v_sens_force = 0) : selon que le GL retenu est
+--              celui du compte du client (debite par un remboursement) ou
+--              celui des creances (credite par un remboursement), le script
+--              retient D-C ou C-D. Dans les deux cas une extourne, de sens
+--              inverse, vient bien en diminution du montant encaisse.
 --   IRREGULARITE : un mois M est declare irregulier lorsque, a la fin
 --              de M, le CUMUL des echeances exigibles depasse le CUMUL
 --              des encaissements. La comparaison etant cumulative, un
@@ -41,7 +47,7 @@
 SET ECHO OFF
 SET DEFINE OFF
 SET FEEDBACK OFF
-SET LINESIZE 250
+SET LINESIZE 300
 SET TRIMSPOOL ON
 SET SERVEROUTPUT ON SIZE UNLIMITED;
 
@@ -51,7 +57,11 @@ DECLARE
     -- ========================================================
     v_d_debut    DATE         := TO_DATE('01/01/2023','DD/MM/YYYY'); -- debut du perimetre (BOOK_DATE)
     v_d_ref      DATE         := TRUNC(SYSDATE);                     -- date d'arrete de l'analyse
-    v_gl_client  VARCHAR2(10) := '37%';   -- prefixe AC_NATURAL_GL de la jambe compte client
+    v_gl_prefixe VARCHAR2(10) := '37%';   -- prefixe AC_NATURAL_GL de la jambe retenue
+    v_sens_force PLS_INTEGER  := 0;       -- sens comptable d'un remboursement sur cette jambe :
+                                          --   0 = detection automatique (recommande)
+                                          --   1 = le remboursement DEBITE la jambe retenue
+                                          --  -1 = le remboursement CREDITE la jambe retenue
     v_tol        NUMBER       := 1;       -- tolerance d'arrondi, en unite de compte
     c_max_lig    CONSTANT PLS_INTEGER := 30;  -- lignes max par tableau detaille
     c_max_cred   CONSTANT PLS_INTEGER := 20;  -- credits max detailles en section 4
@@ -60,6 +70,8 @@ DECLARE
     -- VARIABLES TECHNIQUES
     -- ========================================================
     v_nb_mois    PLS_INTEGER;                       -- nb de mois de la periode analysee
+    v_signe      PLS_INTEGER;   -- +1 si un remboursement debite la jambe retenue, -1 sinon
+    v_net_dc     NUMBER;        -- net debit-credit servant a determiner v_signe
     v_sep        VARCHAR2(200) := RPAD('=',148,'=');
     v_i          PLS_INTEGER;
     v_n          PLS_INTEGER;
@@ -114,7 +126,8 @@ DECLARE
     -- d'une eventuelle duplication d'ACCOUNT_NUMBER dans le master.
     lo AS (
         SELECT m.ACCOUNT_NUMBER                 AS acc,
-               MAX(m.PRIMARY_APPLICANT_NAME)    AS nom,
+               MAX(m.CUSTOMER_ID)               AS cif,
+               MAX(m.PRIMARY_APPLICANT_NAME)    AS nom_pret,
                MAX(m.PRODUCT_CODE)              AS prd,
                MIN(m.BOOK_DATE)                 AS dt_book,
                MAX(m.MATURITY_DATE)             AS dt_mat,
@@ -150,13 +163,13 @@ DECLARE
     -- Encaissements reels, jambe compte client, par jour
     enc AS (
         SELECT h.RELATED_ACCOUNT AS acc, TRUNC(h.TRN_DT) AS dt,
-               SUM(CASE WHEN h.AMOUNT_TAG='PRINCIPAL_LIQD'
+               v_signe * SUM(CASE WHEN h.AMOUNT_TAG='PRINCIPAL_LIQD'
                         THEN CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END
                         ELSE 0 END) AS pa_pri,
-               SUM(CASE WHEN h.AMOUNT_TAG='MAIN_INT_LIQD'
+               v_signe * SUM(CASE WHEN h.AMOUNT_TAG='MAIN_INT_LIQD'
                         THEN CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END
                         ELSE 0 END) AS pa_int,
-               SUM(CASE WHEN h.AMOUNT_TAG='TVA_MAININT_LIQD'
+               v_signe * SUM(CASE WHEN h.AMOUNT_TAG='TVA_MAININT_LIQD'
                         THEN CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END
                         ELSE 0 END) AS pa_tva
         FROM   ACTB_HISTORY h
@@ -166,7 +179,7 @@ DECLARE
         AND    h.TRN_DT <= v_d_ref
         AND    EXISTS (SELECT 1 FROM STTB_ACCOUNT g
                        WHERE g.AC_GL_NO = h.AC_NO
-                       AND   g.AC_NATURAL_GL LIKE v_gl_client)
+                       AND   g.AC_NATURAL_GL LIKE v_gl_prefixe)
         GROUP BY h.RELATED_ACCOUNT, TRUNC(h.TRN_DT)
     ),
     ech_t AS (
@@ -222,7 +235,11 @@ DECLARE
         FROM arr WHERE arriere > v_tol GROUP BY acc
     ),
     base AS (
-        SELECT l.acc, l.nom, l.prd, l.dt_book, l.dt_mat, l.montant, l.statut,
+        SELECT l.acc, l.cif, l.prd, l.dt_book, l.dt_mat, l.montant, l.statut,
+               -- Nom officiel du referentiel client, a defaut le nom porte par le pret
+               NVL((SELECT MAX(sc.CUSTOMER_NAME1) FROM STTM_CUSTOMER sc
+                    WHERE sc.CUSTOMER_NO = l.cif), l.nom_pret) AS nom,
+               l.nom_pret,
                (SELECT MAX(p.PRODUCT_DESC) FROM CLTM_PRODUCT p WHERE p.PRODUCT_CODE = l.prd) AS prd_lib,
                NVL(ed.du_pri,0) AS du_pri, NVL(ed.du_int,0) AS du_int, NVL(ed.du_tva,0) AS du_tva,
                NVL(ed.nb_ech_due,0) AS nb_ech_due, ed.derniere_ech_due,
@@ -274,7 +291,8 @@ DECLARE
     WITH
     lo AS (
         SELECT m.ACCOUNT_NUMBER              AS acc,
-               MAX(m.PRIMARY_APPLICANT_NAME) AS nom,
+               MAX(m.CUSTOMER_ID)            AS cif,
+               MAX(m.PRIMARY_APPLICANT_NAME) AS nom_pret,
                MIN(m.BOOK_DATE)              AS dt_book,
                MAX(NVL(m.AMOUNT_FINANCED,0)) AS montant,
                MAX(m.ACCOUNT_STATUS)         AS statut
@@ -294,10 +312,10 @@ DECLARE
     ),
     enc AS (
         SELECT h.RELATED_ACCOUNT AS acc, TRUNC(h.TRN_DT,'MM') AS mm,
-               SUM(CASE WHEN h.AMOUNT_TAG='PRINCIPAL_LIQD'
+               v_signe * SUM(CASE WHEN h.AMOUNT_TAG='PRINCIPAL_LIQD'
                         THEN CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END
                         ELSE 0 END) AS pa_pri,
-               SUM(CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END) AS pa_tot
+               v_signe * SUM(CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0) ELSE -NVL(h.LCY_AMOUNT,0) END) AS pa_tot
         FROM   ACTB_HISTORY h
         WHERE  h.MODULE = 'CL'
         AND    h.AMOUNT_TAG IN ('PRINCIPAL_LIQD','MAIN_INT_LIQD','TVA_MAININT_LIQD')
@@ -305,7 +323,7 @@ DECLARE
         AND    h.TRN_DT <= v_d_ref
         AND    EXISTS (SELECT 1 FROM STTB_ACCOUNT g
                        WHERE g.AC_GL_NO = h.AC_NO
-                       AND   g.AC_NATURAL_GL LIKE v_gl_client)
+                       AND   g.AC_NATURAL_GL LIKE v_gl_prefixe)
         GROUP BY h.RELATED_ACCOUNT, TRUNC(h.TRN_DT,'MM')
     ),
     cal AS (
@@ -324,7 +342,9 @@ DECLARE
         LEFT JOIN  ech   e ON e.acc = g.acc AND e.mm = g.mm
         LEFT JOIN  enc   p ON p.acc = g.acc AND p.mm = g.mm
     )
-    SELECT a.acc, l.nom, l.montant, l.statut, a.mm,
+    SELECT a.acc, l.cif, l.montant, l.statut, a.mm,
+           NVL((SELECT MAX(sc.CUSTOMER_NAME1) FROM STTM_CUSTOMER sc
+                WHERE sc.CUSTOMER_NO = l.cif), l.nom_pret) AS nom,
            a.cum_du, a.cum_pa, a.cum_du - a.cum_pa AS arriere, a.arriere_pri
     FROM      arr a
     JOIN      lo  l ON l.acc = a.acc
@@ -414,6 +434,32 @@ DECLARE
 BEGIN
     v_nb_mois := MONTHS_BETWEEN(TRUNC(v_d_ref,'MM'), TRUNC(v_d_debut,'MM')) + 1;
 
+    -- =========================================================
+    -- SENS COMPTABLE DE LA JAMBE RETENUE
+    -- DRCR_IND : D = debit, C = credit. Sur la jambe conservee, un
+    -- remboursement va toujours dans le meme sens : soit il DEBITE cette
+    -- jambe (c'est le compte du client, qui se vide), soit il la CREDITE
+    -- (c'est le GL de creances, qui s'amortit). Le net debit-credit des
+    -- seules ecritures de liquidation revele lequel des deux cas s'applique,
+    -- puisque le montant rembourse sur la periode est necessairement positif.
+    -- =========================================================
+    SELECT NVL(SUM(CASE WHEN h.DRCR_IND='D' THEN NVL(h.LCY_AMOUNT,0)
+                                            ELSE -NVL(h.LCY_AMOUNT,0) END),0)
+    INTO   v_net_dc
+    FROM   ACTB_HISTORY h
+    WHERE  h.MODULE = 'CL'
+    AND    h.AMOUNT_TAG IN ('PRINCIPAL_LIQD','MAIN_INT_LIQD','TVA_MAININT_LIQD')
+    AND    h.TRN_DT >= v_d_debut AND h.TRN_DT <= v_d_ref
+    AND    EXISTS (SELECT 1 FROM STTB_ACCOUNT g
+                   WHERE g.AC_GL_NO = h.AC_NO
+                   AND   g.AC_NATURAL_GL LIKE v_gl_prefixe);
+
+    IF v_sens_force <> 0 THEN
+        v_signe := SIGN(v_sens_force);
+    ELSE
+        v_signe := CASE WHEN v_net_dc < 0 THEN -1 ELSE 1 END;
+    END IF;
+
     DBMS_OUTPUT.PUT_LINE(v_sep);
     DBMS_OUTPUT.PUT_LINE('   ANALYSE DES REMBOURSEMENTS DE CREDITS (MODULE CL) — '
                          || TO_CHAR(SYSDATE,'DD/MM/YYYY HH24:MI:SS'));
@@ -422,7 +468,7 @@ BEGIN
     kv('Perimetre (BOOK_DATE a partir du)',  TO_CHAR(v_d_debut,'DD/MM/YYYY'));
     kv('Date de reference (arrete)',         TO_CHAR(v_d_ref,'DD/MM/YYYY'));
     kv('Nombre de mois analyses',            TO_CHAR(v_nb_mois));
-    kv('Prefixe GL jambe compte client',     v_gl_client);
+    kv('Prefixe GL jambe compte client',     v_gl_prefixe);
     kv('Tolerance d''arrondi',               TO_CHAR(v_tol));
 
     -- =========================================================
@@ -479,7 +525,7 @@ BEGIN
     SELECT COUNT(*), NVL(SUM(CASE WHEN g.AC_GL_NO IS NOT NULL THEN 1 ELSE 0 END),0)
     INTO   v_ecr_tot, v_ecr_ret
     FROM   ACTB_HISTORY h
-    LEFT JOIN (SELECT DISTINCT AC_GL_NO FROM STTB_ACCOUNT WHERE AC_NATURAL_GL LIKE v_gl_client) g
+    LEFT JOIN (SELECT DISTINCT AC_GL_NO FROM STTB_ACCOUNT WHERE AC_NATURAL_GL LIKE v_gl_prefixe) g
            ON g.AC_GL_NO = h.AC_NO
     WHERE  h.MODULE = 'CL'
     AND    h.AMOUNT_TAG IN ('PRINCIPAL_LIQD','MAIN_INT_LIQD','TVA_MAININT_LIQD')
@@ -496,7 +542,13 @@ BEGIN
     kv('  dont ecartees (autre contrepartie)', TO_CHAR(v_ecr_tot - v_ecr_ret));
     p('      -> les ecritures ecartees sont la contrepartie comptable (GL de');
     p('         creances). Si ce taux s''ecarte fortement de 50%, ajuster le');
-    p('         parametre v_gl_client au plan comptable en vigueur.');
+    p('         parametre v_gl_prefixe au plan comptable en vigueur.');
+    kv('Net debit - credit sur la jambe retenue', TO_CHAR(v_net_dc,'FM999G999G999G990'));
+    kv('Sens d''un remboursement sur cette jambe',
+       CASE WHEN v_signe = 1 THEN 'DEBIT  -> encaisse = D - C'
+                             ELSE 'CREDIT -> encaisse = C - D' END
+       || CASE WHEN v_sens_force <> 0 THEN '   [force par v_sens_force]'
+                                      ELSE '   [detecte automatiquement]' END);
     kv('Lignes CLTB_ACCOUNT_APPS_MASTER',      TO_CHAR(v_lig_master));
     kv('  dont comptes distincts (perimetre)', TO_CHAR(v_nb_tot));
     kv('Credits sans echeancier',              TO_CHAR(v_nb_sans_s));
@@ -586,25 +638,25 @@ BEGIN
     ELSE
         p('  Aucun mois d''arriere depuis le booking. Tries par montant finance.');
         p('');
-        tbl_line('4,20,24,12,12,16,16,9,7,12');
-        p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CLIENT',24) || '|'
-                || RPAD(' BOOKING',12) || '|' || RPAD(' ECHEANCE',12) || '|' || RPAD(' FINANCE',16) || '|'
-                || RPAD(' ENCAISSE',16) || '|' || RPAD(' % REMB',9) || '|' || RPAD(' SOLDE',7) || '|'
-                || RPAD(' DER. PMT',12) || '|');
-        tbl_line('4,20,24,12,12,16,16,9,7,12');
+        tbl_line('4,20,13,26,12,16,16,9,7,12');
+        p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CIF',13) || '|'
+                || RPAD(' NOM DU CLIENT',26) || '|' || RPAD(' BOOKING',12) || '|'
+                || RPAD(' FINANCE',16) || '|' || RPAD(' ENCAISSE',16) || '|'
+                || RPAD(' % REMB',9) || '|' || RPAD(' SOLDE',7) || '|' || RPAD(' DER. PMT',12) || '|');
+        tbl_line('4,20,13,26,12,16,16,9,7,12');
         v_row := 0;
         FOR i IN 1 .. v_nb_tot LOOP
             EXIT WHEN v_row >= c_max_lig;
             IF g_cr(i).classe = 'SAIN' THEN
                 v_row := v_row + 1;
                 p('  |' || LPAD(v_row,3) || ' |' || f_txt(g_cr(i).acc,20)
-                        || f_txt(g_cr(i).nom,24) || f_dat(g_cr(i).dt_book,12)
-                        || f_dat(g_cr(i).dt_mat,12) || f_num(g_cr(i).montant,16)
+                        || f_txt(g_cr(i).cif,13) || f_txt(g_cr(i).nom,26)
+                        || f_dat(g_cr(i).dt_book,12) || f_num(g_cr(i).montant,16)
                         || f_num(g_cr(i).pa_tot,16) || f_pct(g_cr(i).tx_rec,9)
                         || f_txt(g_cr(i).solde,7) || f_dat(g_cr(i).dernier_pmt,12));
             END IF;
         END LOOP;
-        tbl_line('4,20,24,12,12,16,16,9,7,12');
+        tbl_line('4,20,13,26,12,16,16,9,7,12');
         IF v_nb_sain > c_max_lig THEN
             p('  ... ' || (v_nb_sain - c_max_lig) || ' autre(s) credit(s) sain(s) non affiche(s).');
         END IF;
@@ -618,11 +670,12 @@ BEGIN
     p('  exigibles depasse le cumul des encaissements. Les credits sont tries');
     p('  par gravite (pic d''arriere le plus eleve).');
     p('');
-    tbl_line('4,20,24,9,16,16,16,16');
-    p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CLIENT',24) || '|'
-            || RPAD(' MOIS',9) || '|' || RPAD(' CUMUL DU',16) || '|' || RPAD(' CUMUL ENCAISSE',16) || '|'
-            || RPAD(' ARRIERE',16) || '|' || RPAD(' DONT PRINCIPAL',16) || '|');
-    tbl_line('4,20,24,9,16,16,16,16');
+    tbl_line('4,20,13,26,9,16,16,16,16');
+    p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CIF',13) || '|'
+            || RPAD(' NOM DU CLIENT',26) || '|' || RPAD(' MOIS',9) || '|' || RPAD(' CUMUL DU',16) || '|'
+            || RPAD(' CUMUL ENCAISSE',16) || '|' || RPAD(' ARRIERE',16) || '|'
+            || RPAD(' DONT PRINCIPAL',16) || '|');
+    tbl_line('4,20,13,26,9,16,16,16,16');
 
     v_prev_acc  := NULL;
     v_nb_cred_d := 0;
@@ -648,7 +701,7 @@ BEGIN
             v_nb_cred_d := v_nb_cred_d + 1;
             v_prev_acc  := m.acc;
             IF v_nb_cred_d > 1 AND v_nb_cred_d <= c_max_cred THEN
-                tbl_line('4,20,24,9,16,16,16,16');
+                tbl_line('4,20,13,26,9,16,16,16,16');
             END IF;
         END IF;
 
@@ -656,13 +709,14 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE('  |'
                 || CASE WHEN v_n = 1 THEN LPAD(v_nb_cred_d,3) || ' |' ELSE RPAD(' ',4) || '|' END
                 || f_txt(CASE WHEN v_n = 1 THEN m.acc ELSE ' ' END, 20)
-                || f_txt(CASE WHEN v_n = 1 THEN m.nom ELSE ' ' END, 24)
+                || f_txt(CASE WHEN v_n = 1 THEN m.cif ELSE ' ' END, 13)
+                || f_txt(CASE WHEN v_n = 1 THEN m.nom ELSE ' ' END, 26)
                 || f_txt(TO_CHAR(m.mm,'MM/YYYY'), 9)
                 || f_num(m.cum_du,16) || f_num(m.cum_pa,16)
                 || f_num(m.arriere,16) || f_num(m.arriere_pri,16));
         END IF;
     END LOOP;
-    tbl_line('4,20,24,9,16,16,16,16');
+    tbl_line('4,20,13,26,9,16,16,16,16');
 
     IF v_nb_cred_d = 0 THEN
         p('  Aucun credit n''a connu de mois en irregularite sur la periode.');
@@ -717,30 +771,31 @@ BEGIN
         p('  PRINCIPAL RESTANT  : principal total non encaisse, echeances futures incluses');
         p('                       (exposition residuelle sur le credit).');
         p('');
-        tbl_line('4,20,24,10,19,19,19,12');
-        p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CLIENT',24) || '|'
-                || RPAD(' RETARD (J)',10) || '|' || RPAD(' PRINCIPAL IMPAYE',19) || '|'
-                || RPAD(' PRINCIPAL RESTANT',19) || '|' || RPAD(' INT + TVA IMPAYES',19) || '|'
-                || RPAD(' DER. PMT',12) || '|');
-        tbl_line('4,20,24,10,19,19,19,12');
+        tbl_line('4,20,13,26,10,17,17,17,12');
+        p('  |' || RPAD(' N#',4) || '|' || RPAD(' COMPTE',20) || '|' || RPAD(' CIF',13) || '|'
+                || RPAD(' NOM DU CLIENT',26) || '|' || RPAD(' RETARD (J)',10) || '|'
+                || RPAD(' PRINCIPAL IMPAYE',17) || '|' || RPAD(' PRINC. RESTANT',17) || '|'
+                || RPAD(' INT + TVA IMPAYES',17) || '|' || RPAD(' DER. PMT',12) || '|');
+        tbl_line('4,20,13,26,10,17,17,17,12');
         v_row := 0;
         FOR i IN 1 .. v_nb_tot LOOP
             EXIT WHEN v_row >= c_max_lig;
             IF g_cr(i).classe = 'EN DIFFICULTE' THEN
                 v_row := v_row + 1;
                 p('  |' || LPAD(v_row,3) || ' |' || f_txt(g_cr(i).acc,20)
-                        || f_txt(g_cr(i).nom,24) || f_int(g_cr(i).dpd_jours,10)
-                        || f_num(GREATEST(g_cr(i).arriere_pri,0),19)
-                        || f_num(GREATEST(g_cr(i).pri_restant,0),19)
-                        || f_num(GREATEST(g_cr(i).arriere_tot - g_cr(i).arriere_pri,0),19)
+                        || f_txt(g_cr(i).cif,13) || f_txt(g_cr(i).nom,26)
+                        || f_int(g_cr(i).dpd_jours,10)
+                        || f_num(GREATEST(g_cr(i).arriere_pri,0),17)
+                        || f_num(GREATEST(g_cr(i).pri_restant,0),17)
+                        || f_num(GREATEST(g_cr(i).arriere_tot - g_cr(i).arriere_pri,0),17)
                         || f_dat(g_cr(i).dernier_pmt,12));
             END IF;
         END LOOP;
-        tbl_line('4,20,24,10,19,19,19,12');
-        p('  |' || f_txt('TOTAL (' || v_nb_dif || ' credits en difficulte)', 61)
-                || f_num(v_arr_pri,19) || f_num(v_rest_pri,19)
-                || f_num(v_arr_it,19) || RPAD(' ',12) || '|');
-        tbl_line('4,20,24,10,19,19,19,12');
+        tbl_line('4,20,13,26,10,17,17,17,12');
+        p('  |' || f_txt('TOTAL (' || v_nb_dif || ' credits en difficulte)', 77)
+                || f_num(v_arr_pri,17) || f_num(v_rest_pri,17)
+                || f_num(v_arr_it,17) || RPAD(' ',12) || '|');
+        tbl_line('4,20,13,26,10,17,17,17,12');
         IF v_nb_dif > c_max_lig THEN
             p('  ... ' || (v_nb_dif - c_max_lig) || ' autre(s) credit(s) en difficulte non affiche(s) ;');
             p('      les totaux ci-dessus portent bien sur la totalite des ' || v_nb_dif || ' credits.');

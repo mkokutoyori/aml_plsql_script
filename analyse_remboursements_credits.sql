@@ -67,7 +67,7 @@ DECLARE
     v_ecr_ret    PLS_INTEGER := 0;   -- dont retenues par le filtre GL
     v_lig_master PLS_INTEGER := 0;   -- lignes du master sur le perimetre
     v_cle        VARCHAR2(20);  -- cle de map : 'YYYYMM' ou tranche de retard
-    v_prev_acc   VARCHAR2(50);
+    v_prev_acc   VARCHAR2(100);
     v_nb_cred_d  PLS_INTEGER;
     v_row        PLS_INTEGER;
     v_max_arr    NUMBER;        -- arriere du mois le plus degrade
@@ -87,6 +87,7 @@ DECLARE
     v_fin_tot    NUMBER := 0;  v_du_pri  NUMBER := 0;  v_du_int  NUMBER := 0;  v_du_tva  NUMBER := 0;
     v_pa_pri     NUMBER := 0;  v_pa_int  NUMBER := 0;  v_pa_tva  NUMBER := 0;
     v_arr_tot    NUMBER := 0;  v_arr_pri NUMBER := 0;  v_rest_pri NUMBER := 0;
+    v_arr_it     NUMBER := 0;  -- interets + TVA echus impayes
 
     -- Cumuls par classe
     TYPE t_cls IS RECORD (nb PLS_INTEGER, fin NUMBER, arr NUMBER, arr_pri NUMBER);
@@ -453,6 +454,7 @@ BEGIN
         IF r.classe = 'EN DIFFICULTE' THEN
             v_arr_tot  := v_arr_tot  + r.arriere_tot;
             v_arr_pri  := v_arr_pri  + GREATEST(r.arriere_pri,0);
+            v_arr_it   := v_arr_it   + GREATEST(r.arriere_tot - r.arriere_pri,0);
             v_rest_pri := v_rest_pri + GREATEST(r.pri_restant,0);
             v_cle := CASE WHEN r.dpd_jours <=   0 THEN '0-non date'
                           WHEN r.dpd_jours <=  30 THEN '1-1 a 30 j'
@@ -737,7 +739,7 @@ BEGIN
         tbl_line('4,20,24,10,19,19,19,12');
         p('  |' || f_txt('TOTAL (' || v_nb_dif || ' credits en difficulte)', 61)
                 || f_num(v_arr_pri,19) || f_num(v_rest_pri,19)
-                || f_num(GREATEST(v_arr_tot - v_arr_pri,0),19) || RPAD(' ',12) || '|');
+                || f_num(v_arr_it,19) || RPAD(' ',12) || '|');
         tbl_line('4,20,24,10,19,19,19,12');
         IF v_nb_dif > c_max_lig THEN
             p('  ... ' || (v_nb_dif - c_max_lig) || ' autre(s) credit(s) en difficulte non affiche(s) ;');
@@ -768,7 +770,7 @@ BEGIN
     p('');
     p('  RESTE A RECOUVRER SUR LES CREDITS EN DIFFICULTE');
     kv('  Principal echu impaye (exigible)',   TO_CHAR(v_arr_pri,'FM999G999G999G990'));
-    kv('  Interets + TVA echus impayes',       TO_CHAR(GREATEST(v_arr_tot-v_arr_pri,0),'FM999G999G999G990'));
+    kv('  Interets + TVA echus impayes',       TO_CHAR(v_arr_it,'FM999G999G999G990'));
     kv('  Principal total restant du',         TO_CHAR(v_rest_pri,'FM999G999G999G990'));
     kv('  Taux de principal impaye / finance',
        TO_CHAR(ROUND(CASE WHEN v_fin_tot > 0 THEN 100*v_arr_pri/v_fin_tot END,2),'FM990D00') || '%');

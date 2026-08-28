@@ -81,6 +81,9 @@ DECLARE
     v_anomalies     NUMBER := 0;
     v_row_num       NUMBER := 0;
     v_montant       NUMBER;
+    -- Statut de classification des dossiers sains, determine a partir des
+    -- donnees (statut le plus frequent parmi les dossiers sans impaye)
+    v_statut_sain   VARCHAR2(50);
 
     -- Tampon des lignes de detail (permet d'obtenir le nombre d'anomalies
     -- et les lignes a afficher en un seul passage sur les grosses tables)
@@ -3359,6 +3362,353 @@ BEGIN
                 || RPAD(' ' || SUBSTR(d.cat,1,10),12) || '|');
         END LOOP;
         tbl_line('4,12,24,22,20,20,13,12');
+    END IF;
+
+    -- =========================================================
+    -- SECTION 11 : COHERENCE DU DECLASSEMENT ET DU PROVISIONNEMENT
+    -- =========================================================
+    -- Le declassement conditionne le niveau de provisionnement et la
+    -- suspension des produits. Un dossier durablement impaye maintenu en
+    -- statut sain surevalue le resultat et sous-estime le risque.
+    -- Le statut "sain" de reference n'est pas code en dur : il est deduit
+    -- des donnees comme le statut le plus frequent parmi les dossiers ne
+    -- presentant aucun impaye, puis affiche ci-dessous.
+    -- =========================================================
+    print_section('11. COHERENCE DU DECLASSEMENT ET DU PROVISIONNEMENT');
+
+    -- Determination du statut sain de reference
+    BEGIN
+        SELECT st INTO v_statut_sain FROM (
+            SELECT NVL(m.USER_DEFINED_STATUS,'-') AS st, COUNT(*) AS nb
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            WHERE NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_SCHEDULES s
+                              WHERE s.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+                                AND NVL(s.AMOUNT_OVERDUE,0) > 0)
+            GROUP BY NVL(m.USER_DEFINED_STATUS,'-')
+            ORDER BY COUNT(*) DESC
+        ) WHERE ROWNUM = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN v_statut_sain := NULL;
+    END;
+    DBMS_OUTPUT.PUT_LINE('');
+    print_info('Statut sain de reference deduit des donnees', NVL(v_statut_sain,'(indetermine)'));
+
+    -- Ventilation croisee : statut de classification x anciennete d'impaye
+    DBMS_OUTPUT.PUT_LINE('');
+    DBMS_OUTPUT.PUT_LINE('  [Classification x anciennete d''impaye]');
+    tbl_line('16,12,12,12,12,12,20');
+    DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' STATUT',16) || '|' || RPAD(' SANS IMP.',12) || '|'
+        || RPAD(' 1-30 J',12) || '|' || RPAD(' 31-90 J',12) || '|' || RPAD(' 91-180 J',12) || '|'
+        || RPAD(' > 180 J',12) || '|' || RPAD(' IMPAYE TOTAL',20) || '|');
+    tbl_line('16,12,12,12,12,12,20');
+    FOR d IN (SELECT NVL(m.USER_DEFINED_STATUS,'-') AS st,
+                     SUM(CASE WHEN i.anciennete IS NULL THEN 1 ELSE 0 END) AS c0,
+                     SUM(CASE WHEN i.anciennete BETWEEN 1 AND c_impaye_1 THEN 1 ELSE 0 END) AS c1,
+                     SUM(CASE WHEN i.anciennete > c_impaye_1 AND i.anciennete <= c_impaye_2 THEN 1 ELSE 0 END) AS c2,
+                     SUM(CASE WHEN i.anciennete > c_impaye_2 AND i.anciennete <= c_impaye_3 THEN 1 ELSE 0 END) AS c3,
+                     SUM(CASE WHEN i.anciennete > c_impaye_3 THEN 1 ELSE 0 END) AS c4,
+                     NVL(SUM(i.impaye),0) AS impaye
+              FROM CLTB_ACCOUNT_APPS_MASTER m
+              LEFT JOIN (
+                  SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                         TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                  FROM CLTB_ACCOUNT_SCHEDULES s
+                  WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                    AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                  GROUP BY s.ACCOUNT_NUMBER
+              ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+              GROUP BY NVL(m.USER_DEFINED_STATUS,'-')
+              ORDER BY 1) LOOP
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' ' || SUBSTR(d.st,1,14),16) || '|'
+            || LPAD(fmt_n(d.c0),11) || ' |' || LPAD(fmt_n(d.c1),11) || ' |'
+            || LPAD(fmt_n(d.c2),11) || ' |' || LPAD(fmt_n(d.c3),11) || ' |'
+            || LPAD(fmt_n(d.c4),11) || ' |' || LPAD(fmt_m(d.impaye),19) || ' |');
+    END LOOP;
+    tbl_line('16,12,12,12,12,12,20');
+
+    -- 11.1 Dossiers impayes au-dela du seuil de declassement mais
+    --      toujours classes au statut sain
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   i.impaye, i.anciennete, NVL(m.USER_DEFINED_STATUS,'-') AS st,
+                   NVL(m.STOP_ACCRUALS,'N') AS stop_acc
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) > c_impaye_2
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE v_statut_sain IS NOT NULL
+              AND NVL(m.USER_DEFINED_STATUS,'-') = v_statut_sain
+        ) q
+        ORDER BY q.anciennete DESC, q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),20) || ' |' || LPAD(fmt_m(d.impaye),20) || ' |'
+            || LPAD(fmt_n(d.anciennete),10) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,10),12) || '|'
+            || RPAD(' ' || d.stop_acc,9) || '|';
+    END LOOP;
+    print_test('Impayes > ' || c_impaye_2 || ' j toujours classes sains', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,21,21,11,12,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',21) || '|' || RPAD(' IMPAYE',21) || '|'
+            || RPAD(' JOURS',11) || '|' || RPAD(' STATUT',12) || '|' || RPAD(' STOP AC',9) || '|');
+        tbl_line('4,12,24,22,21,21,11,12,9');
+        flush_lignes;
+        tbl_line('4,12,24,22,21,21,11,12,9');
+    END IF;
+
+    -- 11.2 Cas aggrave : impaye de plus de 360 jours en statut sain
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   i.impaye, i.anciennete, i.plus_ancienne,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       MIN(s.SCHEDULE_DUE_DATE) AS plus_ancienne,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) > c_impaye_4
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE v_statut_sain IS NOT NULL
+              AND NVL(m.USER_DEFINED_STATUS,'-') = v_statut_sain
+        ) q
+        ORDER BY q.anciennete DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),20) || ' |' || LPAD(fmt_m(d.impaye),20) || ' |'
+            || RPAD(' ' || fmt_d(d.plus_ancienne),13) || '|'
+            || LPAD(fmt_n(d.anciennete),10) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,10),12) || '|';
+    END LOOP;
+    print_test('Impayes > ' || c_impaye_4 || ' j toujours classes sains', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,21,21,13,11,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',21) || '|' || RPAD(' IMPAYE',21) || '|'
+            || RPAD(' + ANCIENNE',13) || '|' || RPAD(' JOURS',11) || '|' || RPAD(' STATUT',12) || '|');
+        tbl_line('4,12,24,22,21,21,13,11,12');
+        flush_lignes;
+        tbl_line('4,12,24,22,21,21,13,11,12');
+    END IF;
+
+    -- 11.3 Dossiers declasses alors qu'ils ne presentent aucun impaye :
+    --      classement a justifier ou reclassement a operer
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st, NVL(m.DERIVED_STATUS,'-') AS st_derive,
+                   m.MATURITY_DATE, NVL(m.STOP_ACCRUALS,'N') AS stop_acc
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE v_statut_sain IS NOT NULL
+              AND NVL(m.USER_DEFINED_STATUS,'-') != v_statut_sain
+              AND NOT EXISTS (SELECT 1 FROM CLTB_ACCOUNT_SCHEDULES s
+                              WHERE s.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+                                AND NVL(s.AMOUNT_OVERDUE,0) > 0)
+        ) q
+        ORDER BY q.finance DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),21) || ' |'
+            || RPAD(' ' || SUBSTR(d.st,1,12),14) || '|'
+            || RPAD(' ' || SUBSTR(d.st_derive,1,12),14) || '|'
+            || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|'
+            || RPAD(' ' || d.stop_acc,9) || '|';
+    END LOOP;
+    print_test('Dossiers declasses sans aucun impaye', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,14,14,13,9');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' STATUT',14) || '|'
+            || RPAD(' STATUT DERIVE',14) || '|' || RPAD(' MATURITE',13) || '|' || RPAD(' STOP AC',9) || '|');
+        tbl_line('4,12,24,22,22,14,14,13,9');
+        flush_lignes;
+        tbl_line('4,12,24,22,22,14,14,13,9');
+    END IF;
+
+    -- 11.4 Divergence entre statut declare et statut derive par le systeme
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.USER_DEFINED_STATUS IS NOT NULL AND m.DERIVED_STATUS IS NOT NULL
+      AND TRIM(m.USER_DEFINED_STATUS) != TRIM(m.DERIVED_STATUS);
+    print_test('Statut declare different du statut derive', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,14,14,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' DECLARE',14) || '|'
+            || RPAD(' DERIVE',14) || '|' || RPAD(' MODE CHGT',12) || '|');
+        tbl_line('4,12,24,22,22,14,14,12');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, m.USER_DEFINED_STATUS AS st,
+                   m.DERIVED_STATUS AS st_derive, NVL(m.STATUS_CHANGE_MODE,'-') AS mode_chgt
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.USER_DEFINED_STATUS IS NOT NULL AND m.DERIVED_STATUS IS NOT NULL
+              AND TRIM(m.USER_DEFINED_STATUS) != TRIM(m.DERIVED_STATUS)
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),21) || ' |'
+                || RPAD(' ' || SUBSTR(d.st,1,12),14) || '|'
+                || RPAD(' ' || SUBSTR(d.st_derive,1,12),14) || '|'
+                || RPAD(' ' || SUBSTR(d.mode_chgt,1,10),12) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,22,14,14,12');
+    END IF;
+
+    -- 11.5 Impayes au-dela du seuil de declassement sans arret des
+    --      accruals : des interets continuent d'etre constates
+    v_lignes.DELETE; v_count := 0; v_row_num := 0;
+    FOR d IN (SELECT * FROM (
+        SELECT q.*, COUNT(*) OVER () AS nb_total FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   m.ACCOUNT_NUMBER, NVL(m.AMOUNT_FINANCED,0) AS finance,
+                   i.impaye, i.anciennete, m.NEXT_ACCR_DATE,
+                   NVL(m.USER_DEFINED_STATUS,'-') AS st
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            JOIN (
+                SELECT s.ACCOUNT_NUMBER, SUM(NVL(s.AMOUNT_OVERDUE,0)) AS impaye,
+                       TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) AS anciennete
+                FROM CLTB_ACCOUNT_SCHEDULES s
+                WHERE NVL(s.AMOUNT_OVERDUE,0) > 0
+                  AND s.SCHEDULE_DUE_DATE < TRUNC(SYSDATE)
+                GROUP BY s.ACCOUNT_NUMBER
+                HAVING TRUNC(SYSDATE) - TRUNC(MIN(s.SCHEDULE_DUE_DATE)) > c_impaye_2
+            ) i ON i.ACCOUNT_NUMBER = m.ACCOUNT_NUMBER
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE NVL(m.STOP_ACCRUALS,'N') != 'Y'
+        ) q
+        ORDER BY q.impaye DESC
+    ) WHERE ROWNUM <= c_max_rows) LOOP
+        v_count := d.nb_total;
+        v_row_num := v_row_num + 1;
+        v_lignes(v_row_num) := '  |' || LPAD(v_row_num,3) || ' |'
+            || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+            || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+            || LPAD(fmt_m(d.finance),21) || ' |' || LPAD(fmt_m(d.impaye),21) || ' |'
+            || LPAD(fmt_n(d.anciennete),10) || ' |'
+            || RPAD(' ' || fmt_d(d.NEXT_ACCR_DATE),13) || '|'
+            || RPAD(' ' || SUBSTR(d.st,1,10),12) || '|';
+    END LOOP;
+    print_test('Impayes > ' || c_impaye_2 || ' j sans arret des accruals', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,22,11,13,12');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' IMPAYE',22) || '|'
+            || RPAD(' JOURS',11) || '|' || RPAD(' PROCH. ACCR',13) || '|' || RPAD(' STATUT',12) || '|');
+        tbl_line('4,12,24,22,22,22,11,13,12');
+        flush_lignes;
+        tbl_line('4,12,24,22,22,22,11,13,12');
+    END IF;
+
+    -- 11.6 Contrats LD sans dispositif de provisionnement automatique ou
+    --      sans categorie d'exposition
+    SELECT COUNT(*) INTO v_count
+    FROM LDTB_CONTRACT_MASTER t
+    WHERE NVL(t.AUTO_PROV_REQD,'N') != 'Y'
+       OR t.EXPOSURE_CATEGORY IS NULL OR TRIM(t.EXPOSURE_CATEGORY) IS NULL;
+    print_test('Contrats LD sans provisionnement auto ou sans categorie', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,10,16,13');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' CONTREPARTIE',24) || '|'
+            || RPAD(' CONTRAT',22) || '|' || RPAD(' MONTANT',22) || '|' || RPAD(' PROV.AUTO',10) || '|'
+            || RPAD(' CAT. EXPO',16) || '|' || RPAD(' MATURITE',13) || '|');
+        tbl_line('4,12,24,22,22,10,16,13');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(t.COUNTERPARTY,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom,
+                   t.CONTRACT_REF_NO, NVL(t.LCY_AMOUNT,0) AS montant,
+                   NVL(t.AUTO_PROV_REQD,'-') AS prov, NVL(t.EXPOSURE_CATEGORY,'-') AS cat,
+                   t.MATURITY_DATE
+            FROM LDTB_CONTRACT_MASTER t
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = t.COUNTERPARTY
+            WHERE NVL(t.AUTO_PROV_REQD,'N') != 'Y'
+               OR t.EXPOSURE_CATEGORY IS NULL OR TRIM(t.EXPOSURE_CATEGORY) IS NULL
+            ORDER BY NVL(t.LCY_AMOUNT,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.CONTRACT_REF_NO,1,20),22) || '|'
+                || LPAD(fmt_m(d.montant),21) || ' |'
+                || RPAD(' ' || d.prov,10) || '|'
+                || RPAD(' ' || SUBSTR(d.cat,1,14),16) || '|'
+                || RPAD(' ' || fmt_d(d.MATURITY_DATE),13) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,22,10,16,13');
+    END IF;
+
+    -- 11.7 Changements de statut operes manuellement
+    SELECT COUNT(*) INTO v_count
+    FROM CLTB_ACCOUNT_APPS_MASTER m
+    WHERE m.STATUS_CHANGE_MODE IS NOT NULL
+      AND UPPER(TRIM(m.STATUS_CHANGE_MODE)) IN ('M','MANUAL','MANUEL');
+    print_test('Changements de statut operes manuellement', v_count);
+    IF v_count > 0 THEN
+        tbl_line('4,12,24,22,22,14,14,16');
+        DBMS_OUTPUT.PUT_LINE('  |' || RPAD(' N#',4) || '|' || RPAD(' CIF',12) || '|' || RPAD(' NOM CLIENT',24) || '|'
+            || RPAD(' DOSSIER',22) || '|' || RPAD(' FINANCE',22) || '|' || RPAD(' STATUT',14) || '|'
+            || RPAD(' DERIVE',14) || '|' || RPAD(' MAKER',16) || '|');
+        tbl_line('4,12,24,22,22,14,14,16');
+        v_row_num := 0;
+        FOR d IN (SELECT * FROM (
+            SELECT NVL(m.CUSTOMER_ID,'-') AS cif, NVL(c.CUSTOMER_NAME1,'-') AS nom, m.ACCOUNT_NUMBER,
+                   NVL(m.AMOUNT_FINANCED,0) AS finance, NVL(m.USER_DEFINED_STATUS,'-') AS st,
+                   NVL(m.DERIVED_STATUS,'-') AS st_derive, NVL(m.MAKER_ID,'-') AS maker
+            FROM CLTB_ACCOUNT_APPS_MASTER m
+            LEFT JOIN STTM_CUSTOMER c ON c.CUSTOMER_NO = m.CUSTOMER_ID
+            WHERE m.STATUS_CHANGE_MODE IS NOT NULL
+              AND UPPER(TRIM(m.STATUS_CHANGE_MODE)) IN ('M','MANUAL','MANUEL')
+            ORDER BY NVL(m.AMOUNT_FINANCED,0) DESC
+        ) WHERE ROWNUM <= c_max_rows) LOOP
+            v_row_num := v_row_num + 1;
+            DBMS_OUTPUT.PUT_LINE('  |' || LPAD(v_row_num,3) || ' |'
+                || RPAD(' ' || d.cif,12) || '|' || RPAD(' ' || SUBSTR(d.nom,1,22),24) || '|'
+                || RPAD(' ' || SUBSTR(d.ACCOUNT_NUMBER,1,20),22) || '|'
+                || LPAD(fmt_m(d.finance),21) || ' |'
+                || RPAD(' ' || SUBSTR(d.st,1,12),14) || '|'
+                || RPAD(' ' || SUBSTR(d.st_derive,1,12),14) || '|'
+                || RPAD(' ' || SUBSTR(d.maker,1,14),16) || '|');
+        END LOOP;
+        tbl_line('4,12,24,22,22,14,14,16');
     END IF;
 
     -- =========================================================

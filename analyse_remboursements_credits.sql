@@ -66,7 +66,7 @@ DECLARE
     v_ecr_tot    PLS_INTEGER := 0;   -- ecritures CL de la periode
     v_ecr_ret    PLS_INTEGER := 0;   -- dont retenues par le filtre GL
     v_lig_master PLS_INTEGER := 0;   -- lignes du master sur le perimetre
-    v_cle        VARCHAR2(6);
+    v_cle        VARCHAR2(20);  -- cle de map : 'YYYYMM' ou tranche de retard
     v_prev_acc   VARCHAR2(50);
     v_nb_cred_d  PLS_INTEGER;
     v_row        PLS_INTEGER;
@@ -102,6 +102,7 @@ DECLARE
     TYPE t_mois IS RECORD (lib VARCHAR2(10), nb PLS_INTEGER, arr NUMBER, arr_pri NUMBER);
     TYPE t_mois_tab IS TABLE OF t_mois INDEX BY VARCHAR2(6);
     g_mois       t_mois_tab;
+    v_rm         t_mois;      -- enregistrement de travail pour g_mois
 
     -- ========================================================
     -- CURSEUR 1 — SITUATION DE CHAQUE CREDIT A LA DATE DE REFERENCE
@@ -380,15 +381,21 @@ DECLARE
     -- Cumul dans une map de classe
     PROCEDURE add_cls(p_map IN OUT NOCOPY t_cls_tab, p_cle VARCHAR2,
                       p_fin NUMBER, p_arr NUMBER, p_arr_pri NUMBER) IS
+        l_r t_cls;
     BEGIN
-        IF NOT p_map.EXISTS(p_cle) THEN
-            p_map(p_cle).nb  := 0; p_map(p_cle).fin := 0;
-            p_map(p_cle).arr := 0; p_map(p_cle).arr_pri := 0;
+        -- Sur une collection associative de RECORD, affecter directement un
+        -- champ d'un element inexistant leve NO_DATA_FOUND : on passe donc
+        -- par un enregistrement de travail affecte en bloc.
+        IF p_map.EXISTS(p_cle) THEN
+            l_r := p_map(p_cle);
+        ELSE
+            l_r.nb := 0; l_r.fin := 0; l_r.arr := 0; l_r.arr_pri := 0;
         END IF;
-        p_map(p_cle).nb      := p_map(p_cle).nb + 1;
-        p_map(p_cle).fin     := p_map(p_cle).fin + NVL(p_fin,0);
-        p_map(p_cle).arr     := p_map(p_cle).arr + GREATEST(NVL(p_arr,0),0);
-        p_map(p_cle).arr_pri := p_map(p_cle).arr_pri + GREATEST(NVL(p_arr_pri,0),0);
+        l_r.nb      := l_r.nb + 1;
+        l_r.fin     := l_r.fin + NVL(p_fin,0);
+        l_r.arr     := l_r.arr + GREATEST(NVL(p_arr,0),0);
+        l_r.arr_pri := l_r.arr_pri + GREATEST(NVL(p_arr_pri,0),0);
+        p_map(p_cle) := l_r;
     END;
 
     -- Ligne "libelle .......... valeur"
@@ -467,7 +474,7 @@ BEGIN
     -- =========================================================
     section('0. CONTROLES DE COUVERTURE');
 
-    SELECT COUNT(*), SUM(CASE WHEN g.AC_GL_NO IS NOT NULL THEN 1 ELSE 0 END)
+    SELECT COUNT(*), NVL(SUM(CASE WHEN g.AC_GL_NO IS NOT NULL THEN 1 ELSE 0 END),0)
     INTO   v_ecr_tot, v_ecr_ret
     FROM   ACTB_HISTORY h
     LEFT JOIN (SELECT DISTINCT AC_GL_NO FROM STTB_ACCOUNT WHERE AC_NATURAL_GL LIKE v_gl_client) g
@@ -621,13 +628,16 @@ BEGIN
     FOR m IN c_mois LOOP
         -- Alimentation de la concentration mensuelle du portefeuille
         v_cle := TO_CHAR(m.mm,'YYYYMM');
-        IF NOT g_mois.EXISTS(v_cle) THEN
-            g_mois(v_cle).lib := TO_CHAR(m.mm,'MM/YYYY');
-            g_mois(v_cle).nb  := 0; g_mois(v_cle).arr := 0; g_mois(v_cle).arr_pri := 0;
+        IF g_mois.EXISTS(v_cle) THEN
+            v_rm := g_mois(v_cle);
+        ELSE
+            v_rm.lib := TO_CHAR(m.mm,'MM/YYYY');
+            v_rm.nb  := 0; v_rm.arr := 0; v_rm.arr_pri := 0;
         END IF;
-        g_mois(v_cle).nb      := g_mois(v_cle).nb + 1;
-        g_mois(v_cle).arr     := g_mois(v_cle).arr + m.arriere;
-        g_mois(v_cle).arr_pri := g_mois(v_cle).arr_pri + GREATEST(m.arriere_pri,0);
+        v_rm.nb      := v_rm.nb + 1;
+        v_rm.arr     := v_rm.arr + m.arriere;
+        v_rm.arr_pri := v_rm.arr_pri + GREATEST(m.arriere_pri,0);
+        g_mois(v_cle) := v_rm;
         v_row := v_row + 1;
 
         -- Rupture sur le credit

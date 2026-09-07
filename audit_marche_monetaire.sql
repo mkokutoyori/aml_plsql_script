@@ -514,6 +514,61 @@ BEGIN
         po('  Criticite         CRITIQUE > ELEVE > MOYEN > FAIBLE > INFO');
         po('  Montants          les colonnes en " M" sont exprimees en millions de XAF');
 
+        print_sub('0.6 Couverture des controles candidats issus du script d''exploration');
+        po('  La section 30 du rapport d''exploration (money_marker_exploration_report.txt)');
+        po('  a dimensionne 35 controles candidats. Le tableau ci-dessous indique, pour');
+        po('  chacun, le test du present script qui le porte. Les 35 candidats sont');
+        po('  couverts ; le script ajoute par ailleurs les controles de recalcul des');
+        po('  interets, de provisions, de remboursement, de retard et de rapprochement');
+        po('  comptable, qui ne figuraient pas dans la liste preparatoire.');
+        po('');
+        tbl_line('4,62,12');
+        po('  |' || fpad('N#', 4) || '|' || fpad('CONTROLE CANDIDAT (rapport d''exploration)', 62) || '|'
+            || fpad('TEST', 12) || '|');
+        tbl_line('4,62,12');
+        FOR r IN (
+            SELECT n, lib, test FROM (
+                SELECT 1 n, 'Contrepartie absente du referentiel clients' lib, 'MM-102' test FROM DUAL UNION ALL
+                SELECT 2, 'Contrepartie non renseignee', 'MM-102' FROM DUAL UNION ALL
+                SELECT 3, 'Contrepartie sans reference KYC', 'MM-104' FROM DUAL UNION ALL
+                SELECT 4, 'Contrepartie gelee, decedee ou introuvable', 'MM-103' FROM DUAL UNION ALL
+                SELECT 5, 'Contrepartie non autorisee (AUTH_STAT different de A)', 'MM-103' FROM DUAL UNION ALL
+                SELECT 6, 'Contrepartie a risque KYC eleve (RISK_LEVEL)', 'MM-105' FROM DUAL UNION ALL
+                SELECT 7, 'Contrepartie qui n''est pas un etablissement bancaire', 'MM-106' FROM DUAL UNION ALL
+                SELECT 8, 'Taux MAIN_COMP_RATE non renseigne', 'MM-308' FROM DUAL UNION ALL
+                SELECT 9, 'Taux MAIN_COMP_RATE egal a zero', 'MM-308' FROM DUAL UNION ALL
+                SELECT 10, 'Taux superieur a 15 pourcent', 'MM-308' FROM DUAL UNION ALL
+                SELECT 11, 'Montant du contrat nul ou negatif', 'MM-210' FROM DUAL UNION ALL
+                SELECT 12, 'Montant superieur a 1 milliard', 'MM-211' FROM DUAL UNION ALL
+                SELECT 13, 'Montant rond au million (operation forfaitaire)', 'MM-212' FROM DUAL UNION ALL
+                SELECT 14, 'Echeance anterieure a la date de valeur', 'MM-201' FROM DUAL UNION ALL
+                SELECT 15, 'Date de valeur anterieure a la date de booking', 'MM-202' FROM DUAL UNION ALL
+                SELECT 16, 'Contrat echu depuis plus de 90 jours', 'MM-506' FROM DUAL UNION ALL
+                SELECT 17, 'Contrat echu avec encours residuel non nul', 'MM-402' FROM DUAL UNION ALL
+                SELECT 18, 'Contrat sans aucune ecriture comptable', 'MM-601' FROM DUAL UNION ALL
+                SELECT 19, 'Contrat sans composante d''interet (ICCF)', 'MM-114' FROM DUAL UNION ALL
+                SELECT 20, 'Contrat sans echeancier', 'MM-114' FROM DUAL UNION ALL
+                SELECT 21, 'Contrat sans confirmation SWIFT', 'MM-113b' FROM DUAL UNION ALL
+                SELECT 22, 'Produit absent du referentiel CSTM_PRODUCT', 'MM-107' FROM DUAL UNION ALL
+                SELECT 23, 'Produit absent du parametrage LDTM_PRODUCT_MASTER', 'MM-107' FROM DUAL UNION ALL
+                SELECT 24, 'Duree hors bornes du produit (TENOR sous MIN ou sur MAX)', 'MM-204' FROM DUAL UNION ALL
+                SELECT 25, 'Contrat renouvele au moins une fois', 'MM-410' FROM DUAL UNION ALL
+                SELECT 26, 'Contrat renouvele plus de trois fois', 'MM-411' FROM DUAL UNION ALL
+                SELECT 27, 'Contrat sans DEALER identifie', 'MM-112' FROM DUAL UNION ALL
+                SELECT 28, 'Contrat sans compte de reglement par defaut', 'MM-111' FROM DUAL UNION ALL
+                SELECT 29, 'Contrat sans ligne de credit rattachee', 'MM-112b' FROM DUAL UNION ALL
+                SELECT 30, 'Contrat sans remarque / justification', 'MM-112c' FROM DUAL UNION ALL
+                SELECT 31, 'Contrat booke un samedi ou un dimanche', 'MM-205' FROM DUAL UNION ALL
+                SELECT 32, 'Reference ne commencant pas par le code agence', 'MM-109' FROM DUAL UNION ALL
+                SELECT 33, 'Contrat non confirme par la contrepartie', 'MM-113' FROM DUAL UNION ALL
+                SELECT 34, 'Ecritures saisies par l''application externe', 'MM-703' FROM DUAL UNION ALL
+                SELECT 35, 'Ecritures auto-autorisees (saisie = autorisation)', 'MM-701' FROM DUAL
+            ) ORDER BY n
+        ) LOOP
+            po('  |' || fpadl(TO_CHAR(r.n), 4) || '|' || fpad(r.lib, 62) || '|' || fpad(r.test, 12) || '|');
+        END LOOP;
+        tbl_line('4,62,12');
+
     EXCEPTION
         WHEN OTHERS THEN
             po('');
@@ -1884,6 +1939,36 @@ BEGIN
            AND TRIM(m.dealer) IS NULL;
         p_verdict('MM-112', 'Contrat sans operateur de marche identifie (DEALER)', v_cnt, v_tot, v_mt, 'ELEVE');
 
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND TRIM(m.credit_line) IS NULL;
+        p_verdict('MM-112b', 'Contrat sans ligne de credit de contrepartie rattachee',
+                  v_cnt, v_tot, v_mt, 'ELEVE');
+
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND TRIM(m.remarks) IS NULL;
+        p_verdict('MM-112c', 'Contrat sans justification saisie (REMARKS)',
+                  v_cnt, v_tot, v_mt, 'MOYEN');
+
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND TRIM(m.dealing_method) IS NULL;
+        p_verdict('MM-112d', 'Contrat sans canal de negoce identifie (DEALING_METHOD)',
+                  v_cnt, v_tot, v_mt, 'MOYEN');
+
         -- -----------------------------------------------------
         p_test('MM-113', 'Confirmation de la contrepartie');
         p_obj('verifier que chaque operation est confirmee par la contrepartie et');
@@ -2329,6 +2414,172 @@ BEGIN
                       fnum(r.dur) || ' / ' || fnum(r.std_tenor) || ' j');
             END LOOP;
             d_foot;
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 10 BIS. MM-21x : MONTANTS ET PROFIL DES OPERATIONS
+    -- =========================================================
+    print_section('10 BIS. CONTROLES MM-21x : MONTANTS ET PROFIL DES OPERATIONS');
+    BEGIN
+        po('  Controles sur les montants eux-memes : validite, coherence interne entre');
+        po('  les differentes colonnes de montant du contrat, et profil des valeurs');
+        po('  (operations significatives, montants ronds).');
+
+        -- -----------------------------------------------------
+        p_test('MM-210', 'Montant du contrat nul ou negatif');
+        p_obj('un contrat de marche monetaire porte necessairement un nominal');
+        po('             strictement positif.');
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND NVL(m.lcy_amount, 0) <= 0;
+        p_verdict('MM-210', 'Montant du contrat nul ou negatif', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
+        IF v_cnt > 0 THEN
+            d_head('MONTANT');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT m.contract_ref_no, m.product, m.counterparty,
+                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
+                                 WHERE c.customer_no = m.counterparty) nom,
+                               m.lcy_amount, m.main_comp_rate, m.value_date, m.maturity_date
+                          FROM ldtb_contract_master m
+                         WHERE m.module = k_mod
+                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                                WHERE v.contract_ref_no = m.contract_ref_no)
+                           AND NVL(m.lcy_amount, 0) <= 0
+                         ORDER BY m.lcy_amount
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
+                      r.lcy_amount, r.main_comp_rate, r.value_date, r.maturity_date,
+                      famt(r.lcy_amount));
+            END LOOP;
+            d_foot;
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-211', 'Operations superieures au seuil de signification');
+        p_obj('delimiter la population des operations a examiner en priorite sur');
+        po('             piece. Ce n''est pas une anomalie mais un perimetre d''echantillonnage.');
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND m.lcy_amount >= k_mt_signif;
+        print_kv('Seuil applique', famt(k_mt_signif) || ' XAF');
+        print_kv('Couverture en montant du perimetre', fpct(v_mt, v_mt_ctr));
+        p_verdict('MM-211', 'Operations au-dessus du seuil de signification', v_cnt, v_nb_ctr, v_mt, 'INFO');
+
+        -- -----------------------------------------------------
+        p_test('MM-212', 'Montants ronds, indice d''operation forfaitaire');
+        p_obj('un nominal rond au million ou au milliard traduit une operation');
+        po('             negociee en bloc. La proportion de montants ronds eclaire la nature du');
+        po('             portefeuille et signale les operations calibrees a la main.');
+        print_sub('MM-212 a. Granularite des montants');
+        tbl_line('4,34,12,12,20,12');
+        po('  |' || fpad('N#', 4) || '|' || fpad('GRANULARITE DU NOMINAL', 34) || '|' || fpadl('NB', 12) || '|'
+            || fpadl('% NB', 12) || '|' || fpadl('MONTANT LCY', 20) || '|' || fpadl('% MT', 12) || '|');
+        tbl_line('4,34,12,12,20,12');
+        v_row := 0;
+        FOR r IN (
+            SELECT tr, COUNT(*) nb, SUM(mt) mt
+              FROM (SELECT CASE
+                             WHEN MOD(m.lcy_amount, 1000000000) = 0 THEN '1. multiple du milliard'
+                             WHEN MOD(m.lcy_amount,  100000000) = 0 THEN '2. multiple de 100 millions'
+                             WHEN MOD(m.lcy_amount,   10000000) = 0 THEN '3. multiple de 10 millions'
+                             WHEN MOD(m.lcy_amount,    1000000) = 0 THEN '4. multiple du million'
+                             WHEN MOD(m.lcy_amount,       1000) = 0 THEN '5. multiple du millier'
+                             ELSE                                       '6. montant non rond'
+                           END tr, m.lcy_amount mt
+                      FROM ldtb_contract_master m
+                     WHERE m.module = k_mod
+                       AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                       AND NVL(m.lcy_amount, 0) > 0
+                       AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = m.contract_ref_no))
+             GROUP BY tr ORDER BY tr
+        ) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.tr, 34) || '|' || fpadl(fnum(r.nb), 12) || '|'
+                || fpadl(fpct(r.nb, v_nb_ctr), 12) || '|' || fpadl(fmio(r.mt), 20) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 12) || '|');
+        END LOOP;
+        tbl_line('4,34,12,12,20,12');
+
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND NVL(m.lcy_amount, 0) > 0
+           AND MOD(m.lcy_amount, 1000000) = 0;
+        p_verdict('MM-212', 'Nominal rond au million (operation possiblement forfaitaire)',
+                  v_cnt, v_nb_ctr, v_mt, 'INFO');
+
+        -- -----------------------------------------------------
+        p_test('MM-213', 'Coherence interne des colonnes de montant du contrat');
+        p_obj('AMOUNT, LCY_AMOUNT et MAX_DRAWDOWN_AMOUNT decrivent le meme nominal.');
+        po('             Toute divergence signale une reprise de donnees ou un amendement partiel.');
+        SELECT COUNT(*), NVL(SUM(ABS(NVL(m.amount, 0) - NVL(m.max_drawdown_amount, 0))), 0)
+          INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND m.max_drawdown_amount IS NOT NULL
+           AND ABS(NVL(m.amount, 0) - NVL(m.max_drawdown_amount, 0)) > k_tol_abs;
+        p_verdict('MM-213', 'Nominal different du montant maximal de tirage', v_cnt, v_nb_ctr, v_mt, 'MOYEN');
+
+        SELECT COUNT(*), NVL(SUM(ABS(NVL(m.amount, 0) - NVL(m.lcy_amount, 0))), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND ABS(NVL(m.amount, 0) - NVL(m.lcy_amount, 0)) > k_tol_abs;
+        p_verdict('MM-213b', 'Montant en devise different du montant en monnaie locale',
+                  v_cnt, v_nb_ctr, v_mt, 'MOYEN');
+        IF v_cnt > 0 THEN
+            tbl_line('4,20,7,10,28,20,20,20');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 20) || '|' || fpad('PROD', 7) || '|'
+                || fpad('DEVISE', 10) || '|' || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('AMOUNT', 20) || '|'
+                || fpadl('LCY_AMOUNT', 20) || '|' || fpadl('ECART', 20) || '|');
+            tbl_line('4,20,7,10,28,20,20,20');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT m.contract_ref_no ref, m.product, m.currency ccy, m.amount, m.lcy_amount,
+                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
+                                 WHERE c.customer_no = m.counterparty) etat
+                          FROM ldtb_contract_master m
+                         WHERE m.module = k_mod
+                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                                WHERE v.contract_ref_no = m.contract_ref_no)
+                           AND ABS(NVL(m.amount, 0) - NVL(m.lcy_amount, 0)) > k_tol_abs
+                         ORDER BY ABS(NVL(m.amount, 0) - NVL(m.lcy_amount, 0)) DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 20) || '|' || fpad(r.product, 7) || '|'
+                    || fpad(r.ccy, 10) || '|' || fpad(r.etat, 28) || '|' || fpadl(famt(r.amount), 20) || '|'
+                    || fpadl(famt(r.lcy_amount), 20) || '|'
+                    || fpadl(famt(NVL(r.amount, 0) - NVL(r.lcy_amount, 0)), 20) || '|');
+            END LOOP;
+            tbl_line('4,20,7,10,28,20,20,20');
         END IF;
 
     EXCEPTION
@@ -3692,6 +3943,103 @@ BEGIN
             tbl_line('4,20,7,28,20,10,12,20,18');
         END IF;
 
+
+        -- -----------------------------------------------------
+        p_test('MM-410', 'Contrat renouvele (rollover)');
+        p_obj('un renouvellement prolonge l''operation sans nouvelle decision');
+        po('             d''investissement. Il doit rester tracable et autorise.');
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND NVL(m.rollover_count, 0) > 0;
+        p_verdict('MM-410', 'Contrat renouvele au moins une fois', v_cnt, v_nb_ctr, v_mt, 'INFO');
+
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND NVL(m.rollover_count, 0) > 3;
+        p_verdict('MM-411', 'Contrat renouvele plus de trois fois', v_cnt, v_nb_ctr, v_mt, 'ELEVE');
+        IF v_cnt > 0 THEN
+            d_head('NB RENOUVELLEMENTS');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT m.contract_ref_no, m.product, m.counterparty,
+                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
+                                 WHERE c.customer_no = m.counterparty) nom,
+                               m.lcy_amount, m.main_comp_rate, m.value_date, m.maturity_date,
+                               m.rollover_count rc
+                          FROM ldtb_contract_master m
+                         WHERE m.module = k_mod
+                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                                WHERE v.contract_ref_no = m.contract_ref_no)
+                           AND NVL(m.rollover_count, 0) > 3
+                         ORDER BY m.rollover_count DESC, m.lcy_amount DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
+                      r.lcy_amount, r.main_comp_rate, r.value_date, r.maturity_date, fnum(r.rc));
+            END LOOP;
+            d_foot;
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-412', 'Instruction de renouvellement enregistree mais jamais executee');
+        p_obj('un contrat porteur d''une instruction de rollover dans');
+        po('             LDTB_CONTRACT_ROLLOVER mais dont ROLLOVER_COUNT reste a zero et dont');
+        po('             ROLLOVER_INDICATOR vaut N revele un parametrage dormant : la banque');
+        po('             croit disposer d''un renouvellement automatique qui ne se declenche pas.');
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND NVL(m.rollover_count, 0) = 0
+           AND EXISTS (SELECT 1 FROM ldtb_contract_rollover o
+                        WHERE o.contract_ref_no = m.contract_ref_no);
+        p_verdict('MM-412', 'Instruction de renouvellement enregistree mais jamais executee',
+                  v_cnt, v_nb_ctr, v_mt, 'MOYEN');
+        IF v_cnt > 0 THEN
+            tbl_line('4,20,7,28,20,12,12,12,14');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 20) || '|' || fpad('PROD', 7) || '|'
+                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|' || fpad('ECHEANCE', 12) || '|'
+                || fpad('ROLL. AUT.', 12) || '|' || fpad('INDICATEUR', 12) || '|'
+                || fpadl('TYPE / METHODE', 14) || '|');
+            tbl_line('4,20,7,28,20,12,12,12,14');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT m.contract_ref_no ref, m.product, m.lcy_amount nom, m.maturity_date md,
+                               TRIM(m.rollover_allowed) ra, TRIM(m.rollover_indicator) ri,
+                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
+                                 WHERE c.customer_no = m.counterparty) etat,
+                               (SELECT MAX(TRIM(o.rollover_type) || ' / ' || TRIM(o.roll_by))
+                                  FROM ldtb_contract_rollover o
+                                 WHERE o.contract_ref_no = m.contract_ref_no) typ
+                          FROM ldtb_contract_master m
+                         WHERE m.module = k_mod
+                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                                WHERE v.contract_ref_no = m.contract_ref_no)
+                           AND NVL(m.rollover_count, 0) = 0
+                           AND EXISTS (SELECT 1 FROM ldtb_contract_rollover o
+                                        WHERE o.contract_ref_no = m.contract_ref_no)
+                         ORDER BY m.lcy_amount DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 20) || '|' || fpad(r.product, 7) || '|'
+                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpad(fdt(r.md), 12) || '|'
+                    || fpad(r.ra, 12) || '|' || fpad(r.ri, 12) || '|' || fpadl(r.typ, 14) || '|');
+            END LOOP;
+            tbl_line('4,20,7,28,20,12,12,12,14');
+        END IF;
+
     EXCEPTION
         WHEN OTHERS THEN
             po('');
@@ -4043,6 +4391,58 @@ BEGIN
                 || fpadl(CASE WHEN r.dmax IS NULL THEN '-' ELSE fnum(r.dmax) || ' j' END, 20) || '|');
         END LOOP;
         tbl_line('4,30,12,20,14,20,14,20');
+
+
+        -- -----------------------------------------------------
+        p_test('MM-506', 'Population des contrats echus de longue date');
+        p_obj('recenser les operations echues depuis plus de ' || TO_CHAR(k_ech_ancien) || ' jours, quel que soit');
+        po('             leur etat de remboursement. Ce n''est pas une anomalie en soi : c''est la');
+        po('             population qui devrait etre entierement denouee et soldee comptablement,');
+        po('             et qui sert de base aux tests MM-402, MM-503 et MM-608.');
+        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master m
+         WHERE m.module = k_mod
+           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = m.contract_ref_no)
+           AND TRUNC(k_arrete) - TRUNC(m.maturity_date) > k_ech_ancien;
+        p_verdict('MM-506', 'Contrats echus depuis plus de ' || TO_CHAR(k_ech_ancien) || ' jours',
+                  v_cnt, v_nb_ctr, v_mt, 'INFO');
+
+        print_sub('MM-506 bis. Anciennete des contrats echus');
+        tbl_line('4,30,12,20,12,20');
+        po('  |' || fpad('N#', 4) || '|' || fpad('ANCIENNETE DE L''ECHEANCE', 30) || '|' || fpadl('NB', 12) || '|'
+            || fpadl('NOMINAL', 20) || '|' || fpadl('% NB', 12) || '|' || fpadl('DONT NON SOLDE', 20) || '|');
+        tbl_line('4,30,12,20,12,20');
+        v_row := 0;
+        FOR r IN (
+            SELECT tr, COUNT(*) nb, SUM(nom) mt,
+                   SUM(CASE WHEN rembt < nom - k_tol_abs THEN nom ELSE 0 END) ns
+              FROM (SELECT CASE
+                             WHEN TRUNC(k_arrete) - TRUNC(m.maturity_date) < 0    THEN '0. non echu'
+                             WHEN TRUNC(k_arrete) - TRUNC(m.maturity_date) <= 30  THEN '1. moins de 30 jours'
+                             WHEN TRUNC(k_arrete) - TRUNC(m.maturity_date) <= 90  THEN '2. 31 a 90 jours'
+                             WHEN TRUNC(k_arrete) - TRUNC(m.maturity_date) <= 365 THEN '3. 91 a 365 jours'
+                             WHEN TRUNC(k_arrete) - TRUNC(m.maturity_date) <= 730 THEN '4. 1 a 2 ans'
+                             ELSE                                                      '5. plus de 2 ans'
+                           END tr,
+                           m.lcy_amount nom,
+                           NVL((SELECT SUM(l.amount_paid) FROM ldtb_contract_liq l
+                                 WHERE l.contract_ref_no = m.contract_ref_no
+                                   AND l.component = 'PRINCIPAL'), 0) rembt
+                      FROM ldtb_contract_master m
+                     WHERE m.module = k_mod
+                       AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
+                       AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = m.contract_ref_no))
+             GROUP BY tr ORDER BY tr
+        ) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.tr, 30) || '|' || fpadl(fnum(r.nb), 12) || '|'
+                || fpadl(fmio(r.mt), 20) || '|' || fpadl(fpct(r.nb, v_nb_ctr), 12) || '|'
+                || fpadl(fmio(r.ns), 20) || '|');
+        END LOOP;
+        tbl_line('4,30,12,20,12,20');
 
     EXCEPTION
         WHEN OTHERS THEN

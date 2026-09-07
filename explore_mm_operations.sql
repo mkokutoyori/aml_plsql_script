@@ -833,7 +833,7 @@ BEGIN
                          WHEN lcy_amount < 1000000000 THEN '5. 500 M a 1 Md'
                          WHEN lcy_amount < 5000000000 THEN '6. 1 a 5 Md'
                          ELSE                              '7. 5 Md et plus'
-                       END AS tranche
+                       END AS tranche, lcy_amount
                 FROM ldtb_contract_master WHERE module = 'MM')
             GROUP BY tranche ORDER BY tranche
         ) LOOP
@@ -1976,16 +1976,17 @@ BEGIN
         SELECT COUNT(*) INTO v_tot FROM actb_history;
         v_row := 0;
         FOR r IN (SELECT * FROM (
-                    SELECT user_id, SUM(nb) nb, MIN(d1) d1, MAX(d2) d2, SUM(tot) tot,
+                    SELECT user_id, SUM(nb_ecr) nb, MIN(dmin) d1, MAX(dmax) d2, SUM(mt) tot,
                            LISTAGG(module, ',') WITHIN GROUP (ORDER BY module) mods
                     FROM (
-                        SELECT h.user_id, h.module, COUNT(*) nb, MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
-                               SUM(NVL(h.lcy_amount, 0)) tot
+                        SELECT h.user_id, h.module, COUNT(*) nb_ecr,
+                               MIN(h.trn_dt) dmin, MAX(h.trn_dt) dmax,
+                               SUM(NVL(h.lcy_amount, 0)) mt
                         FROM actb_history h
                         GROUP BY h.user_id, h.module
                     )
                     GROUP BY user_id
-                    ORDER BY SUM(nb) DESC
+                    ORDER BY SUM(nb_ecr) DESC
                   ) WHERE ROWNUM <= 30) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.user_id, 20) || '|' || fpadl(fnum(r.nb), 16) || '|'

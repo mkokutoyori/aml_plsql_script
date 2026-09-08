@@ -29,11 +29,13 @@
 --   opens at launch.
 --
 -- REPORT LAYOUT
---   PART 0  - scope, parameters, chart of accounts, legend
+--   PART 0  - scope, parameters, chart of accounts, legend, source of truth
+--             and what the bank does with these securities (0.8)
 --   PART 1  - THE BANK'S SECURITIES PORTFOLIO
 --             1.1 to 1.7   the portfolio as the deals describe it
 --             1.8 to 1.12  the portfolio as the accounting shows it, and the
---                          reconciliation of the two, live book then matured book
+--                          reconciliation of the two, securities still held then
+--                          securities already out of the book
 --             1.13, 1.14   walkthrough of the large deals and the high rates
 --   PART 2  - SECURITIES LIFE CYCLE      LC-01 to LC-06, LIF-01 to LIF-07
 --   PART 3  - EXTRACTION INTEGRITY       EXT-01 to EXT-04
@@ -81,6 +83,7 @@ DECLARE
 
     -- Recalculation tolerance
     k_tol_abs     NUMBER := 1;           -- absolute tolerance, in XAF
+    k_tol_pro     NUMBER := 2;           -- tolerance on a prorated figure, in percent
 
     -- Business thresholds
     k_mt_large    NUMBER := 5000000000;  -- large deal walkthrough threshold (5 Bn)
@@ -176,7 +179,7 @@ DECLARE
     v_lib     VARCHAR2(200);  -- account description buffer
 
     -- Column widths of the securities detail table (see sec_head below)
-    k_sec_w   VARCHAR2(60) := '4,24,11,26,22,18,16,14,17,30';
+    k_sec_w   VARCHAR2(80) := '4,24,11,22,22,18,16,14,17,22,16,30';
 
     -- ========================================================================
     -- Display helpers
@@ -413,14 +416,21 @@ DECLARE
     -- ========================================================================
     PROCEDURE sec_head(p_find VARCHAR2 DEFAULT 'FINDING') IS
     BEGIN
-        po('     Securities concerned .');
+        po('     Securities concerned . EXIT and HELD are read from the entries,');
+        po('     not from the contract: a security sold before maturity left the');
+        po('     book on the day the PRINCIPAL_LIQD entry was passed.');
         tbl_head(k_sec_w,
-                 'N#|CONTRACT|PRODUCT|ISSUER|NOMINAL|RATE|BOOKED|VALUE|MATURITY|' || p_find,
+                 'N#|CONTRACT|PRODUCT|ISSUER|NOMINAL|RATE|BOOKED|VALUE|MATURITY|EXIT|HELD|'
+                 || p_find,
                  '|CONTRACT_REF_NO|PRODUCT|CUSTOMER_NAME1|LCY_AMOUNT|MAIN_COMP_RATE'
-                 || '|BOOKING_DATE|VALUE_DATE|MATURITY_DATE|',
-                 'RLLLRRLLLR');
+                 || '|BOOKING_DATE|VALUE_DATE|MATURITY_DATE|PRINCIPAL_LIQD|days|',
+                 'RLLLRRLLLLRR');
     END;
 
+    -- One detail line. The holding period is not taken from the contract: it
+    -- is read from ACTB_HISTORY, because a security bought to be held to
+    -- maturity can be sold earlier when the bank needs liquidity, and only
+    -- the entries know the day it actually left the book.
     PROCEDURE sec_row(p_n    NUMBER,
                       p_ref  VARCHAR2,
                       p_prod VARCHAR2,
@@ -431,12 +441,45 @@ DECLARE
                       p_vd   DATE,
                       p_md   DATE,
                       p_find VARCHAR2) IS
+        v_in   DATE;
+        v_out  DATE;
+        v_held NUMBER;
+        v_st   VARCHAR2(20);
     BEGIN
+        BEGIN
+            SELECT MIN(CASE WHEN h.amount_tag = 'PRINCIPAL' THEN h.trn_dt END),
+                   MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
+                             AND NVL(h.lcy_amount, 0) > 0 THEN h.trn_dt END)
+              INTO v_in, v_out
+              FROM actb_history h
+             WHERE h.trn_ref_no = p_ref AND h.module = k_mod;
+        EXCEPTION
+            WHEN OTHERS THEN v_in := NULL; v_out := NULL;
+        END;
+        v_in := NVL(v_in, p_vd);
+        IF v_out IS NOT NULL THEN
+            v_held := TRUNC(v_out) - TRUNC(v_in);
+            v_st   := CASE WHEN p_md IS NOT NULL
+                            AND TRUNC(v_out) < TRUNC(p_md) - k_late_d THEN 'SOLD'
+                           ELSE 'REDEEMED' END;
+        ELSIF v_in IS NULL THEN
+            v_held := NULL;
+            v_st   := 'NO ENTRY';
+        ELSE
+            v_held := TRUNC(LEAST(k_asof, NVL(p_md, k_asof))) - TRUNC(v_in);
+            v_st   := CASE WHEN p_md IS NOT NULL AND TRUNC(p_md) <= TRUNC(k_asof)
+                           THEN 'OVERDUE' ELSE 'HELD' END;
+        END IF;
         po('  |' || fpadl(TO_CHAR(p_n), 4) || '|' || fpad(p_ref, 24) || '|'
-            || fpad(p_prod, 11) || '|' || fpad(p_iss, 26) || '|'
+            || fpad(p_prod, 11) || '|' || fpad(p_iss, 22) || '|'
             || fpadl(famt(p_nom), 22) || '|' || fpadl(ftx(p_rate), 18) || '|'
             || fpad(fdt(p_bd), 16) || '|' || fpad(fdt(p_vd), 14) || '|'
-            || fpad(fdt(p_md), 17) || '|' || fpadl(p_find, 30) || '|');
+            || fpad(fdt(p_md), 17) || '|'
+            || fpad(CASE WHEN v_out IS NULL THEN v_st
+                         ELSE fdt(v_out) || ' ' || v_st END, 22) || '|'
+            || fpadl(CASE WHEN v_held IS NULL THEN '-'
+                          ELSE fnum(v_held) || ' d' END, 16) || '|'
+            || fpadl(p_find, 30) || '|');
     END;
 
     PROCEDURE sec_foot IS
@@ -602,7 +645,7 @@ DECLARE
                     WHEN v_nliq > 0
                          THEN 'redeemed BUT a balance is still open, see part 2'
                     WHEN ABS(v_bsec) > k_tol_abs
-                         THEN 'live position of ' || famt(v_bsec) || ' XAF still carried'
+                         THEN 'still held, position of ' || famt(v_bsec) || ' XAF carried'
                     ELSE 'no redemption entry and no security balance, to be explained'
                END);
         EXCEPTION
@@ -645,6 +688,8 @@ BEGIN
         print_kv('Reporting date',                       fdt(k_asof));
         print_kv('Audited period on BOOKING_DATE',       fdt(k_dt_from) || ' to ' || fdt(k_dt_to));
         print_kv('Absolute tolerance on recalculations', famt(k_tol_abs) || ' XAF');
+        print_kv('Tolerance on a figure prorated over the holding period',
+                 ftx(k_tol_pro));
         print_kv('Large deal walkthrough threshold',     famt(k_mt_large) || ' XAF (' || fmio(k_mt_large) || ')');
         print_kv('High rate walkthrough threshold',      ftx(k_rate_high));
         print_kv('Plausible rate range',                 ftx(k_rate_min) || ' to ' || ftx(k_rate_max));
@@ -799,6 +844,37 @@ BEGIN
         po('  disagree with the entries, THE ENTRIES WIN, and the disagreement is');
         po('  itself reported as a finding.');
 
+        print_sub('0.8 What the bank does with these securities');
+        po('  The bank buys a sovereign security and intends to HOLD IT TO MATURITY');
+        po('  so as to cash the whole coupon. The terms of that intention are in');
+        po('  LDTB_CONTRACT_MASTER: nominal, rate, value date, maturity date.');
+        po('');
+        po('  When liquidity is tight the bank SELLS THE SECURITY BEFORE MATURITY.');
+        po('  That is a normal act of treasury management, not an anomaly. It is a');
+        po('  transaction, so like every transaction it lands in ACTB_HISTORY: the');
+        po('  security leaves the book on the day a PRINCIPAL_LIQD entry is passed');
+        po('  on it, and the contract master, which only ever held the intention, is');
+        po('  not rewritten. The maturity date in the deal therefore says NOTHING');
+        po('  about whether the security is still on the balance sheet.');
+        po('');
+        po('  Two consequences run through the whole report:');
+        po('');
+        po('    STILL HELD      no PRINCIPAL_LIQD entry has been passed. This, and');
+        po('                    never MATURITY_DATE, is how every control decides');
+        po('                    whether a security is on the books.');
+        po('    HOLDING PERIOD  from VALUE_DATE to the PRINCIPAL_LIQD entry, or to');
+        po('                    ' || fdt(k_asof) || ' while the security is still held. It is printed');
+        po('                    in every exception table, and it is the period over');
+        po('                    which interest was legitimately earned. A security');
+        po('                    sold at half its life earned half its coupon, and');
+        po('                    that is what the accounts must show.');
+        po('');
+        po('  A sale before maturity is therefore reported as INFORMATION (LIF-05),');
+        po('  with the holding period and the yield it realised. What is tested as a');
+        po('  finding is that the accruals STOPPED on the day of the sale (LC-06),');
+        po('  that the income booked matches the period held (LC-04), and that');
+        po('  nothing was left behind on the balance sheet (LC-01, LC-02, LC-03).');
+
     EXCEPTION
         WHEN OTHERS THEN
             po('');
@@ -824,6 +900,11 @@ BEGIN
     po('  The portfolio is presented twice on purpose. First as the deals');
     po('  describe it, then as the accounting shows it, and the two are');
     po('  confronted in section 1.12. Where they differ, THE ENTRIES ARE RIGHT.');
+    po('');
+    po('  Read section 0.8 first. The deals say what the bank meant to hold to');
+    po('  maturity; the entries say what it still holds after the sales it made');
+    po('  to raise liquidity. Every figure below labelled STILL HELD or HELD comes');
+    po('  from the entries.');
 
     -- =========================================================
     -- 1. THE PORTFOLIO AS THE DEALS DESCRIBE IT
@@ -842,10 +923,10 @@ BEGIN
            AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                 WHERE v.contract_ref_no = c.contract_ref_no)
            AND c.maturity_date > k_asof;
-        print_kv('Live at ' || fdt(k_asof) || ' (MATURITY_DATE in the future)',
+        print_kv('Not yet matured per the deals (MATURITY_DATE in the future)',
                  fnum(v_cnt) || '   ' || fpct(v_cnt, v_nb_ctr));
-        print_kv('Live nominal',                               fmio(v_mt) || '   ' || fpct(v_mt, v_mt_ctr));
-        print_kv('Matured contracts',                          fnum(v_nb_ctr - v_cnt));
+        print_kv('Nominal not yet matured',                    fmio(v_mt) || '   ' || fpct(v_mt, v_mt_ctr));
+        print_kv('Matured per the deals',                      fnum(v_nb_ctr - v_cnt));
         print_kv('Matured nominal',                            fmio(v_mt_ctr - v_mt));
         SELECT MIN(c.value_date), MAX(c.maturity_date), ROUND(AVG(c.main_comp_rate), 4),
                ROUND(AVG(c.maturity_date - c.value_date))
@@ -859,34 +940,102 @@ BEGIN
         print_kv('Latest maturity (MATURITY_DATE)',            fdt(v_d_last));
         print_kv('Average rate (MAIN_COMP_RATE)',              ftx(v_tot));
         print_kv('Average tenor',                              fnum(v_tot2) || ' days');
+        po('');
+        po('  The bank buys these securities to hold them and cash the coupon, but');
+        po('  sells before maturity when liquidity is tight. A security is STILL HELD');
+        po('  only while no PRINCIPAL_LIQD entry has been passed on it. That is read');
+        po('  from ACTB_HISTORY, not from MATURITY_DATE, and the two do not always');
+        po('  say the same thing.');
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt2, v_mt2
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod
+                              AND h.amount_tag = 'PRINCIPAL_LIQD'
+                              AND NVL(h.lcy_amount, 0) > 0);
+        print_kv('Still held at ' || fdt(k_asof) || ' (no PRINCIPAL_LIQD entry)',
+                 fnum(v_cnt2) || '   ' || fpct(v_cnt2, v_nb_ctr));
+        print_kv('Nominal still held',                         fmio(v_mt2) || '   ' || fpct(v_mt2, v_mt_ctr));
+        print_kv('Already out of the book (PRINCIPAL_LIQD passed)',
+                 fnum(v_nb_ctr - v_cnt2) || '   ' || fpct(v_nb_ctr - v_cnt2, v_nb_ctr));
+        SELECT ROUND(AVG(TRUNC(q.out_dt) - TRUNC(q.vd))),
+               NVL(SUM(CASE WHEN q.md IS NOT NULL
+                             AND TRUNC(q.out_dt) < TRUNC(q.md) - k_late_d
+                            THEN 1 ELSE 0 END), 0)
+          INTO v_tot, v_cnt3
+          FROM (SELECT c.value_date vd, c.maturity_date md,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                                   WHERE h.trn_ref_no = c.contract_ref_no
+                                     AND h.module = k_mod
+                                     AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                     AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)) q
+         WHERE q.out_dt IS NOT NULL;
+        print_kv('Average holding period of the securities already out',
+                 CASE WHEN v_tot IS NULL THEN '-' ELSE fnum(v_tot) || ' days' END);
+        print_kv('Of which sold more than ' || TO_CHAR(k_late_d)
+                 || ' days before maturity (see LIF-05)',
+                 fnum(v_cnt3) || '   ' || fpct(v_cnt3, v_nb_ctr - v_cnt2));
 
         print_sub('1.2 Breakdown by product');
-        tbl_head('4,12,20,26,16,18,18,18,18',
-                 'N#|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|AVERAGE TENOR|LIVE|MATURED',
+        po('  AVERAGE TENOR is what the deal was written for, MATURITY_DATE minus');
+        po('  VALUE_DATE. AVERAGE HELD is what the bank actually did with it: from the');
+        po('  value date to the PRINCIPAL_LIQD entry when the security has left the');
+        po('  book, and to ' || fdt(k_asof) || ' when it is still there. A held average well below');
+        po('  the tenor is a book that is being sold down before term.');
+        tbl_head('4,12,18,26,14,16,16,14,12,16',
+                 'N#|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|AVERAGE TENOR|STILL HELD'
+                 || '|OUT|AVERAGE HELD',
                  '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE|MATURITY_DATE minus'
-                 || ' VALUE_DATE| | ',
-                 'RLRRRRRRR');
+                 || ' VALUE_DATE|PRINCIPAL_LIQD|PRINCIPAL_LIQD|days',
+                 'RLRRRRRRRR');
         v_row := 0;
-        FOR r IN (SELECT c.product, COUNT(*) nb, SUM(c.lcy_amount) mt,
-                         ROUND(AVG(c.main_comp_rate), 4) rate,
-                         ROUND(AVG(c.maturity_date - c.value_date)) tenor,
-                         SUM(CASE WHEN c.maturity_date > k_asof THEN 1 ELSE 0 END) nb_live,
-                         SUM(CASE WHEN c.maturity_date <= k_asof THEN 1 ELSE 0 END) nb_mat
-                    FROM ldtb_contract_master c
-                   WHERE c.module = k_mod
-                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                          WHERE v.contract_ref_no = c.contract_ref_no)
-                   GROUP BY c.product
-                   ORDER BY SUM(c.lcy_amount) DESC) LOOP
+        FOR r IN (SELECT q.product, COUNT(*) nb, SUM(q.nom) mt,
+                         ROUND(AVG(q.rate), 4) rate, ROUND(AVG(q.tenor)) tenor,
+                         SUM(CASE WHEN q.out_dt IS NULL THEN 1 ELSE 0 END) nb_held,
+                         SUM(CASE WHEN q.out_dt IS NULL THEN 0 ELSE 1 END) nb_out,
+                         ROUND(AVG(q.held)) held
+                    FROM (SELECT TRIM(c.product) product, c.lcy_amount nom,
+                                 c.main_comp_rate rate,
+                                 c.maturity_date - c.value_date tenor,
+                                 (SELECT MIN(h.trn_dt) FROM actb_history h
+                                   WHERE h.trn_ref_no = c.contract_ref_no
+                                     AND h.module = k_mod
+                                     AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                     AND NVL(h.lcy_amount, 0) > 0) out_dt,
+                                 TRUNC(NVL((SELECT MIN(h.trn_dt) FROM actb_history h
+                                   WHERE h.trn_ref_no = c.contract_ref_no
+                                     AND h.module = k_mod
+                                     AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                     AND NVL(h.lcy_amount, 0) > 0),
+                                           LEAST(k_asof, NVL(c.maturity_date, k_asof))))
+                                   - TRUNC(c.value_date) held
+                            FROM ldtb_contract_master c
+                           WHERE c.module = k_mod
+                             AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                             AND c.version_no = (SELECT MAX(v.version_no)
+                                                   FROM ldtb_contract_master v
+                                                  WHERE v.contract_ref_no
+                                                        = c.contract_ref_no)) q
+                   GROUP BY q.product
+                   ORDER BY SUM(q.nom) DESC) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.product, 12) || '|'
-                || fpadl(fnum(r.nb), 20) || '|' || fpadl(fmio(r.mt), 26) || '|'
-                || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|' || fpadl(ftx(r.rate), 18) || '|'
-                || fpadl(fnum(r.tenor) || ' d', 18) || '|' || fpadl(fnum(r.nb_live), 18) || '|'
-                || fpadl(fnum(r.nb_mat), 18) || '|');
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 14) || '|' || fpadl(ftx(r.rate), 16) || '|'
+                || fpadl(fnum(r.tenor) || ' d', 16) || '|' || fpadl(fnum(r.nb_held), 14) || '|'
+                || fpadl(fnum(r.nb_out), 12) || '|'
+                || fpadl(fnum(r.held) || ' d', 16) || '|');
         END LOOP;
-        tbl_line('4,12,20,26,16,18,18,18,18');
+        tbl_line('4,12,18,26,14,16,16,14,12,16');
 
         print_sub('1.3 Breakdown by issuer');
         po('  The issuers are read from STTM_CUSTOMER through COUNTERPARTY. On a');
@@ -921,13 +1070,19 @@ BEGIN
 
         print_sub('1.4 Issuer against product');
         tbl_head('4,34,12,18,26,16,18,16',
-                 'N#|ISSUER|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|LIVE',
-                 '|CUSTOMER_NAME1|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE| ',
+                 'N#|ISSUER|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|STILL HELD',
+                 '|CUSTOMER_NAME1|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE'
+                 || '|PRINCIPAL_LIQD',
                  'RLLRRRRR');
         v_row := 0;
         FOR r IN (SELECT MAX(x.customer_name1) issuer, c.product, COUNT(*) nb,
                          SUM(c.lcy_amount) mt, ROUND(AVG(c.main_comp_rate), 4) rate,
-                         SUM(CASE WHEN c.maturity_date > k_asof THEN 1 ELSE 0 END) nb_live
+                         SUM(CASE WHEN (SELECT COUNT(*) FROM actb_history h
+                                         WHERE h.trn_ref_no = c.contract_ref_no
+                                           AND h.module = k_mod
+                                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                           AND NVL(h.lcy_amount, 0) > 0) = 0
+                                  THEN 1 ELSE 0 END) nb_live
                     FROM ldtb_contract_master c
                     LEFT JOIN sttm_customer x ON x.customer_no = c.counterparty
                    WHERE c.module = k_mod
@@ -945,9 +1100,11 @@ BEGIN
         END LOOP;
         tbl_line('4,34,12,18,26,16,18,16');
 
-        print_sub('1.5 Maturity schedule of the live book');
-        po('  What remains to be repaid, and when. The band is computed from');
-        po('  MATURITY_DATE against the reporting date ' || fdt(k_asof) || '.');
+        print_sub('1.5 Maturity schedule of the securities still held');
+        po('  What remains to be repaid, and when. Only the securities STILL HELD are');
+        po('  counted, that is those with no PRINCIPAL_LIQD entry: a security already');
+        po('  sold has nothing left to mature. The band is computed from MATURITY_DATE');
+        po('  against the reporting date ' || fdt(k_asof) || '.');
         tbl_head('4,30,18,26,16,18,18',
                  'N#|BAND|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|FIRST MATURITY',
                  '|MATURITY_DATE|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE|MATURITY_DATE',
@@ -968,7 +1125,11 @@ BEGIN
                        AND c.booking_date BETWEEN k_dt_from AND k_dt_to
                        AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                             WHERE v.contract_ref_no = c.contract_ref_no)
-                       AND c.maturity_date > k_asof)
+                       AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                        WHERE h.trn_ref_no = c.contract_ref_no
+                                          AND h.module = k_mod
+                                          AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                          AND NVL(h.lcy_amount, 0) > 0))
                    GROUP BY band ORDER BY band) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.band, 30) || '|'
@@ -1175,17 +1336,19 @@ BEGIN
         END LOOP;
         tbl_line('4,14,18,26,18,26,26');
 
-        print_sub('1.12 a. Live contracts: what the deals say against what the accounts hold');
-        po('  Per product, the nominal of the contracts not yet matured as the deal');
-        po('  master states it, against the balance the security account carries for');
-        po('  those same contracts. The two should be the same number.');
+        print_sub('1.12 a. Securities still held: the deals against the accounts');
+        po('  A security is STILL HELD when no PRINCIPAL_LIQD entry has been passed');
+        po('  on it. That is the only reliable test: the bank buys to hold to');
+        po('  maturity, but when liquidity is tight it sells before maturity, and');
+        po('  the sale shows up in ACTB_HISTORY and nowhere else. A contract whose');
+        po('  maturity is still in the future may therefore be long gone.');
         po('');
-        po('  A gap here is a LIVE position that the accounts do not carry properly:');
-        po('  either the bank holds a security the balance sheet ignores, or the');
-        po('  balance sheet holds more than the front office bought. THE ENTRIES ARE');
-        po('  RIGHT; the contracts behind the gap are named in LIF-06.');
+        po('  Per product, the nominal of the securities still held as the deal');
+        po('  master states it, against the balance the security account carries.');
+        po('  The two should be the same number; a gap is a held position the');
+        po('  accounts do not carry properly, and LIF-06 names the contracts.');
         tbl_head('4,12,20,28,28,26,16',
-                 'N#|PRODUCT|LIVE CONTRACTS|NOMINAL PER THE DEALS|BALANCE PER THE ENTRIES|GAP|READING',
+                 'N#|PRODUCT|HELD SECURITIES|NOMINAL PER THE DEALS|BALANCE PER THE ENTRIES|GAP|READING',
                  '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT|LCY_AMOUNT| | ',
                  'RLRRRRR');
         v_row := 0;
@@ -1200,8 +1363,11 @@ BEGIN
                AND c.booking_date BETWEEN k_dt_from AND k_dt_to
                AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                     WHERE v.contract_ref_no = c.contract_ref_no)
-               AND c.maturity_date > k_asof
-               AND TRIM(c.product) = r.prod;
+               AND TRIM(c.product) = r.prod
+               AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                WHERE h.trn_ref_no = c.contract_ref_no
+                                  AND h.module = k_mod
+                                  AND h.amount_tag = 'PRINCIPAL_LIQD');
             SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                            ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_tot2
@@ -1213,8 +1379,11 @@ BEGIN
                               AND c.version_no = (SELECT MAX(v.version_no)
                                                     FROM ldtb_contract_master v
                                                    WHERE v.contract_ref_no = c.contract_ref_no)
-                              AND TRIM(c.product) = r.prod
-                              AND c.maturity_date > k_asof);
+                              AND TRIM(c.product) = r.prod)
+               AND NOT EXISTS (SELECT 1 FROM actb_history x
+                                WHERE x.trn_ref_no = h.trn_ref_no
+                                  AND x.module = k_mod
+                                  AND x.amount_tag = 'PRINCIPAL_LIQD');
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
                 || fpadl(fnum(v_cnt), 20) || '|' || fpadl(fmio(v_tot), 28) || '|'
@@ -1225,30 +1394,42 @@ BEGIN
         END LOOP;
         tbl_line('4,12,20,28,28,26,16');
 
-        print_sub('1.12 b. Matured contracts: what should have left the balance sheet');
-        po('  A contract that has matured and been redeemed must leave nothing');
-        po('  behind. The balance of its security account must be nil. Anything');
-        po('  still carried here is a position the bank was repaid for and never');
-        po('  took off its books, or one the counterparty has not repaid at all.');
-        po('  The contracts behind it are named in LIF-01 and LIF-07.');
-        tbl_head('4,12,24,30,24',
-                 'N#|PRODUCT|MATURED CONTRACTS|BALANCE STILL CARRIED|READING',
-                 '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| ',
-                 'RLRRR');
+        print_sub('1.12 b. Securities already out: nothing should be left behind');
+        po('  A security on which a PRINCIPAL_LIQD entry has been passed has left');
+        po('  the book, whether it was redeemed at maturity or sold earlier. Its');
+        po('  security account must be nil. Anything still carried is a position');
+        po('  the bank was paid for and never took off its books.');
+        po('');
+        po('  The two exits are counted separately because they are not the same');
+        po('  business event: a redemption is the deal running its course, a sale');
+        po('  is a liquidity decision that ended the deal early. Neither is an');
+        po('  anomaly; a residual balance on either is. LIF-07 names the contracts.');
+        tbl_head('4,12,16,16,30,24',
+                 'N#|PRODUCT|REDEEMED|SOLD EARLY|BALANCE STILL CARRIED|READING',
+                 '|PRODUCT|PRINCIPAL_LIQD|PRINCIPAL_LIQD|LCY_AMOUNT| ',
+                 'RLRRRR');
         v_row := 0;
         FOR r IN (SELECT 1 ord, 'OTAP' prod, k_cl_bond_pl cl FROM DUAL UNION ALL
                   SELECT 2, 'MTPD', k_cl_bill_pl FROM DUAL UNION ALL
                   SELECT 3, 'TBTR', k_cl_bill_tr FROM DUAL UNION ALL
                   SELECT 4, 'BTTR', k_cl_bill_tr FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT COUNT(*) INTO v_cnt
-              FROM ldtb_contract_master c
-             WHERE c.module = k_mod
-               AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-               AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                    WHERE v.contract_ref_no = c.contract_ref_no)
-               AND c.maturity_date <= k_asof
-               AND TRIM(c.product) = r.prod;
+            SELECT NVL(SUM(CASE WHEN q.d_out >= TRUNC(q.md) - k_late_d THEN 1 ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN q.d_out <  TRUNC(q.md) - k_late_d THEN 1 ELSE 0 END), 0)
+              INTO v_cnt, v_cnt2
+              FROM (SELECT c.maturity_date md,
+                           (SELECT TRUNC(MIN(h.trn_dt)) FROM actb_history h
+                             WHERE h.trn_ref_no = c.contract_ref_no
+                               AND h.module = k_mod
+                               AND h.amount_tag = 'PRINCIPAL_LIQD'
+                               AND NVL(h.lcy_amount, 0) > 0) d_out
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no)
+                       AND TRIM(c.product) = r.prod) q
+             WHERE q.d_out IS NOT NULL;
             SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                            ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_tot2
@@ -1260,15 +1441,19 @@ BEGIN
                               AND c.version_no = (SELECT MAX(v.version_no)
                                                     FROM ldtb_contract_master v
                                                    WHERE v.contract_ref_no = c.contract_ref_no)
-                              AND TRIM(c.product) = r.prod
-                              AND c.maturity_date <= k_asof);
+                              AND TRIM(c.product) = r.prod)
+               AND EXISTS (SELECT 1 FROM actb_history x
+                            WHERE x.trn_ref_no = h.trn_ref_no
+                              AND x.module = k_mod
+                              AND x.amount_tag = 'PRINCIPAL_LIQD');
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
-                || fpadl(fnum(v_cnt), 24) || '|' || fpadl(fmio(v_tot2), 30) || '|'
+                || fpadl(fnum(v_cnt), 16) || '|' || fpadl(fnum(v_cnt2), 16) || '|'
+                || fpadl(fmio(v_tot2), 30) || '|'
                 || fpadl(CASE WHEN ABS(v_tot2) <= k_tol_abs THEN 'NOTHING LEFT'
                               ELSE 'STILL OPEN' END, 24) || '|');
         END LOOP;
-        tbl_line('4,12,24,30,24');
+        tbl_line('4,12,16,16,30,24');
 
     EXCEPTION
         WHEN OTHERS THEN
@@ -1362,11 +1547,15 @@ BEGIN
     print_part('PART 2 : SECURITIES LIFE CYCLE');
     -- ########################################################################
     po('');
-    po('  A security that has been redeemed must leave nothing behind on the');
+    po('  A security that has LEFT THE BOOK must leave nothing behind on the');
     po('  balance sheet: no security account, no accrued receivable, no deferred');
-    po('  income. A security still alive must carry exactly its nominal and the');
-    po('  interest earned so far. This part reads the balance sheet contract by');
-    po('  contract and confronts it with the state expected at ' || fdt(k_asof) || '.');
+    po('  income. It leaves the book on the day its PRINCIPAL_LIQD entry is passed,');
+    po('  which is its maturity when the bank held it to term, and an earlier date');
+    po('  when the bank sold it under liquidity pressure. A security STILL HELD,');
+    po('  meaning one with no PRINCIPAL_LIQD entry at all, must carry exactly its');
+    po('  nominal and the interest earned so far. This part reads the balance sheet');
+    po('  contract by contract and confronts it with the state expected at '
+       || fdt(k_asof) || '.');
     po('');
     po('  MATRIX COVERAGE . the ten tests of this part carry thirteen references');
     po('  of the control matrix: LC-01 to LC-06, from the accounting analysis of');
@@ -1510,11 +1699,17 @@ BEGIN
         p_test('LC-03 / LIF-03', 'Post counted deals: the accrued receivable is cleared');
         p_obj('for ' || k_prod_post || ', interest accrues daily on classes ' || k_cl_accr_pl
             || ' and ' || k_cl_accr_tr || ',');
-        po('                   then is collected at maturity. Once matured, the receivable must');
-        po('                   be nil AND an INT_%_LIQD entry must prove the cash came in. A');
+        po('                   then is collected when the security leaves the book. That day is');
+        po('                   the maturity when the security is held to term, and the day of the');
+        po('                   sale when the bank sells it early under liquidity pressure. Either');
+        po('                   way, once the PRINCIPAL_LIQD entry is passed the receivable must be');
+        po('                   nil AND an INT_%_LIQD entry must prove the cash came in. A');
         po('                   receivable left standing is income recognised but never received.');
-        p_how('per matured contract of the post counted products, signed balance');
-        po('                   of the accrued receivable classes, and count of collection tags.');
+        p_how('population read from the entries: contracts carrying a');
+        po('                   PRINCIPAL_LIQD entry, that is those that have LEFT THE BOOK, on the');
+        po('                   post counted products. Signed balance of the accrued receivable');
+        po('                   classes, and count of collection tags. The exit date and the holding');
+        po('                   period are printed with each contract.');
         SELECT COUNT(*), NVL(SUM(ABS(bal_accr)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.bal_accr, a.n_int
                   FROM (SELECT h.trn_ref_no ref,
@@ -1531,9 +1726,13 @@ BEGIN
                                              AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                  WHERE INSTR(',' || k_prod_post || ',', ',' || TRIM(c.product) || ',') > 0
-                   AND c.maturity_date <= k_asof)
+                   AND EXISTS (SELECT 1 FROM actb_history h2
+                                WHERE h2.trn_ref_no = c.contract_ref_no
+                                  AND h2.module = k_mod
+                                  AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                  AND NVL(h2.lcy_amount, 0) > 0))
          WHERE ABS(bal_accr) > k_tol_abs OR n_int = 0;
-        p_verdict('LC-03 / LIF-03', 'Accrued receivable not cleared or interest never collected',
+        p_verdict('LC-03 / LIF-03', 'Receivable not cleared or interest never collected on exit',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
             sec_head('RESIDUAL / COLLECTIONS');
@@ -1559,7 +1758,11 @@ BEGIN
                                                      AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                          WHERE INSTR(',' || k_prod_post || ',', ',' || TRIM(c.product) || ',') > 0
-                           AND c.maturity_date <= k_asof
+                           AND EXISTS (SELECT 1 FROM actb_history h2
+                                        WHERE h2.trn_ref_no = c.contract_ref_no
+                                          AND h2.module = k_mod
+                                          AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                          AND NVL(h2.lcy_amount, 0) > 0)
                            AND (ABS(a.bal_accr) > k_tol_abs OR a.n_int = 0)
                          ORDER BY ABS(a.bal_accr) DESC, c.lcy_amount DESC
                       ) WHERE ROWNUM <= k_top) LOOP
@@ -1575,11 +1778,16 @@ BEGIN
         p_test('LC-02 / LIF-04', 'Pre counted deals: the deferred income is released');
         p_obj('for ' || k_prod_pre || ', the discount is cashed in on day one and credited to');
         po('                   class ' || k_cl_defer || ' (' || k_ac_defer || '), then released to income day by day.');
-        po('                   At maturity the deferred income must be nil: the amount cashed');
-        po('                   in at the start equals the sum of the daily releases. A residue');
-        po('                   is income collected but never taken to the profit and loss.');
-        p_how('per matured contract of the pre counted products, signed balance');
-        po('                   of class ' || k_cl_defer || ', which covers every sub account of that class.');
+        po('                   When the security leaves the book, at maturity if it is held to');
+        po('                   term or on the day of the sale if the bank sells it early, the');
+        po('                   deferred income must be nil: the amount cashed in at the start');
+        po('                   equals the sum of the releases. A residue is income collected but');
+        po('                   never taken to the profit and loss.');
+        p_how('population read from the entries: contracts carrying a');
+        po('                   PRINCIPAL_LIQD entry, that is those that have LEFT THE BOOK, on the');
+        po('                   pre counted products. Signed balance of class ' || k_cl_defer || ', which covers');
+        po('                   every sub account of that class. The exit date and the holding');
+        po('                   period are printed with each contract.');
         SELECT COUNT(*), NVL(SUM(ABS(bal_def)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.bal_def
                   FROM (SELECT h.trn_ref_no ref,
@@ -1594,9 +1802,13 @@ BEGIN
                                              AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                  WHERE INSTR(',' || k_prod_pre || ',', ',' || TRIM(c.product) || ',') > 0
-                   AND c.maturity_date <= k_asof)
+                   AND EXISTS (SELECT 1 FROM actb_history h2
+                                WHERE h2.trn_ref_no = c.contract_ref_no
+                                  AND h2.module = k_mod
+                                  AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                  AND NVL(h2.lcy_amount, 0) > 0))
          WHERE ABS(bal_def) > k_tol_abs;
-        p_verdict('LC-02 / LIF-04', 'Deferred income not released at maturity',
+        p_verdict('LC-02 / LIF-04', 'Deferred income not released when the security left',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
             sec_head('DEFERRED INCOME LEFT');
@@ -1619,7 +1831,11 @@ BEGIN
                                                      AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                          WHERE INSTR(',' || k_prod_pre || ',', ',' || TRIM(c.product) || ',') > 0
-                           AND c.maturity_date <= k_asof
+                           AND EXISTS (SELECT 1 FROM actb_history h2
+                                        WHERE h2.trn_ref_no = c.contract_ref_no
+                                          AND h2.module = k_mod
+                                          AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                          AND NVL(h2.lcy_amount, 0) > 0)
                            AND ABS(a.bal_def) > k_tol_abs
                          ORDER BY ABS(a.bal_def) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
@@ -1631,119 +1847,190 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        p_test('LC-04', 'Total income over the life equals the deal interest');
-        p_obj('whatever the mechanism, the income recognised over the life of a');
-        po('                   deal must equal MAIN_COMP_AMOUNT. Pre counted or post counted,');
-        po('                   the route differs but the destination does not. A gap means the');
-        po('                   profit and loss carries more, or less, than the deal earned.');
-        p_how('per matured contract, signed income on class ' || k_cl_income || ' (credits minus');
-        po('                   debits) against MAIN_COMP_AMOUNT of the last contract version.');
-        po('                   Also carries matrix reference INT-01.');
-        SELECT COUNT(*), NVL(SUM(ABS(gap)), 0) INTO v_cnt, v_mt
-          FROM (SELECT c.contract_ref_no, NVL(c.main_comp_amount, 0)
-                       - NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                         ELSE -NVL(h.lcy_amount, 0) END)
-                                FROM actb_history h
-                               WHERE h.trn_ref_no = c.contract_ref_no
-                                 AND h.module = k_mod
-                                 AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) gap
-                  FROM ldtb_contract_master c
-                 WHERE c.module = k_mod
-                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                   AND c.maturity_date <= k_asof
-                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                        WHERE v.contract_ref_no = c.contract_ref_no)
-                   AND NVL(c.main_comp_amount, 0) > 0
-                   AND EXISTS (SELECT 1 FROM actb_history h
-                                WHERE h.trn_ref_no = c.contract_ref_no AND h.module = k_mod))
-         WHERE ABS(gap) > k_tol_abs;
-        p_verdict('LC-04', 'Income recognised different from the deal interest',
+        p_test('LC-04', 'Income earned over the holding period equals what was booked');
+        p_obj('the bank buys a security to hold it to maturity and cash the');
+        po('                   coupon. Under liquidity pressure it may sell it before maturity,');
+        po('                   and the entries then show a PRINCIPAL_LIQD before MATURITY_DATE.');
+        po('                   In that case the bank never earned the whole MAIN_COMP_AMOUNT, it');
+        po('                   earned the part that runs from the value date to the day it left');
+        po('                   the book. The income recognised must equal that earned part, no');
+        po('                   more, no less.');
+        p_how('population = contracts that have LEFT THE BOOK, that is those');
+        po('                   carrying a PRINCIPAL_LIQD entry, whether redeemed at maturity or');
+        po('                   sold early. Earned interest = MAIN_COMP_AMOUNT prorated on the');
+        po('                   holding period, from VALUE_DATE to the first PRINCIPAL_LIQD date,');
+        po('                   over the contractual life VALUE_DATE to MATURITY_DATE, capped at');
+        po('                   one. Booked income = signed sum on class ' || k_cl_income || ' (credits minus');
+        po('                   debits) from ACTB_HISTORY. Tolerance ' || ftx(k_tol_pro) || ' of the earned figure.');
+        po('                   A matured contract with no exit entry is not tested here, it is');
+        po('                   an LC-01 finding. Also carries matrix reference INT-01.');
+        WITH x AS (
+            SELECT c.contract_ref_no ref, c.product, c.counterparty cpty,
+                   c.lcy_amount nom, c.main_comp_rate rate, c.booking_date bd,
+                   c.value_date vd, c.maturity_date md,
+                   NVL(c.main_comp_amount, 0) deal_int,
+                   (SELECT MIN(h.trn_dt) FROM actb_history h
+                     WHERE h.trn_ref_no = c.contract_ref_no
+                       AND h.module = k_mod
+                       AND h.amount_tag = 'PRINCIPAL_LIQD'
+                       AND NVL(h.lcy_amount, 0) > 0) out_dt,
+                   NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                   ELSE -NVL(h.lcy_amount, 0) END)
+                          FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
+              FROM ldtb_contract_master c
+             WHERE c.module = k_mod
+               AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+               AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                    WHERE v.contract_ref_no = c.contract_ref_no)
+               AND NVL(c.main_comp_amount, 0) > 0
+               AND EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod
+                              AND h.amount_tag = 'PRINCIPAL_LIQD'
+                              AND NVL(h.lcy_amount, 0) > 0)
+        ), z AS (
+            SELECT x.*,
+                   TRUNC(out_dt) - TRUNC(vd) held,
+                   ROUND(deal_int
+                         * CASE WHEN md IS NULL OR vd IS NULL OR TRUNC(md) - TRUNC(vd) <= 0 THEN 1
+                                ELSE GREATEST(0, LEAST(1, (TRUNC(out_dt) - TRUNC(vd))
+                                                          / (TRUNC(md) - TRUNC(vd)))) END, 2) earned
+              FROM x
+        )
+        SELECT COUNT(*), NVL(SUM(ABS(earned - booked)), 0) INTO v_cnt, v_mt
+          FROM z
+         WHERE ABS(earned - booked) > GREATEST(k_tol_abs, k_tol_pro * ABS(earned) / 100);
+        p_verdict('LC-04', 'Income booked different from the interest earned while held',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
-            sec_head('DEAL INT. / BOOKED / GAP');
+            sec_head('EARNED / BOOKED GAP');
             v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT c.contract_ref_no ref, c.product, c.counterparty,
-                               (SELECT MAX(x.customer_name1) FROM sttm_customer x
-                                 WHERE x.customer_no = c.counterparty) issuer,
-                               c.lcy_amount, c.main_comp_rate, c.booking_date,
-                               c.value_date, c.maturity_date,
-                               NVL(c.main_comp_amount, 0) deal_int,
-                               NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                               ELSE -NVL(h.lcy_amount, 0) END)
-                                      FROM actb_history h
-                                     WHERE h.trn_ref_no = c.contract_ref_no
-                                       AND h.module = k_mod
-                                       AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
-                          FROM ldtb_contract_master c
-                         WHERE c.module = k_mod
-                           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                           AND c.maturity_date <= k_asof
-                           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = c.contract_ref_no)
-                           AND NVL(c.main_comp_amount, 0) > 0
-                           AND EXISTS (SELECT 1 FROM actb_history h
-                                        WHERE h.trn_ref_no = c.contract_ref_no AND h.module = k_mod)
-                           AND ABS(NVL(c.main_comp_amount, 0)
-                                   - NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                                     ELSE -NVL(h.lcy_amount, 0) END)
-                                            FROM actb_history h
-                                           WHERE h.trn_ref_no = c.contract_ref_no
-                                             AND h.module = k_mod
-                                             AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0)) > k_tol_abs
-                         ORDER BY c.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
+            FOR r IN (
+                WITH x AS (
+                    SELECT c.contract_ref_no ref, c.product, c.counterparty cpty,
+                           c.lcy_amount nom, c.main_comp_rate rate, c.booking_date bd,
+                           c.value_date vd, c.maturity_date md,
+                           NVL(c.main_comp_amount, 0) deal_int,
+                           (SELECT MIN(h.trn_dt) FROM actb_history h
+                             WHERE h.trn_ref_no = c.contract_ref_no
+                               AND h.module = k_mod
+                               AND h.amount_tag = 'PRINCIPAL_LIQD'
+                               AND NVL(h.lcy_amount, 0) > 0) out_dt,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                           ELSE -NVL(h.lcy_amount, 0) END)
+                                  FROM actb_history h
+                                 WHERE h.trn_ref_no = c.contract_ref_no
+                                   AND h.module = k_mod
+                                   AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no)
+                       AND NVL(c.main_comp_amount, 0) > 0
+                       AND EXISTS (SELECT 1 FROM actb_history h
+                                    WHERE h.trn_ref_no = c.contract_ref_no
+                                      AND h.module = k_mod
+                                      AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                      AND NVL(h.lcy_amount, 0) > 0)
+                ), z AS (
+                    SELECT x.*,
+                           TRUNC(out_dt) - TRUNC(vd) held,
+                           ROUND(deal_int
+                                 * CASE WHEN md IS NULL OR vd IS NULL OR TRUNC(md) - TRUNC(vd) <= 0 THEN 1
+                                        ELSE GREATEST(0, LEAST(1, (TRUNC(out_dt) - TRUNC(vd))
+                                                                  / (TRUNC(md) - TRUNC(vd)))) END, 2) earned
+                      FROM x
+                )
+                SELECT * FROM (
+                    SELECT z.*,
+                           (SELECT MAX(s.customer_name1) FROM sttm_customer s
+                             WHERE s.customer_no = z.cpty) issuer
+                      FROM z
+                     WHERE ABS(earned - booked)
+                           > GREATEST(k_tol_abs, k_tol_pro * ABS(earned) / 100)
+                     ORDER BY ABS(earned - booked) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
-                sec_row(v_row, r.ref, r.product, r.issuer, r.lcy_amount, r.main_comp_rate,
-                        r.booking_date, r.value_date, r.maturity_date,
-                        famt(r.deal_int - r.booked));
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md, famt(r.earned - r.booked));
             END LOOP;
             sec_foot;
-            print_sub('LC-04 a. Deal interest against income booked, deal by deal');
-            tbl_head('4,24,11,24,24,24,20',
-                     'N#|CONTRACT|PRODUCT|DEAL INTEREST|INCOME BOOKED|GAP|GAP IN PERCENT',
-                     '|CONTRACT_REF_NO|PRODUCT|MAIN_COMP_AMOUNT|LCY_AMOUNT on 733| | ',
-                     'RLLRRRR');
+            print_sub('LC-04 a. What the deal promised, what the holding period earned,'
+                      || ' what the books recognised');
+            po('     A contract sold before maturity earns only part of its coupon. The');
+            po('     EARNED column is MAIN_COMP_AMOUNT cut down to the days actually held.');
+            po('     The GAP is measured against EARNED, never against the full coupon.');
+            tbl_head('4,24,11,14,16,22,22,22,20',
+                     'N#|CONTRACT|PRODUCT|EXIT|HELD / LIFE|DEAL INTEREST|EARNED WHILE HELD'
+                     || '|INCOME BOOKED|GAP',
+                     '|CONTRACT_REF_NO|PRODUCT|PRINCIPAL_LIQD|days|MAIN_COMP_AMOUNT| '
+                     || '|LCY_AMOUNT on ' || k_cl_income || '| ',
+                     'RLLLLRRRR');
             v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT c.contract_ref_no ref, c.product,
-                               NVL(c.main_comp_amount, 0) deal_int,
-                               NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                               ELSE -NVL(h.lcy_amount, 0) END)
-                                      FROM actb_history h
-                                     WHERE h.trn_ref_no = c.contract_ref_no
-                                       AND h.module = k_mod
-                                       AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
-                          FROM ldtb_contract_master c
-                         WHERE c.module = k_mod
-                           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                           AND c.maturity_date <= k_asof
-                           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = c.contract_ref_no)
-                           AND NVL(c.main_comp_amount, 0) > 0
-                           AND ABS(NVL(c.main_comp_amount, 0)
-                                   - NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                                     ELSE -NVL(h.lcy_amount, 0) END)
-                                            FROM actb_history h
-                                           WHERE h.trn_ref_no = c.contract_ref_no
-                                             AND h.module = k_mod
-                                             AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0)) > k_tol_abs
-                         ORDER BY ABS(NVL(c.main_comp_amount, 0)
-                                   - NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                                                     ELSE -NVL(h.lcy_amount, 0) END)
-                                            FROM actb_history h
-                                           WHERE h.trn_ref_no = c.contract_ref_no
-                                             AND h.module = k_mod
-                                             AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0)) DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
+            FOR r IN (
+                WITH x AS (
+                    SELECT c.contract_ref_no ref, c.product,
+                           c.value_date vd, c.maturity_date md,
+                           NVL(c.main_comp_amount, 0) deal_int,
+                           (SELECT MIN(h.trn_dt) FROM actb_history h
+                             WHERE h.trn_ref_no = c.contract_ref_no
+                               AND h.module = k_mod
+                               AND h.amount_tag = 'PRINCIPAL_LIQD'
+                               AND NVL(h.lcy_amount, 0) > 0) out_dt,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                           ELSE -NVL(h.lcy_amount, 0) END)
+                                  FROM actb_history h
+                                 WHERE h.trn_ref_no = c.contract_ref_no
+                                   AND h.module = k_mod
+                                   AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no)
+                       AND NVL(c.main_comp_amount, 0) > 0
+                       AND EXISTS (SELECT 1 FROM actb_history h
+                                    WHERE h.trn_ref_no = c.contract_ref_no
+                                      AND h.module = k_mod
+                                      AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                      AND NVL(h.lcy_amount, 0) > 0)
+                ), z AS (
+                    SELECT x.*,
+                           TRUNC(out_dt) - TRUNC(vd) held,
+                           CASE WHEN md IS NULL OR vd IS NULL THEN NULL
+                                ELSE TRUNC(md) - TRUNC(vd) END life,
+                           ROUND(deal_int
+                                 * CASE WHEN md IS NULL OR vd IS NULL OR TRUNC(md) - TRUNC(vd) <= 0 THEN 1
+                                        ELSE GREATEST(0, LEAST(1, (TRUNC(out_dt) - TRUNC(vd))
+                                                                  / (TRUNC(md) - TRUNC(vd)))) END, 2) earned
+                      FROM x
+                )
+                SELECT * FROM (
+                    SELECT z.*,
+                           CASE WHEN md IS NOT NULL
+                                     AND TRUNC(out_dt) < TRUNC(md) - k_late_d
+                                THEN 'SOLD EARLY' ELSE 'REDEEMED' END basis
+                      FROM z
+                     WHERE ABS(earned - booked)
+                           > GREATEST(k_tol_abs, k_tol_pro * ABS(earned) / 100)
+                     ORDER BY ABS(earned - booked) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
                 po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
-                    || fpad(r.product, 11) || '|' || fpadl(famt(r.deal_int), 24) || '|'
-                    || fpadl(famt(r.booked), 24) || '|'
-                    || fpadl(famt(r.deal_int - r.booked), 24) || '|'
-                    || fpadl(fpct(ABS(r.deal_int - r.booked), r.deal_int), 20) || '|');
+                    || fpad(r.product, 11) || '|' || fpad(r.basis, 14) || '|'
+                    || fpad(fnum(r.held) || ' / '
+                            || CASE WHEN r.life IS NULL THEN '-'
+                                    ELSE fnum(r.life) END, 16) || '|'
+                    || fpadl(famt(r.deal_int), 22) || '|'
+                    || fpadl(famt(r.earned), 22) || '|'
+                    || fpadl(famt(r.booked), 22) || '|'
+                    || fpadl(famt(r.earned - r.booked), 20) || '|');
             END LOOP;
-            tbl_line('4,24,11,24,24,24,20');
+            tbl_line('4,24,11,14,16,22,22,22,20');
         END IF;
 
         -- -----------------------------------------------------
@@ -1913,14 +2200,23 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        p_test('LIF-05', 'Early redemptions are identified and documented');
-        p_obj('a redemption of the principal booked before the contractual');
-        po('                   maturity is a sale or an early repayment. It changes the yield of');
-        po('                   the deal, and the accruals must stop on that date. Each case must');
-        po('                   be documented by the front office.');
+        p_test('LIF-05', 'Securities sold before maturity, and the yield they realised');
+        p_obj('the bank buys a security to hold it to maturity and cash the');
+        po('                   coupon. Selling before maturity is a normal act of treasury');
+        po('                   management when liquidity is tight, not an anomaly in itself, and');
+        po('                   the entries record it as a PRINCIPAL_LIQD passed before');
+        po('                   MATURITY_DATE. What must be true of every such sale is that the');
+        po('                   accruals stopped on that day (tested by LC-06) and that the income');
+        po('                   recognised matches the period actually held (tested by LC-04).');
+        po('                   This control is therefore DESCRIPTIVE. It exists so the reader can');
+        po('                   see how much of the book left early, for how long it was held and');
+        po('                   what it yielded, and so the front office can be asked to document');
+        po('                   the liquidity decision behind each sale.');
         p_how('first PRINCIPAL_LIQD entry with a positive amount, compared with');
-        po('                   MATURITY_DATE, beyond a tolerance of ' || TO_CHAR(k_late_d) || ' days. The last accrual');
-        po('                   date is printed so that the stop can be checked at a glance.');
+        po('                   MATURITY_DATE, beyond a tolerance of ' || TO_CHAR(k_late_d) || ' days. The holding period');
+        po('                   runs from VALUE_DATE to that entry. The realised yield is the');
+        po('                   signed income on class ' || k_cl_income || ' brought back to a year of '
+                             || TO_CHAR(k_day_basis) || ' days.');
         SELECT COUNT(*), NVL(SUM(nom), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, c.lcy_amount nom, a.dliq, c.maturity_date md
                   FROM (SELECT h.trn_ref_no ref, MIN(h.trn_dt) dliq
@@ -1933,10 +2229,10 @@ BEGIN
                                              AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no))
          WHERE TRUNC(md) - TRUNC(dliq) > k_late_d;
-        p_verdict('LIF-05', 'Principal redeemed before contractual maturity',
-                  v_cnt, v_nb_ctr, v_mt, 'HIGH');
+        p_verdict('LIF-05', 'Security sold before its contractual maturity',
+                  v_cnt, v_nb_ctr, v_mt, 'INFO');
         IF v_cnt > 0 THEN
-            sec_head('REDEEMED / DAYS EARLY');
+            sec_head('DAYS SOLD EARLY');
             v_row := 0;
             FOR r IN (SELECT * FROM (
                         SELECT a.ref, a.dliq, a.d_accr, c.product, c.counterparty,
@@ -1962,20 +2258,71 @@ BEGIN
                 v_row := v_row + 1;
                 sec_row(v_row, r.ref, r.product, r.issuer, r.lcy_amount, r.main_comp_rate,
                         r.booking_date, r.value_date, r.maturity_date,
-                        fdt(r.dliq) || ' / '
-                        || fnum(TRUNC(r.maturity_date) - TRUNC(r.dliq)) || ' d');
+                        fnum(TRUNC(r.maturity_date) - TRUNC(r.dliq)) || ' d early');
             END LOOP;
             sec_foot;
+            print_sub('LIF-05 a. How long each security was held and what it yielded');
+            po('     HELD is the number of days between the value date and the day the');
+            po('     security left the book. CONTRACT RATE is what the deal promised over');
+            po('     its whole life. REALISED is what the bank actually took, income');
+            po('     booked over the nominal, brought back to a year of '
+               || TO_CHAR(k_day_basis) || ' days.');
+            po('     A realised yield far below the contract rate is the cost of the exit.');
+            tbl_head('4,24,11,22,14,14,14,22,14,14',
+                     'N#|CONTRACT|PRODUCT|NOMINAL|HELD|LIFE|EARLY|INCOME BOOKED'
+                     || '|CONTRACT RATE|REALISED',
+                     '|CONTRACT_REF_NO|PRODUCT|LCY_AMOUNT|days|days|days'
+                     || '|LCY_AMOUNT on ' || k_cl_income || '|MAIN_COMP_RATE| ',
+                     'RLLRRRRRRR');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT a.ref, a.dliq, c.product, c.lcy_amount nom,
+                               c.main_comp_rate rate, c.value_date vd, c.maturity_date md,
+                               TRUNC(a.dliq) - TRUNC(c.value_date) held,
+                               TRUNC(c.maturity_date) - TRUNC(c.value_date) life,
+                               TRUNC(c.maturity_date) - TRUNC(a.dliq) early,
+                               NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                               ELSE -NVL(h.lcy_amount, 0) END)
+                                      FROM actb_history h
+                                     WHERE h.trn_ref_no = a.ref
+                                       AND h.module = k_mod
+                                       AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) booked
+                          FROM (SELECT h.trn_ref_no ref, MIN(h.trn_dt) dliq
+                                  FROM actb_history h
+                                 WHERE h.module = k_mod
+                                   AND h.amount_tag = 'PRINCIPAL_LIQD'
+                                   AND NVL(h.lcy_amount, 0) > 0
+                                 GROUP BY h.trn_ref_no) a
+                          JOIN ldtb_contract_master c ON c.contract_ref_no = a.ref
+                                                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                                         WHERE v.contract_ref_no = c.contract_ref_no)
+                         WHERE TRUNC(c.maturity_date) - TRUNC(a.dliq) > k_late_d
+                         ORDER BY c.lcy_amount DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
+                    || fpad(r.product, 11) || '|' || fpadl(famt(r.nom), 22) || '|'
+                    || fpadl(fnum(r.held), 14) || '|' || fpadl(fnum(r.life), 14) || '|'
+                    || fpadl(fnum(r.early), 14) || '|' || fpadl(famt(r.booked), 22) || '|'
+                    || fpadl(ftx(r.rate), 14) || '|'
+                    || fpadl(CASE WHEN NVL(r.held, 0) <= 0 OR NVL(r.nom, 0) = 0 THEN '-'
+                                  ELSE ftx(ROUND(r.booked / r.nom
+                                                 * k_day_basis / r.held * 100, 2)) END, 14) || '|');
+            END LOOP;
+            tbl_line('4,24,11,22,14,14,14,22,14,14');
         END IF;
 
         -- -----------------------------------------------------
-        p_test('LIF-06', 'Live contracts carry the right security balance');
-        p_obj('on a contract that is neither matured nor redeemed, the signed');
-        po('                   balance of the security account must equal the nominal. A lower');
-        po('                   balance points to a partial exit that was never tracked, a higher');
-        po('                   one to a double booking.');
-        p_how('per contract with no PRINCIPAL_LIQD entry and a maturity beyond');
-        po('                   ' || fdt(k_asof) || ', signed balance of the security classes against LCY_AMOUNT.');
+        p_test('LIF-06', 'Securities still held carry the right security balance');
+        p_obj('a security is STILL HELD when no PRINCIPAL_LIQD entry has been');
+        po('                   passed on it: the bank has neither been repaid at maturity nor sold');
+        po('                   it early. While it is held, the signed balance of the security');
+        po('                   account must equal the nominal. A lower balance points to a partial');
+        po('                   exit that was never tracked, a higher one to a double booking.');
+        p_how('per contract with no PRINCIPAL_LIQD entry in ACTB_HISTORY and a');
+        po('                   maturity beyond ' || fdt(k_asof) || ', signed balance of the security classes');
+        po('                   against LCY_AMOUNT. A contract past maturity with no exit entry is');
+        po('                   not tested here, it is an LIF-07 finding.');
         SELECT COUNT(*), NVL(SUM(ABS(bal_sec - nom)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.bal_sec, c.lcy_amount nom
                   FROM (SELECT h.trn_ref_no ref,
@@ -1993,7 +2340,7 @@ BEGIN
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                  WHERE a.n_liq = 0 AND c.maturity_date > k_asof)
          WHERE ABS(bal_sec - nom) > k_tol_abs;
-        p_verdict('LIF-06', 'Live contract whose security balance differs from the nominal',
+        p_verdict('LIF-06', 'Security still held whose balance differs from the nominal',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
             sec_head('BALANCE / GAP');
@@ -3251,15 +3598,25 @@ BEGIN
         po('                   the number of days elapsed. A gap means income the bank earned but');
         po('                   never recognised, and a balance sheet understated by that amount.');
         p_how('sum of the accrual amounts divided by the theoretical day gives');
-        po('                   the days accrued, compared with the days elapsed up to ' || fdt(v_d_accr) || '.');
-        po('                   Tolerance of ' || TO_CHAR(k_gap_d) || ' days for public holidays.');
+        po('                   the days accrued, compared with the days the bank ACTUALLY HELD the');
+        po('                   security: from VALUE_DATE to the earliest of ' || fdt(v_d_accr) || ', MATURITY_DATE');
+        po('                   and the first PRINCIPAL_LIQD date. A security sold before maturity');
+        po('                   stops accruing on the day of the sale, and that is correct, not a');
+        po('                   gap. Tolerance of ' || TO_CHAR(k_gap_d) || ' days for public holidays.');
         SELECT COUNT(*), NVL(SUM(ABS(missing * day_int)), 0) INTO v_cnt, v_mt
           FROM (SELECT q.ref, q.day_int, q.d_accrued,
                        q.d_elapsed - q.d_accrued missing
                   FROM (SELECT c.contract_ref_no ref,
                                NVL(c.main_comp_amount, 0)
                                  / NULLIF(c.maturity_date - c.value_date, 0) day_int,
-                               TRUNC(LEAST(v_d_accr, c.maturity_date)) - TRUNC(c.value_date) d_elapsed,
+                               TRUNC(LEAST(v_d_accr, c.maturity_date,
+                                           NVL((SELECT MIN(h2.trn_dt) FROM actb_history h2
+                                                 WHERE h2.trn_ref_no = c.contract_ref_no
+                                                   AND h2.module = k_mod
+                                                   AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                                   AND NVL(h2.lcy_amount, 0) > 0),
+                                               c.maturity_date)))
+                                 - TRUNC(c.value_date) d_elapsed,
                                NVL((SELECT ROUND(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END)
                                           / NULLIF(NVL(c.main_comp_amount, 0)
@@ -3295,7 +3652,13 @@ BEGIN
                                   FROM (SELECT c2.contract_ref_no ref,
                                                NVL(c2.main_comp_amount, 0)
                                                  / NULLIF(c2.maturity_date - c2.value_date, 0) day_int,
-                                               TRUNC(LEAST(v_d_accr, c2.maturity_date))
+                                               TRUNC(LEAST(v_d_accr, c2.maturity_date,
+                                                      NVL((SELECT MIN(h2.trn_dt) FROM actb_history h2
+                                                            WHERE h2.trn_ref_no = c2.contract_ref_no
+                                                              AND h2.module = k_mod
+                                                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                                              AND NVL(h2.lcy_amount, 0) > 0),
+                                                          c2.maturity_date)))
                                                  - TRUNC(c2.value_date) d_elapsed,
                                                NVL((SELECT ROUND(SUM(CASE h.drcr_ind
                                                                         WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -4056,7 +4419,7 @@ BEGIN
     -- ########################################################################
     po('');
     po('  At every reporting date four balance sheet figures must be justified');
-    po('  line by line from the live portfolio: the securities, the accrued');
+    po('  line by line from the securities STILL HELD: the securities, the accrued');
     po('  receivable, the deferred income and the income of the month. The script');
     po('  rebuilds each of them from the entries and from the terms of the deals,');
     po('  and confronts the two.');
@@ -4073,12 +4436,16 @@ BEGIN
 
         -- -----------------------------------------------------
         p_test('CUT-01', 'Accruals run to the last calendar day of the month');
-        p_obj('at every month end, a live contract must carry an accrual dated the');
-        po('                   last calendar day of the month. A missing month end accrual');
-        po('                   understates both the income of the month and the balance sheet.');
-        p_how('live contracts at the last month end preceding ' || fdt(v_d_accr) || ', with no');
-        po('                   ACCR entry on that date. The test is bounded at that date because');
-        po('                   beyond it the module simply stopped accruing.');
+        p_obj('at every month end, a security the bank was STILL HOLDING on that');
+        po('                   day must carry an accrual dated the last calendar day of the month.');
+        po('                   A missing month end accrual understates both the income of the');
+        po('                   month and the balance sheet. A security already sold on that day is');
+        po('                   not expected to accrue, and is excluded.');
+        p_how('contracts whose value date has passed, whose maturity is beyond');
+        po('                   the last month end preceding ' || fdt(v_d_accr) || ', and on which no PRINCIPAL_LIQD');
+        po('                   entry had been passed by that month end, with no ACCR entry on that');
+        po('                   date. The test is bounded at ' || fdt(v_d_accr) || ' because beyond it the module');
+        po('                   simply stopped accruing.');
         SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master c
          WHERE c.module = k_mod
@@ -4087,13 +4454,20 @@ BEGIN
                                 WHERE v.contract_ref_no = c.contract_ref_no)
            AND c.value_date < TRUNC(v_d_accr, 'MM')
            AND c.maturity_date > LAST_DAY(ADD_MONTHS(TRUNC(v_d_accr, 'MM'), -1))
+           AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                            WHERE h2.trn_ref_no = c.contract_ref_no
+                              AND h2.module = k_mod
+                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                              AND NVL(h2.lcy_amount, 0) > 0
+                              AND TRUNC(h2.trn_dt)
+                                  <= LAST_DAY(ADD_MONTHS(TRUNC(v_d_accr, 'MM'), -1)))
            AND NOT EXISTS (SELECT 1 FROM actb_history h
                             WHERE h.trn_ref_no = c.contract_ref_no
                               AND h.module = k_mod
                               AND h.event = 'ACCR'
                               AND TRUNC(h.trn_dt)
                                   = LAST_DAY(ADD_MONTHS(TRUNC(v_d_accr, 'MM'), -1)));
-        p_verdict('CUT-01', 'Live contract with no accrual at the month end tested',
+        p_verdict('CUT-01', 'Security still held with no accrual at the month end tested',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
             sec_head('MONTH END MISSED');
@@ -4111,6 +4485,13 @@ BEGIN
                                                 WHERE v.contract_ref_no = c.contract_ref_no)
                            AND c.value_date < TRUNC(v_d_accr, 'MM')
                            AND c.maturity_date > LAST_DAY(ADD_MONTHS(TRUNC(v_d_accr, 'MM'), -1))
+                           AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                                            WHERE h2.trn_ref_no = c.contract_ref_no
+                                              AND h2.module = k_mod
+                                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                              AND NVL(h2.lcy_amount, 0) > 0
+                                              AND TRUNC(h2.trn_dt)
+                                                  <= LAST_DAY(ADD_MONTHS(TRUNC(v_d_accr, 'MM'), -1)))
                            AND NOT EXISTS (SELECT 1 FROM actb_history h
                                             WHERE h.trn_ref_no = c.contract_ref_no
                                               AND h.module = k_mod
@@ -4128,8 +4509,11 @@ BEGIN
         END IF;
 
         print_sub('CUT-01 a. Month end coverage of the accruals');
+        po('     HELD THAT DAY counts the securities the bank was still holding on the');
+        po('     month end: value date passed, maturity not reached, and no PRINCIPAL_LIQD');
+        po('     entry yet. Securities already sold are not expected to accrue.');
         tbl_head('4,18,20,22,18,26',
-                 'N#|MONTH END|LIVE CONTRACTS|ACCRUED THAT DAY|COVERAGE|ACCRUAL OF THE DAY',
+                 'N#|MONTH END|HELD THAT DAY|ACCRUED THAT DAY|COVERAGE|ACCRUAL OF THE DAY',
                  '|TRN_DT| |TRN_REF_NO| |LCY_AMOUNT',
                  'RLRRRR');
         v_row := 0;
@@ -4152,7 +4536,13 @@ BEGIN
                AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                     WHERE v.contract_ref_no = c.contract_ref_no)
                AND c.value_date <= r.me
-               AND c.maturity_date > r.me;
+               AND c.maturity_date > r.me
+               AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                                WHERE h2.trn_ref_no = c.contract_ref_no
+                                  AND h2.module = k_mod
+                                  AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                  AND NVL(h2.lcy_amount, 0) > 0
+                                  AND TRUNC(h2.trn_dt) <= r.me);
             IF r.nb_acc < v_cnt2 THEN
                 v_cnt := v_cnt + 1;
             END IF;
@@ -4161,7 +4551,7 @@ BEGIN
                 || fpadl(fpct(r.nb_acc, v_cnt2), 18) || '|' || fpadl(fmio(r.mt), 26) || '|');
         END LOOP;
         tbl_line('4,18,20,22,18,26');
-        p_verdict('CUT-01b', 'Month end at which not every live contract was accrued',
+        p_verdict('CUT-01b', 'Month end at which not every security held was accrued',
                   v_cnt, v_row, NULL, 'HIGH');
 
         -- -----------------------------------------------------
@@ -4212,13 +4602,18 @@ BEGIN
                   v_cnt, v_row, v_mt, 'CRITICAL');
 
         -- -----------------------------------------------------
-        p_test('CUT-03', 'Security balances are justified by the live portfolio');
+        p_test('CUT-03', 'Security balances are justified by the securities still held');
         p_obj('for each security account, the signed accounting balance must equal');
-        po('                   the sum of the nominals of the live contracts attached to it. The');
-        po('                   rebuilt figure below is the one to confront with the securities');
+        po('                   the sum of the nominals of the securities the bank STILL HOLDS on');
+        po('                   that account. Still held means no PRINCIPAL_LIQD entry has been');
+        po('                   passed: the security was neither repaid at maturity nor sold early.');
+        po('                   Reading the population off MATURITY_DATE instead would count a');
+        po('                   security sold last month as still on the books and invent a gap.');
+        po('                   The rebuilt figure below is the one to confront with the securities');
         po('                   position report.');
         p_how('per account, signed balance from ACTB_HISTORY against the sum of');
-        po('                   LCY_AMOUNT of the contracts still alive at ' || fdt(k_asof) || '.');
+        po('                   LCY_AMOUNT of the contracts booked on that account and carrying no');
+        po('                   PRINCIPAL_LIQD entry at ' || fdt(k_asof) || '.');
         tbl_head('4,22,14,38,28,28,26,14',
                  'N#|ACCOUNT|CLASS|ACCOUNT NAME|ACCOUNTING BALANCE|REBUILT POSITION|GAP|VERDICT',
                  '|AC_NO| |AC_GL_DESC|LCY_AMOUNT|LCY_AMOUNT| | ',
@@ -4240,7 +4635,11 @@ BEGIN
              WHERE c.module = k_mod
                AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                     WHERE v.contract_ref_no = c.contract_ref_no)
-               AND c.maturity_date > k_asof
+               AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                                WHERE h2.trn_ref_no = c.contract_ref_no
+                                  AND h2.module = k_mod
+                                  AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                  AND NVL(h2.lcy_amount, 0) > 0)
                AND INSTR(',' || r.prod || ',', ',' || TRIM(c.product) || ',') > 0
                AND EXISTS (SELECT 1 FROM actb_history h
                             WHERE h.trn_ref_no = c.contract_ref_no
@@ -4259,17 +4658,20 @@ BEGIN
                 || fpadl(CASE WHEN ABS(v_tot - v_tot2) > k_tol_abs THEN 'GAP' ELSE 'OK' END, 14) || '|');
         END LOOP;
         tbl_line('4,22,14,38,28,28,26,14');
-        p_verdict('CUT-03', 'Security account whose balance is not justified by the portfolio',
+        p_verdict('CUT-03', 'Security account whose balance is not justified by what is held',
                   v_cnt, v_row, v_mt, 'CRITICAL');
 
         -- -----------------------------------------------------
-        p_test('CUT-04', 'Deferred income equals the unearned interest of the live book');
+        p_test('CUT-04', 'Deferred income equals the unearned interest of the book still held');
         p_obj('for pre counted deals, the balance of class ' || k_cl_defer || ' must equal the');
-        po('                   share of interest not yet earned on the live contracts, that is');
-        po('                   interest times days remaining divided by the tenor. A residue');
-        po('                   carried by a matured deal is a release that never happened.');
+        po('                   share of interest not yet earned on the securities STILL HELD, that');
+        po('                   is interest times days remaining divided by the tenor. A residue');
+        po('                   carried by a security that has already left the book, redeemed or');
+        po('                   sold, is a release that never happened.');
         p_how('signed balance of class ' || k_cl_defer || ' from ACTB_HISTORY against the rebuilt');
-        po('                   unearned interest of the live pre counted contracts.');
+        po('                   unearned interest of the pre counted contracts carrying no');
+        po('                   PRINCIPAL_LIQD entry. Days remaining are floored at zero so that a');
+        po('                   contract past its maturity and never unwound adds nothing.');
         SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0)
           INTO v_tot
@@ -4277,23 +4679,30 @@ BEGIN
          WHERE h.module = k_mod
            AND SUBSTR(h.ac_no, 1, 4) = k_cl_defer;
         SELECT NVL(SUM(ROUND(NVL(c.main_comp_amount, 0)
-                             * (TRUNC(c.maturity_date) - TRUNC(k_asof))
+                             * GREATEST(0, TRUNC(c.maturity_date) - TRUNC(k_asof))
                              / NULLIF(c.maturity_date - c.value_date, 0), 2)), 0)
           INTO v_tot2
           FROM ldtb_contract_master c
          WHERE c.module = k_mod
            AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                 WHERE v.contract_ref_no = c.contract_ref_no)
-           AND c.maturity_date > k_asof
+           AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                            WHERE h2.trn_ref_no = c.contract_ref_no
+                              AND h2.module = k_mod
+                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                              AND NVL(h2.lcy_amount, 0) > 0)
            AND INSTR(',' || k_prod_pre || ',', ',' || TRIM(c.product) || ',') > 0;
         print_kv('Accounting balance of the deferred income',        fmio(v_tot));
-        print_kv('Unearned interest of the live pre counted deals',  fmio(v_tot2));
+        print_kv('Unearned interest of the pre counted deals still held', fmio(v_tot2));
         print_kv('Gap',                                              famt(v_tot - v_tot2));
         IF ABS(v_tot - v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
-        p_verdict('CUT-04', 'Deferred income not justified by the live contracts',
+        p_verdict('CUT-04', 'Deferred income not justified by the securities still held',
                   v_cnt, 1, ABS(v_tot - v_tot2), 'CRITICAL');
         IF v_cnt > 0 THEN
-            print_sub('CUT-04 a. Deferred income still carried by matured deals');
+            print_sub('CUT-04 a. Deferred income still carried by securities that have'
+                      || ' left the book');
+            po('     These securities have a PRINCIPAL_LIQD entry, redeemed or sold, so the');
+            po('     deferred income should have been released in full on that day.');
             sec_head('DEFERRED LEFT');
             v_row := 0;
             FOR r IN (SELECT * FROM (
@@ -4314,7 +4723,11 @@ BEGIN
                                                                            FROM ldtb_contract_master v
                                                                           WHERE v.contract_ref_no
                                                                                 = c.contract_ref_no)
-                         WHERE c.maturity_date <= k_asof
+                         WHERE EXISTS (SELECT 1 FROM actb_history h2
+                                        WHERE h2.trn_ref_no = c.contract_ref_no
+                                          AND h2.module = k_mod
+                                          AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                          AND NVL(h2.lcy_amount, 0) > 0)
                            AND ABS(a.bal_def) > k_tol_abs
                          ORDER BY ABS(a.bal_def) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
@@ -4326,13 +4739,16 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        p_test('CUT-05', 'Accrued receivable equals the uncollected interest of the live book');
+        p_test('CUT-05', 'Accrued receivable equals the uncollected interest of the book held');
         p_obj('for post counted deals, the balance of classes ' || k_cl_accr_pl || ' and ' || k_cl_accr_tr || ' must');
-        po('                   equal the interest earned and not yet collected on the live');
-        po('                   contracts. The theoretical figure is bounded at ' || fdt(v_d_accr) || ', the module');
-        po('                   having stopped accruing after that date.');
+        po('                   equal the interest earned and not yet collected on the securities');
+        po('                   STILL HELD. A security sold early stopped accruing on the day of the');
+        po('                   sale and its receivable was settled then, so it has no place in the');
+        po('                   rebuilt figure. The theory is bounded at ' || fdt(v_d_accr) || ', the module having');
+        po('                   stopped accruing after that date.');
         p_how('signed balance of the accrued classes from ACTB_HISTORY against');
-        po('                   the rebuilt earned interest of the live post counted contracts.');
+        po('                   the rebuilt earned interest of the post counted contracts carrying');
+        po('                   no PRINCIPAL_LIQD entry.');
         SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0)
           INTO v_tot
@@ -4347,17 +4763,22 @@ BEGIN
          WHERE c.module = k_mod
            AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                 WHERE v.contract_ref_no = c.contract_ref_no)
-           AND c.maturity_date > k_asof
+           AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                            WHERE h2.trn_ref_no = c.contract_ref_no
+                              AND h2.module = k_mod
+                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                              AND NVL(h2.lcy_amount, 0) > 0)
            AND c.value_date < v_d_accr
            AND INSTR(',' || k_prod_post || ',', ',' || TRIM(c.product) || ',') > 0;
         print_kv('Accounting balance of the accrued receivable',        fmio(v_tot));
-        print_kv('Earned and uncollected interest of the live deals',   fmio(v_tot2));
+        print_kv('Earned and uncollected interest of the deals still held', fmio(v_tot2));
         print_kv('Gap',                                                 famt(v_tot - v_tot2));
         IF ABS(v_tot - v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
-        p_verdict('CUT-05', 'Accrued receivable not justified by the live contracts',
+        p_verdict('CUT-05', 'Accrued receivable not justified by the securities still held',
                   v_cnt, 1, ABS(v_tot - v_tot2), 'CRITICAL');
         IF v_cnt > 0 THEN
-            print_sub('CUT-05 a. Live deals whose accrued receivable differs from the theory');
+            print_sub('CUT-05 a. Securities still held whose accrued receivable differs'
+                      || ' from the theory');
             sec_head('BOOKED / THEORY');
             v_row := 0;
             FOR r IN (SELECT * FROM (
@@ -4381,7 +4802,11 @@ BEGIN
                                                                            FROM ldtb_contract_master v
                                                                           WHERE v.contract_ref_no
                                                                                 = c.contract_ref_no)
-                         WHERE c.maturity_date > k_asof
+                         WHERE NOT EXISTS (SELECT 1 FROM actb_history h2
+                                            WHERE h2.trn_ref_no = c.contract_ref_no
+                                              AND h2.module = k_mod
+                                              AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                              AND NVL(h2.lcy_amount, 0) > 0)
                            AND c.value_date < v_d_accr
                            AND INSTR(',' || k_prod_post || ',', ',' || TRIM(c.product) || ',') > 0
                            AND ABS(a.bal_accr
@@ -4826,14 +5251,18 @@ BEGIN
 
         -- -----------------------------------------------------
         p_test('STA-04', 'Issuer concentration stays within the limits');
-        p_obj('live exposure per sovereign issuer against the limit set by the ALM');
-        po('                   committee (' || fmio(k_conc_lim) || '). A breach is a risk the committee has not');
-        po('                   authorised, on a counterparty the bank cannot diversify away.');
-        p_how('sum of LCY_AMOUNT of the contracts still alive at ' || fdt(k_asof) || ', per');
-        po('                   counterparty. THE LIMIT IS A PARAMETER OF THIS SCRIPT: align it');
-        po('                   with the committee decision before concluding.');
+        p_obj('exposure per sovereign issuer on the securities the bank STILL');
+        po('                   HOLDS, against the limit set by the ALM committee ('
+                             || fmio(k_conc_lim) || '). A breach is');
+        po('                   a risk the committee has not authorised, on a counterparty the bank');
+        po('                   cannot diversify away. A security already sold is no longer an');
+        po('                   exposure, whatever its contractual maturity says.');
+        p_how('sum of LCY_AMOUNT per counterparty, restricted to the contracts');
+        po('                   carrying no PRINCIPAL_LIQD entry in ACTB_HISTORY at ' || fdt(k_asof) || '.');
+        po('                   THE LIMIT IS A PARAMETER OF THIS SCRIPT: align it with the');
+        po('                   committee decision before concluding.');
         tbl_head('4,16,34,20,28,28,18,14',
-                 'N#|CIF|ISSUER|CONTRACTS|LIVE EXPOSURE|ALM LIMIT|UTILISATION|VERDICT',
+                 'N#|CIF|ISSUER|CONTRACTS|EXPOSURE STILL HELD|ALM LIMIT|UTILISATION|VERDICT',
                  '|COUNTERPARTY|CUSTOMER_NAME1|TRN_REF_NO|LCY_AMOUNT| | | ',
                  'RLLRRRRR');
         v_row := 0;
@@ -4847,7 +5276,11 @@ BEGIN
                    WHERE c.module = k_mod
                      AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                           WHERE v.contract_ref_no = c.contract_ref_no)
-                     AND c.maturity_date > k_asof
+                     AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                                      WHERE h2.trn_ref_no = c.contract_ref_no
+                                        AND h2.module = k_mod
+                                        AND h2.amount_tag = 'PRINCIPAL_LIQD'
+                                        AND NVL(h2.lcy_amount, 0) > 0)
                    GROUP BY c.counterparty
                    ORDER BY SUM(c.lcy_amount) DESC) LOOP
             v_row := v_row + 1;
@@ -4862,7 +5295,7 @@ BEGIN
                 || fpadl(CASE WHEN r.mt > k_conc_lim THEN 'BREACHED' ELSE 'OK' END, 14) || '|');
         END LOOP;
         tbl_line('4,16,34,20,28,28,18,14');
-        p_verdict('STA-04', 'Issuer whose live exposure breaches the ALM limit',
+        p_verdict('STA-04', 'Issuer whose exposure still held breaches the ALM limit',
                   v_cnt, v_row, v_mt, 'HIGH');
 
         -- -----------------------------------------------------
@@ -5075,20 +5508,30 @@ BEGIN
         po('     the entries, the entries are taken as right and the disagreement is');
         po('     reported. That choice is deliberate and is the backbone of this');
         po('     report.');
-        po('  3. Eight controls cannot be closed inside the database: CSH-01 to');
+        po('  3. A security is on the books while no PRINCIPAL_LIQD entry has been');
+        po('     passed on it, and not while its MATURITY_DATE lies in the future');
+        po('     (section 0.8). Every population in this report is drawn that way.');
+        po('     The holding period printed with each contract runs from VALUE_DATE');
+        po('     to that entry, or to ' || fdt(k_asof) || ' for a security still held.');
+        po('  4. LC-04 prorates the deal interest over the holding period on a');
+        po('     straight line, then allows ' || ftx(k_tol_pro) || ' around that figure. That is an');
+        po('     approximation of the accrued coupon settled at the sale: where a');
+        po('     sale price or a confirmation is available, the exact figure should');
+        po('     be substituted before concluding on an individual contract.');
+        po('  5. Eight controls cannot be closed inside the database: CSH-01 to');
         po('     CSH-03 need the BEAC account statement, CUT-02 to CUT-05 need the');
         po('     trial balance and the securities position report, and CLS-02 needs');
         po('     the valuation policy. The script runs the verifiable half and');
         po('     prints the figure to be matched. None of those eight can be');
         po('     declared satisfied until the supporting document is obtained.');
-        po('  4. The ALM concentration limit used by STA-04 is a parameter of this');
+        po('  6. The ALM concentration limit used by STA-04 is a parameter of this');
         po('     script (' || fmio(k_conc_lim) || '). It must be aligned with the committee');
         po('     decision before concluding on that test.');
-        po('  5. The pace tests (INT-03, INT-05, CUT-01) are bounded at the last');
+        po('  7. The pace tests (INT-03, INT-05, CUT-01) are bounded at the last');
         po('     accrual entry of the module, ' || fdt(v_d_accr) || '. Beyond that date the absence');
         po('     of an accrual is the module having stopped, not a gap in the');
         po('     series, and it is reported as such.');
-        po('  6. Operations are attached to the LAST VERSION of their contract.');
+        po('  8. Operations are attached to the LAST VERSION of their contract.');
         po('     Amendments are detected by REV-05 but earlier versions are not');
         po('     replayed line by line.');
 

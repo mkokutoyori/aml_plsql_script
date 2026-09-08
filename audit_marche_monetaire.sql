@@ -202,18 +202,18 @@ DECLARE
 
     FUNCTION fnum(x NUMBER) RETURN VARCHAR2 IS
     BEGIN
-        RETURN TO_CHAR(NVL(x, 0), 'FM999G999G999G990');
+        RETURN TO_CHAR(NVL(x, 0), 'FM999G999G999G999G990');
     END;
 
     FUNCTION famt(x NUMBER) RETURN VARCHAR2 IS
     BEGIN
-        RETURN TO_CHAR(NVL(x, 0), 'FM999G999G999G990D00');
+        RETURN TO_CHAR(NVL(x, 0), 'FM999G999G999G999G990D00');
     END;
 
     -- Montant exprime en millions de XAF
     FUNCTION fmio(x NUMBER) RETURN VARCHAR2 IS
     BEGIN
-        RETURN TO_CHAR(NVL(x, 0) / 1000000, 'FM999G999G990D00') || ' M';
+        RETURN TO_CHAR(NVL(x, 0) / 1000000, 'FM999G999G999G990D00') || ' M';
     END;
 
     FUNCTION ftx(x NUMBER) RETURN VARCHAR2 IS
@@ -4851,9 +4851,9 @@ BEGIN
             SELECT u.user_id, u.user_name, u.user_status, u.user_category, u.auto_auth,
                    u.home_branch, x.nb, x.mt
               FROM smtb_user u
-              JOIN (SELECT h.user_id uid, COUNT(*) nb, SUM(NVL(h.lcy_amount, 0)) mt
+              JOIN (SELECT h.user_id usr_id, COUNT(*) nb, SUM(NVL(h.lcy_amount, 0)) mt
                       FROM actb_history h WHERE h.module = k_mod
-                     GROUP BY h.user_id) x ON x.uid = u.user_id
+                     GROUP BY h.user_id) x ON x.usr_id = u.user_id
              ORDER BY x.nb DESC
         ) LOOP
             v_row := v_row + 1;
@@ -4957,8 +4957,8 @@ BEGIN
         p_obj('un utilisateur ayant saisi ou autorise des operations doit avoir une');
         po('             fiche active et autorisee, ou une date de fin coherente.');
         SELECT COUNT(*) INTO v_cnt
-          FROM (SELECT DISTINCT h.user_id uid FROM actb_history h WHERE h.module = k_mod) x
-          JOIN smtb_user u ON u.user_id = x.uid
+          FROM (SELECT DISTINCT h.user_id usr_id FROM actb_history h WHERE h.module = k_mod) x
+          JOIN smtb_user u ON u.user_id = x.usr_id
          WHERE NVL(TRIM(u.record_stat), 'O') <> 'O'
             OR NVL(TRIM(u.auth_stat), 'A') <> 'A'
             OR UPPER(NVL(TRIM(u.user_status), 'E')) IN ('C', 'D');
@@ -4973,8 +4973,8 @@ BEGIN
             v_row := 0;
             FOR r IN (SELECT u.user_id, u.user_name, u.user_status, u.record_stat, u.auth_stat,
                              u.start_date, u.end_date
-                        FROM (SELECT DISTINCT h.user_id uid FROM actb_history h WHERE h.module = k_mod) x
-                        JOIN smtb_user u ON u.user_id = x.uid
+                        FROM (SELECT DISTINCT h.user_id usr_id FROM actb_history h WHERE h.module = k_mod) x
+                        JOIN smtb_user u ON u.user_id = x.usr_id
                        WHERE NVL(TRIM(u.record_stat), 'O') <> 'O'
                           OR NVL(TRIM(u.auth_stat), 'A') <> 'A'
                           OR UPPER(NVL(TRIM(u.user_status), 'E')) IN ('C', 'D')

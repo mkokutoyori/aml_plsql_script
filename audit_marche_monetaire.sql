@@ -56,7 +56,8 @@
 --   PARTIE 2 - sections 9 a 10  : controles MM-1xx referentiel / MM-2xx dates
 --   PARTIE 3 - section 11       : controles MM-3xx CALCUL DES INTERETS
 --   PARTIE 4 - sections 12 a 13 : controles MM-4xx REMBOURSEMENTS / MM-5xx RETARDS
---   PARTIE 5 - section 14       : controles MM-6xx COMPTABILISATION
+--   PARTIE 5 - sections 14, 14B : controles MM-6xx rapprochement comptable
+--                                 et MM-62x SCHEMAS COMPTABLES ET CYCLE DE VIE
 --   PARTIE 6 - section 15       : controles MM-7xx GOUVERNANCE ET PISTE D'AUDIT
 --   PARTIE 7 - section 16       : SYNTHESE DE TOUS LES TESTS
 --
@@ -113,6 +114,19 @@ DECLARE
 
     -- Nombre de lignes de detail affichees par test
     k_top         NUMBER := 30;
+
+    -- ---------- Plan comptable du module (section 14 BIS) ----------
+    -- Prefixes des comptes generaux naturels (STTB_ACCOUNT.AC_NATURAL_GL)
+    -- mouvementes par les operations de marche monetaire. Valeurs issues de
+    -- l'analyse des schemas comptables sur echantillon de contrats ; a ajuster
+    -- si le plan comptable de la banque differe.
+    k_gl_crat_pl  VARCHAR2(8) := '5118';  -- creances rattachees - placement
+    k_gl_crat_tr  VARCHAR2(8) := '5128';  -- creances rattachees - transaction
+    k_gl_tit_pl   VARCHAR2(8) := '511';   -- titres de placement
+    k_gl_tit_tr   VARCHAR2(8) := '512';   -- titres de transaction
+    k_gl_pca      VARCHAR2(8) := '472';   -- produits constates ou percus d'avance
+    k_gl_prod     VARCHAR2(8) := '733';   -- revenus des titres (resultat)
+    k_gl_treso    VARCHAR2(8) := '56';    -- tresorerie, compte de reglement BEAC
 
     -- Module et application externe
     k_mod         VARCHAR2(4)  := 'MM';
@@ -4769,6 +4783,706 @@ BEGIN
            AND TRUNC(h.trn_dt) > TRUNC(m.maturity_date) + 5;
         print_kv('Contrats concernes', fnum(v_cnt2));
         p_verdict('MM-608', 'Ecriture passee plus de 5 jours apres l''echeance', v_cnt, NULL, v_mt, 'MOYEN');
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 14 BIS. MM-62x : SCHEMAS COMPTABLES ET CYCLE DE VIE DES TITRES
+    -- =========================================================
+    print_section('14 BIS. CONTROLES MM-62x : SCHEMAS COMPTABLES ET CYCLE DE VIE DES TITRES');
+    BEGIN
+        po('  ACTB_HISTORY est la table ou le cycle de vie d''une operation se');
+        po('  materialise reellement. Cette section reconstitue, a partir des ecritures,');
+        po('  le schema comptable applique par produit, puis controle que chaque etape du');
+        po('  cycle est correctement denouee.');
+        po('');
+        po('  CLE DE LECTURE');
+        po('    ACTB_HISTORY.TRN_REF_NO = LDTB_CONTRACT_MASTER.CONTRACT_REF_NO');
+        po('    ACTB_HISTORY.AC_NO      = STTB_ACCOUNT.AC_GL_NO');
+        po('    STTB_ACCOUNT.AC_NATURAL_GL donne le compte general naturel, donc la');
+        po('    nature comptable reelle de la ligne.');
+        po('');
+        po('  REQUETE DE REFERENCE POUR DEROULER UN CONTRAT A LA MAIN');
+        po('    select trn_ref_no, ac_gl_desc, ac_no, drcr_ind, a.lcy_amount, a.product,');
+        po('           amount, main_comp_amount, trn_dt, amount_tag, b.main_comp_rate,');
+        po('           booking_date, maturity_date, ac_natural_gl');
+        po('      from actb_history a');
+        po('      left join ldtb_contract_master b on b.contract_ref_no = a.trn_ref_no');
+        po('      left join sttb_account on ac_no = ac_gl_no');
+        po('     where trn_ref_no in (...)');
+        po('     order by trn_ref_no, trn_dt, a.lcy_amount desc, drcr_ind desc;');
+
+        print_sub('14B.0 Schema comptable attendu, par mode de comptabilisation des interets');
+        po('  Les operations se repartissent en deux familles selon que l''interet est');
+        po('  encaisse a la souscription ou a l''echeance. Le schema attendu en decoule.');
+        po('');
+        po('  FAMILLE 1 - INTERETS POSTCOMPTES (interet encaisse a l''echeance)');
+        po('    1. Souscription   DEBIT  compte de titres        CREDIT tresorerie');
+        po('    2. Provision      DEBIT  creances rattachees     CREDIT produits');
+        po('       (une ecriture par jour jusqu''a l''echeance)');
+        po('    3. Encaissement   DEBIT  tresorerie              CREDIT creances rattachees');
+        po('    4. Liquidation    DEBIT  tresorerie              CREDIT compte de titres');
+        po('');
+        po('  FAMILLE 2 - INTERETS PRECOMPTES (interet encaisse a la souscription)');
+        po('    1a. Souscription  DEBIT  compte de titres        CREDIT tresorerie');
+        po('    1b. Interet recu  DEBIT  tresorerie              CREDIT produits constates');
+        po('                                                            d''avance');
+        po('    2.  Etalement     DEBIT  produits constates      CREDIT produits');
+        po('                             d''avance');
+        po('       (une ecriture par jour, la dette d''avance se resorbe)');
+        po('    3.  Encaissement  neant, l''interet a ete encaisse a l''etape 1b');
+        po('    4.  Liquidation   DEBIT  tresorerie              CREDIT compte de titres');
+        po('');
+        po('  REGLE D''OR');
+        po('    Entree de tresorerie = DEBIT tresorerie. Sortie = CREDIT tresorerie.');
+        po('    Le produit est toujours un CREDIT d''un compte de resultat, etale sur la');
+        po('    duree de detention. Apres liquidation, les comptes de bilan du contrat');
+        po('    (titres, creances rattachees, produits constates d''avance) doivent etre');
+        po('    soldes.');
+        po('');
+        po('  Prefixes de comptes naturels retenus (parametrables en tete de script)');
+        print_kv('  Titres de placement',              k_gl_tit_pl || '%');
+        print_kv('  Titres de transaction',            k_gl_tit_tr || '%');
+        print_kv('  Creances rattachees - placement',  k_gl_crat_pl || '%');
+        print_kv('  Creances rattachees - transaction', k_gl_crat_tr || '%');
+        print_kv('  Produits constates d''avance',     k_gl_pca || '%');
+        print_kv('  Revenus des titres (resultat)',    k_gl_prod || '%');
+        print_kv('  Tresorerie',                       k_gl_treso || '%');
+
+        -- -----------------------------------------------------
+        print_sub('14B.1 Comptes generaux naturels mouvementes par le module');
+        tbl_line('4,16,44,26,16,22,22,14');
+        po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE NATUREL', 16) || '|' || fpad('LIBELLE', 44) || '|'
+            || fpad('NATURE RETENUE', 26) || '|' || fpadl('NB ECRITURES', 16) || '|'
+            || fpadl('TOTAL DEBIT', 22) || '|' || fpadl('TOTAL CREDIT', 22) || '|'
+            || fpadl('NB CONTRATS', 14) || '|');
+        tbl_line('4,16,44,26,16,22,22,14');
+        v_row := 0;
+        BEGIN
+            FOR r IN (
+                SELECT s.nat, MAX(s.lib) lib, COUNT(*) nb,
+                       SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                       SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
+                       COUNT(DISTINCT h.trn_ref_no) nbc,
+                       MAX(CASE
+                             WHEN s.nat LIKE k_gl_crat_pl || '%' THEN 'creances rattachees PL'
+                             WHEN s.nat LIKE k_gl_crat_tr || '%' THEN 'creances rattachees TR'
+                             WHEN s.nat LIKE k_gl_tit_pl  || '%' THEN 'titres de placement'
+                             WHEN s.nat LIKE k_gl_tit_tr  || '%' THEN 'titres de transaction'
+                             WHEN s.nat LIKE k_gl_pca     || '%' THEN 'produits d avance'
+                             WHEN s.nat LIKE k_gl_prod    || '%' THEN 'produits (resultat)'
+                             WHEN s.nat LIKE k_gl_treso   || '%' THEN 'tresorerie'
+                             ELSE 'AUTRE A QUALIFIER'
+                           END) nature
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                 WHERE h.module = k_mod
+                 GROUP BY s.nat
+                 ORDER BY COUNT(*) DESC
+            ) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 40;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.nat, 16) || '|' || fpad(r.lib, 44) || '|'
+                    || fpad(r.nature, 26) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.deb), 22) || '|'
+                    || fpadl(fmio(r.cre), 22) || '|' || fpadl(fnum(r.nbc), 14) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,16,44,26,16,22,22,14');
+
+        -- -----------------------------------------------------
+        print_sub('14B.2 Schema comptable reconstitue : produit x tag de montant x sens');
+        po('  C''est le schema REELLEMENT applique, deduit des ecritures et non du');
+        po('  parametrage. Chaque ligne se lit comme une regle de comptabilisation.');
+        po('');
+        tbl_line('4,8,18,6,16,40,26,16,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('PROD', 8) || '|' || fpad('TAG DE MONTANT', 18) || '|'
+            || fpad('D/C', 6) || '|' || fpad('COMPTE NATUREL', 16) || '|' || fpad('LIBELLE', 40) || '|'
+            || fpad('NATURE', 26) || '|' || fpadl('NB ECRITURES', 16) || '|'
+            || fpadl('TOTAL LCY', 22) || '|');
+        tbl_line('4,8,18,6,16,40,26,16,22');
+        v_row := 0;
+        BEGIN
+            FOR r IN (
+                SELECT h.product, h.amount_tag, h.drcr_ind, s.nat, MAX(s.lib) lib,
+                       COUNT(*) nb, SUM(NVL(h.lcy_amount, 0)) mt,
+                       MAX(CASE
+                             WHEN s.nat LIKE k_gl_crat_pl || '%' THEN 'creances rattachees PL'
+                             WHEN s.nat LIKE k_gl_crat_tr || '%' THEN 'creances rattachees TR'
+                             WHEN s.nat LIKE k_gl_tit_pl  || '%' THEN 'titres de placement'
+                             WHEN s.nat LIKE k_gl_tit_tr  || '%' THEN 'titres de transaction'
+                             WHEN s.nat LIKE k_gl_pca     || '%' THEN 'produits d avance'
+                             WHEN s.nat LIKE k_gl_prod    || '%' THEN 'produits (resultat)'
+                             WHEN s.nat LIKE k_gl_treso   || '%' THEN 'tresorerie'
+                             ELSE 'AUTRE A QUALIFIER'
+                           END) nature
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                 WHERE h.module = k_mod
+                 GROUP BY h.product, h.amount_tag, h.drcr_ind, s.nat
+                 ORDER BY h.product, h.amount_tag, h.drcr_ind DESC
+            ) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 120;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.product, 8) || '|'
+                    || fpad(r.amount_tag, 18) || '|' || fpad(r.drcr_ind, 6) || '|' || fpad(r.nat, 16) || '|'
+                    || fpad(r.lib, 40) || '|' || fpad(r.nature, 26) || '|' || fpadl(fnum(r.nb), 16) || '|'
+                    || fpadl(fmio(r.mt), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,8,18,6,16,40,26,16,22');
+
+        -- -----------------------------------------------------
+        print_sub('14B.3 Mode de comptabilisation des interets, par produit');
+        po('  Un produit qui mouvemente un compte de produits constates d''avance');
+        po('  encaisse ses interets a la souscription : il est PRECOMPTE. Un produit qui');
+        po('  mouvemente un compte de creances rattachees les encaisse a l''echeance : il');
+        po('  est POSTCOMPTE. Le delai median entre la date de valeur et l''encaissement');
+        po('  des interets confirme le classement.');
+        po('');
+        tbl_line('4,8,36,14,16,16,18,20');
+        po('  |' || fpad('N#', 4) || '|' || fpad('PROD', 8) || '|' || fpad('LIBELLE DU PRODUIT', 36) || '|'
+            || fpadl('NB CONTRATS', 14) || '|' || fpadl('ECR. AVANCE', 16) || '|'
+            || fpadl('ECR. RATTACHEES', 16) || '|' || fpad('MODE DEDUIT', 18) || '|'
+            || fpadl('DELAI MEDIAN (J)', 20) || '|');
+        tbl_line('4,8,36,14,16,16,18,20');
+        v_row := 0;
+        BEGIN
+            FOR r IN (
+                SELECT h.product,
+                       (SELECT MAX(p.product_description) FROM cstm_product p
+                         WHERE p.product_code = h.product AND p.module = k_mod) lib,
+                       COUNT(DISTINCT h.trn_ref_no) nbc,
+                       SUM(CASE WHEN s.nat LIKE k_gl_pca || '%' THEN 1 ELSE 0 END) n_pca,
+                       SUM(CASE WHEN s.nat LIKE k_gl_crat_pl || '%'
+                                  OR s.nat LIKE k_gl_crat_tr || '%' THEN 1 ELSE 0 END) n_crat,
+                       MEDIAN(CASE WHEN h.amount_tag LIKE 'INT%LIQD'
+                                   THEN TRUNC(h.trn_dt) - TRUNC(m.value_date) END) dm
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                  LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                                                  AND m.version_no = 1
+                 WHERE h.module = k_mod
+                 GROUP BY h.product
+                 ORDER BY COUNT(*) DESC
+            ) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.product, 8) || '|' || fpad(r.lib, 36) || '|'
+                    || fpadl(fnum(r.nbc), 14) || '|' || fpadl(fnum(r.n_pca), 16) || '|'
+                    || fpadl(fnum(r.n_crat), 16) || '|'
+                    || fpad(CASE WHEN r.n_pca > 0 AND r.n_crat = 0 THEN 'PRECOMPTE'
+                                 WHEN r.n_crat > 0 AND r.n_pca = 0 THEN 'POSTCOMPTE'
+                                 WHEN r.n_pca > 0 AND r.n_crat > 0 THEN 'MIXTE A EXPLIQUER'
+                                 ELSE 'INDETERMINE' END, 18) || '|'
+                    || fpadl(CASE WHEN r.dm IS NULL THEN '-' ELSE TO_CHAR(ROUND(r.dm)) END, 20) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,8,36,14,16,16,18,20');
+        po('  Un delai median proche de zero confirme un interet precompte ; un delai');
+        po('  proche de la duree du contrat confirme un interet postcompte.');
+
+        -- -----------------------------------------------------
+        print_sub('14B.4 Cycle de vie detaille d''un contrat representatif par produit');
+        po('  Pour chaque produit, le contrat retenu est celui qui presente le plus grand');
+        po('  nombre de tags de montant distincts, donc le cycle le plus complet. Les');
+        po('  provisions quotidiennes sont resumees en une ligne pour la lisibilite.');
+        BEGIN
+            FOR c IN (
+                SELECT product, ref FROM (
+                    SELECT m.product, h.trn_ref_no ref,
+                           ROW_NUMBER() OVER (PARTITION BY m.product
+                                              ORDER BY COUNT(DISTINCT h.amount_tag) DESC,
+                                                       MAX(h.trn_dt) DESC) rn
+                      FROM actb_history h
+                      JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                     WHERE h.module = k_mod
+                       AND m.module = k_mod
+                       AND m.version_no = 1
+                     GROUP BY m.product, h.trn_ref_no
+                ) WHERE rn = 1
+                ORDER BY product
+            ) LOOP
+                po('');
+                po('  --- PRODUIT ' || c.product || ' - CONTRAT ' || c.ref || ' ---');
+                BEGIN
+                    FOR d IN (SELECT m.lcy_amount nom, m.main_comp_rate tx, m.main_comp_amount it,
+                                     m.main_comp comp, m.value_date vd, m.maturity_date md,
+                                     TRIM(m.contract_status) st,
+                                     (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                                       WHERE x.customer_no = m.counterparty) etat
+                                FROM ldtb_contract_master m
+                               WHERE m.contract_ref_no = c.ref AND m.version_no = 1) LOOP
+                        print_kv('    Contrepartie',          d.etat);
+                        print_kv('    Nominal',               famt(d.nom));
+                        print_kv('    Taux et composante',    ftx(d.tx) || '   ' || d.comp);
+                        print_kv('    Interets contractuels', famt(d.it));
+                        print_kv('    Valeur / echeance',     fdt(d.vd) || ' au ' || fdt(d.md)
+                                 || '   (' || fnum(d.md - d.vd) || ' jours)');
+                        print_kv('    Statut du contrat',     d.st);
+                    END LOOP;
+                EXCEPTION
+                    WHEN OTHERS THEN po('    !! ' || SQLERRM);
+                END;
+                po('');
+                tbl_line('4,12,10,18,6,16,38,20,14');
+                po('  |' || fpad('N#', 4) || '|' || fpad('DATE', 12) || '|' || fpad('EVENT', 10) || '|'
+                    || fpad('TAG DE MONTANT', 18) || '|' || fpad('D/C', 6) || '|'
+                    || fpad('COMPTE NATUREL', 16) || '|' || fpad('LIBELLE DU COMPTE', 38) || '|'
+                    || fpadl('MONTANT LCY', 20) || '|' || fpadl('NB LIGNES', 14) || '|');
+                tbl_line('4,12,10,18,6,16,38,20,14');
+                v_row := 0;
+                BEGIN
+                    FOR r IN (
+                        SELECT dt, event, amount_tag, drcr_ind, nat, lib, mt, nb, ord FROM (
+                            -- toutes les ecritures hors provisions, une ligne chacune
+                            SELECT TO_CHAR(h.trn_dt, 'DD/MM/YYYY') dt, h.event, h.amount_tag,
+                                   h.drcr_ind, s.nat, s.lib, NVL(h.lcy_amount, 0) mt, 1 nb,
+                                   h.trn_dt ord
+                              FROM actb_history h
+                              LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                                           FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                             WHERE h.trn_ref_no = c.ref
+                               AND h.module = k_mod
+                               AND h.event <> 'ACCR'
+                            UNION ALL
+                            -- provisions quotidiennes resumees en une ligne par compte et sens
+                            SELECT TO_CHAR(MIN(h.trn_dt), 'DD/MM/YYYY') || ' a '
+                                   || TO_CHAR(MAX(h.trn_dt), 'DD/MM'), 'ACCR', h.amount_tag,
+                                   h.drcr_ind, s.nat, s.lib, SUM(NVL(h.lcy_amount, 0)), COUNT(*),
+                                   MIN(h.trn_dt)
+                              FROM actb_history h
+                              LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                                           FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                             WHERE h.trn_ref_no = c.ref
+                               AND h.module = k_mod
+                               AND h.event = 'ACCR'
+                             GROUP BY h.amount_tag, h.drcr_ind, s.nat, s.lib
+                        ) ORDER BY ord, mt DESC, drcr_ind DESC
+                    ) LOOP
+                        v_row := v_row + 1;
+                        EXIT WHEN v_row > 40;
+                        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.dt, 12) || '|'
+                            || fpad(r.event, 10) || '|' || fpad(r.amount_tag, 18) || '|'
+                            || fpad(r.drcr_ind, 6) || '|' || fpad(r.nat, 16) || '|' || fpad(r.lib, 38) || '|'
+                            || fpadl(famt(r.mt), 20) || '|' || fpadl(fnum(r.nb), 14) || '|');
+                    END LOOP;
+                EXCEPTION
+                    WHEN OTHERS THEN po('    !! ' || SQLERRM);
+                END;
+                tbl_line('4,12,10,18,6,16,38,20,14');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+
+
+        -- -----------------------------------------------------
+        p_test('MM-621', 'Contrat liquide dont le compte de titres n''est pas solde');
+        p_obj('apres liquidation, la somme des debits du compte de titres doit egaler');
+        po('             la somme de ses credits : le titre est sorti du bilan.');
+        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
+          FROM (SELECT h.trn_ref_no,
+                       SUM(CASE WHEN s.nat LIKE k_gl_crat_pl || '%'
+                                  OR s.nat LIKE k_gl_crat_tr || '%' THEN 0
+                                WHEN s.nat LIKE k_gl_tit_pl || '%'
+                                  OR s.nat LIKE k_gl_tit_tr || '%'
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END) sld,
+                       SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no)
+         WHERE n_liq > 0 AND ABS(sld) > k_tol_abs;
+        p_verdict('MM-621', 'Contrat liquide dont le compte de titres n''est pas solde',
+                  v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
+        IF v_cnt > 0 THEN
+            tbl_line('4,22,8,28,20,20,20');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('PROD', 8) || '|'
+                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
+                || fpadl('SOLDE TITRES', 20) || '|' || fpad('ECHEANCE', 20) || '|');
+            tbl_line('4,22,8,28,20,20,20');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT q.ref, MAX(m.product) prod, MAX(m.lcy_amount) nom,
+                               MAX(m.maturity_date) md, q.sld,
+                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
+                                     WHERE x.customer_no = m.counterparty)) etat
+                          FROM (SELECT h.trn_ref_no ref,
+                                       SUM(CASE WHEN s.nat LIKE k_gl_crat_pl || '%'
+                                                  OR s.nat LIKE k_gl_crat_tr || '%' THEN 0
+                                                WHEN s.nat LIKE k_gl_tit_pl || '%'
+                                                  OR s.nat LIKE k_gl_tit_tr || '%'
+                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                                ELSE 0 END) sld,
+                                       SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
+                                                THEN 1 ELSE 0 END) n_liq
+                                  FROM actb_history h
+                                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                                               FROM sttb_account GROUP BY ac_gl_no) s
+                                         ON s.ac_gl_no = h.ac_no
+                                 WHERE h.module = k_mod
+                                 GROUP BY h.trn_ref_no) q
+                          LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
+                                                          AND m.version_no = 1
+                         WHERE q.n_liq > 0 AND ABS(q.sld) > k_tol_abs
+                         GROUP BY q.ref, q.sld
+                         ORDER BY ABS(q.sld) DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(r.prod, 8) || '|'
+                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpadl(famt(r.sld), 20) || '|'
+                    || fpad(fdt(r.md), 20) || '|');
+            END LOOP;
+            tbl_line('4,22,8,28,20,20,20');
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-622', 'Produits constates d''avance non resorbes a l''echeance');
+        p_obj('sur un produit a interets precomptes, le compte de produits constates');
+        po('             d''avance doit revenir a zero au terme de l''operation : la totalite de');
+        po('             l''interet encaisse le premier jour a alors ete virement au resultat.');
+        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
+          FROM (SELECT h.trn_ref_no,
+                       SUM(CASE WHEN s.nat LIKE k_gl_pca || '%'
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END) sld,
+                       SUM(CASE WHEN s.nat LIKE k_gl_pca || '%' THEN 1 ELSE 0 END) n_pca,
+                       MAX(m.maturity_date) md
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                  LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                                                  AND m.version_no = 1
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no)
+         WHERE n_pca > 0 AND md <= k_arrete AND ABS(sld) > k_tol_abs;
+        p_verdict('MM-622', 'Produits constates d''avance non resorbes a l''echeance',
+                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
+
+        -- -----------------------------------------------------
+        p_test('MM-623', 'Creances rattachees non soldees apres encaissement des interets');
+        p_obj('sur un produit a interets postcomptes, le compte de creances rattachees');
+        po('             doit revenir a zero une fois l''interet encaisse.');
+        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
+          FROM (SELECT h.trn_ref_no,
+                       SUM(CASE WHEN s.nat LIKE k_gl_crat_pl || '%'
+                                  OR s.nat LIKE k_gl_crat_tr || '%'
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END) sld,
+                       SUM(CASE WHEN s.nat LIKE k_gl_crat_pl || '%'
+                                  OR s.nat LIKE k_gl_crat_tr || '%' THEN 1 ELSE 0 END) n_crat,
+                       MAX(m.maturity_date) md
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                  LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                                                  AND m.version_no = 1
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no)
+         WHERE n_crat > 0 AND md <= k_arrete AND ABS(sld) > k_tol_abs;
+        p_verdict('MM-623', 'Creances rattachees non soldees apres encaissement',
+                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
+
+        -- -----------------------------------------------------
+        p_test('MM-624', 'Provisions comptabilisees differentes des interets contractuels');
+        p_obj('la somme des provisions portees au credit du compte de produits doit');
+        po('             egaler les interets prevus au contrat (MAIN_COMP_AMOUNT), une fois');
+        po('             l''operation arrivee a son terme.');
+        SELECT COUNT(*), NVL(SUM(ABS(prod - it)), 0) INTO v_cnt, v_mt
+          FROM (SELECT h.trn_ref_no,
+                       SUM(CASE WHEN s.nat LIKE k_gl_prod || '%' AND h.drcr_ind = 'C'
+                                THEN NVL(h.lcy_amount, 0) ELSE 0 END)
+                     - SUM(CASE WHEN s.nat LIKE k_gl_prod || '%' AND h.drcr_ind = 'D'
+                                THEN NVL(h.lcy_amount, 0) ELSE 0 END) prod,
+                       MAX(NVL(m.main_comp_amount, 0)) it,
+                       MAX(m.maturity_date) md
+                  FROM actb_history h
+                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                  JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                                             AND m.version_no = 1
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no)
+         WHERE md <= k_arrete AND it > 0 AND ABS(prod - it) > k_tol_abs;
+        p_verdict('MM-624', 'Produits comptabilises differents des interets contractuels',
+                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
+        IF v_cnt > 0 THEN
+            tbl_line('4,22,8,28,20,20,20,18');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('PROD', 8) || '|'
+                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
+                || fpadl('INT. CONTRACTUELS', 20) || '|' || fpadl('PRODUITS COMPTA.', 20) || '|'
+                || fpadl('ECART', 18) || '|');
+            tbl_line('4,22,8,28,20,20,20,18');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT q.ref, MAX(q.prod) prod, MAX(q.it) it, MAX(m.product) pr,
+                               MAX(m.lcy_amount) nom,
+                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
+                                     WHERE x.customer_no = m.counterparty)) etat
+                          FROM (SELECT h.trn_ref_no ref,
+                                       SUM(CASE WHEN s.nat LIKE k_gl_prod || '%' AND h.drcr_ind = 'C'
+                                                THEN NVL(h.lcy_amount, 0) ELSE 0 END)
+                                     - SUM(CASE WHEN s.nat LIKE k_gl_prod || '%' AND h.drcr_ind = 'D'
+                                                THEN NVL(h.lcy_amount, 0) ELSE 0 END) prod,
+                                       MAX(NVL(m2.main_comp_amount, 0)) it,
+                                       MAX(m2.maturity_date) md
+                                  FROM actb_history h
+                                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                                               FROM sttb_account GROUP BY ac_gl_no) s
+                                         ON s.ac_gl_no = h.ac_no
+                                  JOIN ldtb_contract_master m2 ON m2.contract_ref_no = h.trn_ref_no
+                                                              AND m2.version_no = 1
+                                 WHERE h.module = k_mod
+                                 GROUP BY h.trn_ref_no) q
+                          JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
+                                                     AND m.version_no = 1
+                         WHERE q.md <= k_arrete AND q.it > 0 AND ABS(q.prod - q.it) > k_tol_abs
+                         GROUP BY q.ref
+                         ORDER BY ABS(MAX(q.prod) - MAX(q.it)) DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(r.pr, 8) || '|'
+                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpadl(famt(r.it), 20) || '|'
+                    || fpadl(famt(r.prod), 20) || '|' || fpadl(famt(r.prod - r.it), 18) || '|');
+            END LOOP;
+            tbl_line('4,22,8,28,20,20,20,18');
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-625', 'Ecritures a montant negatif (extournes)');
+        p_obj('un montant negatif signale une extourne ou une correction retroactive de');
+        po('             taux. Chaque ligne negative doit trouver sa ligne d''origine ; le cumul');
+        po('             par compte et par sens ne doit jamais devenir negatif.');
+        SELECT COUNT(*), COUNT(DISTINCT trn_ref_no), NVL(SUM(lcy_amount), 0)
+          INTO v_cnt, v_cnt2, v_mt
+          FROM actb_history
+         WHERE module = k_mod AND NVL(lcy_amount, 0) < 0;
+        print_kv('Contrats concernes', fnum(v_cnt2));
+        p_verdict('MM-625', 'Ecritures a montant negatif', v_cnt, NULL, ABS(v_mt), 'MOYEN');
+
+        SELECT COUNT(*) INTO v_cnt3
+          FROM (SELECT h.trn_ref_no, h.amount_tag, h.ac_no, h.drcr_ind,
+                       SUM(NVL(h.lcy_amount, 0)) sld
+                  FROM actb_history h
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no, h.amount_tag, h.ac_no, h.drcr_ind)
+         WHERE sld < -k_tol_abs;
+        p_verdict('MM-625b', 'Cumul negatif par contrat, tag, compte et sens (extourne sans origine)',
+                  v_cnt3, NULL, NULL, 'ELEVE');
+        IF v_cnt > 0 THEN
+            tbl_line('4,22,12,10,18,6,16,38,20');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('DATE', 12) || '|'
+                || fpad('EVENT', 10) || '|' || fpad('TAG DE MONTANT', 18) || '|' || fpad('D/C', 6) || '|'
+                || fpad('COMPTE NATUREL', 16) || '|' || fpad('LIBELLE DU COMPTE', 38) || '|'
+                || fpadl('MONTANT LCY', 20) || '|');
+            tbl_line('4,22,12,10,18,6,16,38,20');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT h.trn_ref_no ref, h.trn_dt dt, h.event, h.amount_tag, h.drcr_ind,
+                               s.nat, s.lib, h.lcy_amount mt
+                          FROM actb_history h
+                          LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                                       FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                         WHERE h.module = k_mod AND NVL(h.lcy_amount, 0) < 0
+                         ORDER BY h.lcy_amount
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(fdt(r.dt), 12) || '|'
+                    || fpad(r.event, 10) || '|' || fpad(r.amount_tag, 18) || '|' || fpad(r.drcr_ind, 6) || '|'
+                    || fpad(r.nat, 16) || '|' || fpad(r.lib, 38) || '|' || fpadl(famt(r.mt), 20) || '|');
+            END LOOP;
+            tbl_line('4,22,12,10,18,6,16,38,20');
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-626', 'Provisions enregistrees apres la liquidation du contrat');
+        p_obj('la liquidation peut intervenir avant l''echeance (cession ou remboursement');
+        po('             anticipe). Dans ce cas les provisions doivent s''arreter a la meme date :');
+        po('             toute provision posterieure gonfle indument le resultat.');
+        SELECT COUNT(*), NVL(SUM(mt), 0) INTO v_cnt, v_mt
+          FROM (SELECT h.trn_ref_no,
+                       MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN h.trn_dt END) d_liq,
+                       MAX(CASE WHEN h.event = 'ACCR' THEN h.trn_dt END) d_accr,
+                       SUM(CASE WHEN h.event = 'ACCR' THEN NVL(h.lcy_amount, 0) ELSE 0 END) mt
+                  FROM actb_history h
+                 WHERE h.module = k_mod
+                 GROUP BY h.trn_ref_no)
+         WHERE d_liq IS NOT NULL AND d_accr IS NOT NULL
+           AND TRUNC(d_accr) > TRUNC(d_liq) + 1;
+        p_verdict('MM-626', 'Provisions enregistrees apres la liquidation du contrat',
+                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
+        IF v_cnt > 0 THEN
+            tbl_line('4,22,8,28,20,16,16,16');
+            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('PROD', 8) || '|'
+                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
+                || fpad('LIQUIDATION', 16) || '|' || fpad('DERN. PROVIS.', 16) || '|'
+                || fpadl('ECART (JOURS)', 16) || '|');
+            tbl_line('4,22,8,28,20,16,16,16');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT q.ref, q.d_liq, q.d_accr, MAX(m.product) pr, MAX(m.lcy_amount) nom,
+                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
+                                     WHERE x.customer_no = m.counterparty)) etat
+                          FROM (SELECT h.trn_ref_no ref,
+                                       MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
+                                                THEN h.trn_dt END) d_liq,
+                                       MAX(CASE WHEN h.event = 'ACCR' THEN h.trn_dt END) d_accr
+                                  FROM actb_history h
+                                 WHERE h.module = k_mod
+                                 GROUP BY h.trn_ref_no) q
+                          LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
+                                                          AND m.version_no = 1
+                         WHERE q.d_liq IS NOT NULL AND q.d_accr IS NOT NULL
+                           AND TRUNC(q.d_accr) > TRUNC(q.d_liq) + 1
+                         GROUP BY q.ref, q.d_liq, q.d_accr
+                         ORDER BY TRUNC(q.d_accr) - TRUNC(q.d_liq) DESC
+                      ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(r.pr, 8) || '|'
+                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|'
+                    || fpad(fdt(r.d_liq), 16) || '|' || fpad(fdt(r.d_accr), 16) || '|'
+                    || fpadl(fnum(TRUNC(r.d_accr) - TRUNC(r.d_liq)), 16) || '|');
+            END LOOP;
+            tbl_line('4,22,8,28,20,16,16,16');
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-627', 'Tag de montant incoherent avec la composante d''interet du contrat');
+        p_obj('un contrat dont la composante principale est INT_BT doit generer des tags');
+        po('             INT_BT ; un contrat en INT_OB doit generer des tags INT_OB. Un melange');
+        po('             signale un parametrage produit incoherent.');
+        SELECT COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0) INTO v_cnt, v_mt
+          FROM actb_history h
+          JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
+                                     AND m.version_no = 1
+         WHERE h.module = k_mod
+           AND m.module = k_mod
+           AND h.amount_tag LIKE 'INT%'
+           AND TRIM(m.main_comp) IS NOT NULL
+           AND h.amount_tag NOT LIKE TRIM(m.main_comp) || '%';
+        p_verdict('MM-627', 'Tag de montant incoherent avec la composante du contrat',
+                  v_cnt, v_nb_ctr, v_mt, 'MOYEN');
+
+        -- -----------------------------------------------------
+        p_test('MM-628', 'Ecriture rattachee a un compte introuvable au plan comptable');
+        p_obj('toute ligne doit se raccrocher a un compte de STTB_ACCOUNT portant un');
+        po('             compte general naturel : sans lui, la nature comptable est inconnue.');
+        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
+          INTO v_cnt, v_cnt2, v_mt
+          FROM actb_history h
+          LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                       FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+         WHERE h.module = k_mod
+           AND TRIM(s.nat) IS NULL;
+        print_kv('Contrats concernes', fnum(v_cnt2));
+        p_verdict('MM-628', 'Ecriture sans compte general naturel identifiable',
+                  v_cnt, NULL, v_mt, 'ELEVE');
+
+        -- -----------------------------------------------------
+        p_test('MM-629', 'Compte mouvemente hors du schema comptable attendu');
+        p_obj('les operations ne devraient toucher que les titres, les creances');
+        po('             rattachees, les produits constates d''avance, les produits et la');
+        po('             tresorerie. Tout autre compte doit etre explique.');
+        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
+          INTO v_cnt, v_cnt2, v_mt
+          FROM actb_history h
+          LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
+                       FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+         WHERE h.module = k_mod
+           AND TRIM(s.nat) IS NOT NULL
+           AND s.nat NOT LIKE k_gl_tit_pl  || '%'
+           AND s.nat NOT LIKE k_gl_tit_tr  || '%'
+           AND s.nat NOT LIKE k_gl_pca     || '%'
+           AND s.nat NOT LIKE k_gl_prod    || '%'
+           AND s.nat NOT LIKE k_gl_treso   || '%';
+        print_kv('Contrats concernes', fnum(v_cnt2));
+        p_verdict('MM-629', 'Compte mouvemente hors du schema comptable attendu',
+                  v_cnt, NULL, v_mt, 'MOYEN');
+        IF v_cnt > 0 THEN
+            tbl_line('4,16,44,16,22,22,14');
+            po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE NATUREL', 16) || '|' || fpad('LIBELLE', 44) || '|'
+                || fpadl('NB ECRITURES', 16) || '|' || fpadl('TOTAL DEBIT', 22) || '|'
+                || fpadl('TOTAL CREDIT', 22) || '|' || fpadl('NB CONTRATS', 14) || '|');
+            tbl_line('4,16,44,16,22,22,14');
+            v_row := 0;
+            FOR r IN (SELECT s.nat, MAX(s.lib) lib, COUNT(*) nb,
+                             SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                             SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
+                             COUNT(DISTINCT h.trn_ref_no) nbc
+                        FROM actb_history h
+                        LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
+                                     FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                       WHERE h.module = k_mod
+                         AND TRIM(s.nat) IS NOT NULL
+                         AND s.nat NOT LIKE k_gl_tit_pl  || '%'
+                         AND s.nat NOT LIKE k_gl_tit_tr  || '%'
+                         AND s.nat NOT LIKE k_gl_pca     || '%'
+                         AND s.nat NOT LIKE k_gl_prod    || '%'
+                         AND s.nat NOT LIKE k_gl_treso   || '%'
+                       GROUP BY s.nat
+                       ORDER BY COUNT(*) DESC) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > k_top;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.nat, 16) || '|' || fpad(r.lib, 44) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.deb), 22) || '|'
+                    || fpadl(fmio(r.cre), 22) || '|' || fpadl(fnum(r.nbc), 14) || '|');
+            END LOOP;
+            tbl_line('4,16,44,16,22,22,14');
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('MM-630', 'Desequilibre debit credit par tag de montant');
+        p_obj('chaque tag de montant porte les deux jambes d''une meme ecriture : ses');
+        po('             debits doivent egaler ses credits, sur l''ensemble du module.');
+        tbl_line('4,20,16,22,22,22,14');
+        po('  |' || fpad('N#', 4) || '|' || fpad('TAG DE MONTANT', 20) || '|' || fpadl('NB ECRITURES', 16) || '|'
+            || fpadl('TOTAL DEBIT', 22) || '|' || fpadl('TOTAL CREDIT', 22) || '|'
+            || fpadl('ECART', 22) || '|' || fpadl('VERDICT', 14) || '|');
+        tbl_line('4,20,16,22,22,22,14');
+        v_row := 0;
+        v_cnt := 0;
+        BEGIN
+            FOR r IN (SELECT h.amount_tag, COUNT(*) nb,
+                             SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                             SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
+                        FROM actb_history h
+                       WHERE h.module = k_mod
+                       GROUP BY h.amount_tag
+                       ORDER BY COUNT(*) DESC) LOOP
+                v_row := v_row + 1;
+                IF ABS(r.deb - r.cre) > k_tol_abs THEN
+                    v_cnt := v_cnt + 1;
+                END IF;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.amount_tag, 20) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(famt(r.deb), 22) || '|'
+                    || fpadl(famt(r.cre), 22) || '|' || fpadl(famt(r.deb - r.cre), 22) || '|'
+                    || fpadl(CASE WHEN ABS(r.deb - r.cre) > k_tol_abs THEN 'ECART' ELSE 'OK' END, 14) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,20,16,22,22,22,14');
+        p_verdict('MM-630', 'Tag de montant dont les debits n''egalent pas les credits',
+                  v_cnt, v_row, NULL, 'CRITIQUE');
 
     EXCEPTION
         WHEN OTHERS THEN

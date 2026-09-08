@@ -58,7 +58,7 @@
 --   PARTIE 3 - section 11       : controles MM-3xx CALCUL DES INTERETS
 --   PARTIE 4 - sections 12 a 13 : controles MM-4xx REMBOURSEMENTS / MM-5xx RETARDS
 --   PARTIE 5 - sections 14, 14B : controles MM-6xx rapprochement comptable
---                                 et MM-62x SCHEMAS COMPTABLES ET CYCLE DE VIE
+--                                 et lecture des SCHEMAS COMPTABLES
 --   PARTIE 6 - section 15       : controles MM-7xx GOUVERNANCE ET PISTE D'AUDIT
 --   PARTIE 7 - sections 17 a 26 : REFERENTIEL DE CONTROLE COMPTABLE
 --                                 EXT integrite de l'extraction, DBL partie double,
@@ -604,17 +604,17 @@ BEGIN
                 SELECT 5, 'Contrepartie non autorisee (AUTH_STAT different de A)', 'MM-103' FROM DUAL UNION ALL
                 SELECT 6, 'Contrepartie a risque KYC eleve (RISK_LEVEL)', 'INFO' FROM DUAL UNION ALL
                 SELECT 7, 'Contrepartie qui n''est pas un etablissement bancaire', 'INFO' FROM DUAL UNION ALL
-                SELECT 8, 'Taux MAIN_COMP_RATE non renseigne', 'MM-308' FROM DUAL UNION ALL
-                SELECT 9, 'Taux MAIN_COMP_RATE egal a zero', 'MM-308' FROM DUAL UNION ALL
-                SELECT 10, 'Taux superieur a 15 pourcent', 'MM-308' FROM DUAL UNION ALL
+                SELECT 8, 'Taux MAIN_COMP_RATE non renseigne', 'INT-07' FROM DUAL UNION ALL
+                SELECT 9, 'Taux MAIN_COMP_RATE egal a zero', 'INT-07' FROM DUAL UNION ALL
+                SELECT 10, 'Taux superieur a 15 pourcent', 'INT-07' FROM DUAL UNION ALL
                 SELECT 11, 'Montant du contrat nul ou negatif', 'MM-210' FROM DUAL UNION ALL
                 SELECT 12, 'Montant superieur a 1 milliard', 'INFO' FROM DUAL UNION ALL
                 SELECT 13, 'Montant rond au million (operation forfaitaire)', 'INFO' FROM DUAL UNION ALL
-                SELECT 14, 'Echeance anterieure a la date de valeur', 'MM-201' FROM DUAL UNION ALL
-                SELECT 15, 'Date de valeur anterieure a la date de booking', 'MM-202' FROM DUAL UNION ALL
-                SELECT 16, 'Contrat echu depuis plus de 90 jours', 'MM-503' FROM DUAL UNION ALL
-                SELECT 17, 'Contrat echu avec encours residuel non nul', 'MM-402' FROM DUAL UNION ALL
-                SELECT 18, 'Contrat sans aucune ecriture comptable', 'MM-601' FROM DUAL UNION ALL
+                SELECT 14, 'Echeance anterieure a la date de valeur', 'STA-01' FROM DUAL UNION ALL
+                SELECT 15, 'Date de valeur anterieure a la date de booking', 'STA-01' FROM DUAL UNION ALL
+                SELECT 16, 'Contrat echu depuis plus de 90 jours', 'LIF-01' FROM DUAL UNION ALL
+                SELECT 17, 'Contrat echu avec encours residuel non nul', 'LIF-07' FROM DUAL UNION ALL
+                SELECT 18, 'Contrat sans aucune ecriture comptable', 'EXT-03' FROM DUAL UNION ALL
                 SELECT 19, 'Contrat sans composante d''interet (ICCF)', 'MM-114' FROM DUAL UNION ALL
                 SELECT 20, 'Contrat sans echeancier', 'MM-114' FROM DUAL UNION ALL
                 SELECT 21, 'Contrat sans confirmation SWIFT', 'MM-113' FROM DUAL UNION ALL
@@ -647,6 +647,11 @@ BEGIN
         po('  L''information qu''ils portaient reste imprimee, en clair, sous forme');
         po('  descriptive.');
         po('');
+        po('  La section se lit en trois temps : les controles ecartes faute de');
+        po('  discrimination, les tests conserves mais recalibres, puis les tests');
+        po('  retires parce que le referentiel de la partie 7 les reprend sur une');
+        po('  maille plus fine ou sur une source plus sure.');
+        po('');
         tbl_line('4,16,40,58');
         po('  |' || fpad('N#', 4) || '|' || fpad('ANCIEN CODE', 16) || '|' || fpad('OBJET', 40) || '|'
             || fpad('MOTIF DU RETRAIT', 58) || '|');
@@ -676,7 +681,7 @@ BEGIN
                 SELECT 11, 'MM-407', 'Remboursement anticipe',
                        'se declenchait sur chaque evenement de liquidation' FROM DUAL UNION ALL
                 SELECT 12, 'MM-506', 'Population des echus de longue date',
-                       'population deja portee par MM-402, MM-503 et MM-608' FROM DUAL
+                       'population portee par LIF-01, LIF-07 et MM-608' FROM DUAL
             ) ORDER BY n
         ) LOOP
             po('  |' || fpadl(TO_CHAR(r.n), 4) || '|' || fpad(r.cod, 16) || '|' || fpad(r.obj, 40) || '|'
@@ -684,27 +689,86 @@ BEGIN
         END LOOP;
         tbl_line('4,16,40,58');
         po('');
-        po('  Quatre tests ont ete conserves mais recalibres :');
+        po('  Deux tests ont ete conserves mais recalibres :');
         tbl_line('4,12,50,52');
         po('  |' || fpad('N#', 4) || '|' || fpad('TEST', 12) || '|' || fpad('OBJET', 50) || '|'
             || fpad('RECALIBRAGE', 52) || '|');
         tbl_line('4,12,50,52');
         FOR r IN (
             SELECT n, cod, obj, mot FROM (
-                SELECT 1 n, 'MM-202' cod, 'Date de valeur retroactive' obj,
-                       'seuil de ' || TO_CHAR(k_retro_j) || ' jours ; en deca c''est le delai de reglement' mot FROM DUAL UNION ALL
-                SELECT 2, 'MM-404', 'Capital rembourse contre nominal',
-                       'liquidations extournees neutralisees (double comptage)' FROM DUAL UNION ALL
-                SELECT 3, 'MM-501', 'Retard de paiement declare',
-                       'enjeu en valeur absolue (montants dus negatifs sur decotes)' FROM DUAL UNION ALL
-                SELECT 4, 'MM-607', 'Ecritures d''extourne',
-                       'ramene en INFO : une extourne est un mecanisme normal' FROM DUAL
+                SELECT 1 n, 'MM-404' cod, 'Capital rembourse contre nominal' obj,
+                       'liquidations extournees neutralisees (double comptage)' mot FROM DUAL UNION ALL
+                SELECT 2, 'MM-501', 'Retard de paiement declare',
+                       'enjeu en valeur absolue (montants dus negatifs sur decotes)' FROM DUAL
             ) ORDER BY n
         ) LOOP
             po('  |' || fpadl(TO_CHAR(r.n), 4) || '|' || fpad(r.cod, 12) || '|' || fpad(r.obj, 50) || '|'
                 || fpad(r.mot, 52) || '|');
         END LOOP;
         tbl_line('4,12,50,52');
+        po('');
+        po('  Enfin, vingt-et-un tests de la premiere version ont ete retires parce que');
+        po('  le referentiel de la partie 7 les reprend, sur une maille plus fine ou sur');
+        po('  une source plus sure. Les tests de la partie 7 sont cales sur les numeros');
+        po('  de compte exacts et sur ACTB_HISTORY, qui est la comptabilite reellement');
+        po('  passee ; les tests retires raisonnaient sur des prefixes de compte ou sur');
+        po('  les tables de gestion du contrat. Aucun controle n''est perdu : le tableau');
+        po('  ci-dessous donne, pour chaque test retire, celui qui le porte desormais.');
+        po('');
+        tbl_line('4,12,52,20,32');
+        po('  |' || fpad('N#', 4) || '|' || fpad('RETIRE', 12) || '|' || fpad('OBJET', 52) || '|'
+            || fpad('REPRIS PAR', 20) || '|' || fpad('APPORT DU NOUVEAU TEST', 32) || '|');
+        tbl_line('4,12,52,20,32');
+        FOR r IN (
+            SELECT n, cod, obj, rep, gain FROM (
+                SELECT 1 n, 'MM-101' cod, 'Operations potentiellement saisies en double' obj,
+                       'STA-02' rep, 'meme faisceau d''indices' gain FROM DUAL UNION ALL
+                SELECT 2, 'MM-201', 'Echeance anterieure ou egale a la date de valeur',
+                       'STA-01', 'toute la chaine de dates' FROM DUAL UNION ALL
+                SELECT 3, 'MM-202', 'Date de valeur retroactive',
+                       'STA-01', 'tableaux gardes en descriptif' FROM DUAL UNION ALL
+                SELECT 4, 'MM-308', 'Taux nul ou hors des bornes normales',
+                       'INT-07', 'test identique' FROM DUAL UNION ALL
+                SELECT 5, 'MM-313', 'Provision enregistree apres l''echeance',
+                       'INT-04', 'maille comptable, borne aussi avant' FROM DUAL UNION ALL
+                SELECT 6, 'MM-401', 'Contrat echu sans aucune liquidation',
+                       'LIF-01', 'tag comptable PRINCIPAL_LIQD' FROM DUAL UNION ALL
+                SELECT 7, 'MM-402', 'Contrat echu conservant un encours residuel',
+                       'LIF-07', 'solde reel du compte de titres' FROM DUAL UNION ALL
+                SELECT 8, 'MM-503', 'Contrat echu depuis longtemps et non liquide',
+                       'LIF-01, LIF-07', 'meme population, source comptable' FROM DUAL UNION ALL
+                SELECT 9, 'MM-601', 'Contrat sans aucune ecriture comptable',
+                       'EXT-03', 'filtre sur les quatre produits' FROM DUAL UNION ALL
+                SELECT 10, 'MM-602', 'Ecriture du module sans contrat correspondant',
+                       'EXT-04', 'test identique' FROM DUAL UNION ALL
+                SELECT 11, 'MM-603', 'Desequilibre debit credit par contrat',
+                       'DBL-01', 'complete par DBL-02 et DBL-03' FROM DUAL UNION ALL
+                SELECT 12, 'MM-607', 'Inventaire des ecritures d''extourne',
+                       'REV-01, REV-06', 'appariement, pas seulement comptage' FROM DUAL UNION ALL
+                SELECT 13, 'MM-621', 'Compte de titres non solde apres liquidation',
+                       'LIF-02', 'numeros de compte exacts' FROM DUAL UNION ALL
+                SELECT 14, 'MM-622', 'Produits percus d''avance non resorbes',
+                       'LIF-04', 'restreint aux produits pre-comptes' FROM DUAL UNION ALL
+                SELECT 15, 'MM-623', 'Creances rattachees non soldees',
+                       'LIF-03', 'exige aussi la preuve de l''encaissement' FROM DUAL UNION ALL
+                SELECT 16, 'MM-624', 'Produits comptabilises contre interets du deal',
+                       'INT-01', 'indifferent au mecanisme d''interets' FROM DUAL UNION ALL
+                SELECT 17, 'MM-625', 'Ecritures a montant negatif',
+                       'REV-01', 'apparie chaque negative a son origine' FROM DUAL UNION ALL
+                SELECT 18, 'MM-626', 'Provisions enregistrees apres la liquidation',
+                       'INT-04', 'borne aussi la date de valeur' FROM DUAL UNION ALL
+                SELECT 19, 'MM-628', 'Compte introuvable au plan comptable',
+                       'MAP-05', 'ajoute les statuts bloque, gele, ferme' FROM DUAL UNION ALL
+                SELECT 20, 'MM-629', 'Compte mouvemente hors du schema attendu',
+                       'MAP-06', 'liste des neuf comptes autorises' FROM DUAL UNION ALL
+                SELECT 21, 'MM-630', 'Desequilibre debit credit par tag de montant',
+                       'DBL-02', 'maille contrat, date et tag' FROM DUAL
+            ) ORDER BY n
+        ) LOOP
+            po('  |' || fpadl(TO_CHAR(r.n), 4) || '|' || fpad(r.cod, 12) || '|' || fpad(r.obj, 52) || '|'
+                || fpad(r.rep, 20) || '|' || fpad(r.gain, 32) || '|');
+        END LOOP;
+        tbl_line('4,12,52,20,32');
 
         print_sub('0.8 Referentiel de controle comptable (partie 7)');
         po('  La partie 7 porte le referentiel de 51 controles transmis par la');
@@ -1755,53 +1819,6 @@ BEGIN
     BEGIN
 
         -- -----------------------------------------------------
-        p_test('MM-101', 'Operations potentiellement saisies en double');
-        p_obj('detecter deux contrats de meme contrepartie, meme produit, meme montant,');
-        po('             meme date de valeur, meme echeance et meme taux.');
-        SELECT COUNT(*), NVL(SUM(mt), 0) INTO v_cnt, v_mt
-          FROM (SELECT SUM(m.lcy_amount) mt
-                  FROM ldtb_contract_master m
-                 WHERE m.module = k_mod
-                   AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                   AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                        WHERE v.contract_ref_no = m.contract_ref_no)
-                 GROUP BY m.counterparty, m.product, m.lcy_amount, m.value_date,
-                          m.maturity_date, m.main_comp_rate
-                HAVING COUNT(*) > 1);
-        p_verdict('MM-101', 'Operations potentiellement saisies en double', v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,28,7,20,10,12,12,10,40');
-            po('  |' || fpad('N#', 4) || '|' || fpad('ETAT EMETTEUR', 28) || '|' || fpad('PROD', 7) || '|'
-                || fpadl('MONTANT LCY', 20) || '|' || fpadl('TAUX', 10) || '|' || fpad('VALEUR', 12) || '|'
-                || fpad('ECHEANCE', 12) || '|' || fpadl('NB', 10) || '|' || fpad('REFERENCES CONCERNEES', 40) || '|');
-            tbl_line('4,28,7,20,10,12,12,10,40');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.product, m.lcy_amount, m.main_comp_rate, m.value_date,
-                               m.maturity_date, COUNT(*) nb,
-                               LISTAGG(m.contract_ref_no, ' ') WITHIN GROUP (ORDER BY m.contract_ref_no) refs
-                          FROM ldtb_contract_master m
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                         GROUP BY m.counterparty, m.product, m.lcy_amount, m.value_date,
-                                  m.maturity_date, m.main_comp_rate
-                        HAVING COUNT(*) > 1
-                         ORDER BY m.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.nom, 28) || '|' || fpad(r.product, 7) || '|'
-                    || fpadl(famt(r.lcy_amount), 20) || '|' || fpadl(ftx(r.main_comp_rate), 10) || '|'
-                    || fpad(fdt(r.value_date), 12) || '|' || fpad(fdt(r.maturity_date), 12) || '|'
-                    || fpadl(fnum(r.nb), 10) || '|' || fpad(r.refs, 40) || '|');
-            END LOOP;
-            tbl_line('4,28,7,20,10,12,12,10,40');
-        END IF;
-
-        -- -----------------------------------------------------
         p_test('MM-102', 'Contrepartie absente du referentiel clients');
         p_obj('toute operation doit etre adossee a un tiers existant dans STTM_CUSTOMER.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
@@ -2226,47 +2243,12 @@ BEGIN
     BEGIN
 
         -- -----------------------------------------------------
-        p_test('MM-201', 'Echeance anterieure ou egale a la date de valeur');
-        p_obj('une operation dont l''echeance precede la prise d''effet est impossible.');
-        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
-          FROM ldtb_contract_master m
-         WHERE m.module = k_mod
-           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND m.maturity_date <= m.value_date;
-        p_verdict('MM-201', 'Echeance anterieure ou egale a la date de valeur', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            d_head('DUREE (JOURS)');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT m.contract_ref_no, m.product, m.counterparty,
-                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date
-                          FROM ldtb_contract_master m
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                           AND m.maturity_date <= m.value_date
-                         ORDER BY m.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
-                      r.lcy_amount, r.main_comp_rate, r.booking_date, r.value_date, r.maturity_date,
-                      fnum(r.maturity_date - r.value_date) || ' j');
-            END LOOP;
-            d_foot;
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-202', 'Operation saisie avec une date de valeur retroactive');
-        p_obj('une date de valeur anterieure a la date de saisie fait courir les');
-        po('             interets avant l''enregistrement comptable. Un decalage de un a deux');
-        po('             jours correspond au delai normal de reglement ; seule la retroactivite');
-        po('             au dela de ' || TO_CHAR(k_retro_j) || ' jours est retenue comme anomalie. La distribution');
-        po('             complete, tolerance comprise, est donnee juste apres.');
+        print_sub('Retroactivite de la saisie (information)');
+        po('  Une date de valeur anterieure a la date de saisie fait courir les interets');
+        po('  avant l''enregistrement comptable. Un decalage de un a deux jours');
+        po('  correspond au delai normal de reglement. Le verdict est porte par le test');
+        po('  STA-01, qui teste toute la chaine de dates avec une tolerance de');
+        po('  ' || TO_CHAR(k_retro_j) || ' jours ; les tableaux ci-dessous en donnent la distribution complete.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master m
          WHERE m.module = k_mod
@@ -2274,10 +2256,10 @@ BEGIN
            AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                 WHERE v.contract_ref_no = m.contract_ref_no)
            AND TRUNC(m.booking_date) - TRUNC(m.value_date) > k_retro_j;
-        p_verdict('MM-202', 'Date de valeur retroactive de plus de ' || TO_CHAR(k_retro_j) || ' jours',
-                  v_cnt, v_nb_ctr, v_mt, 'MOYEN');
+        print_kv('Operations a date de valeur retroactive de plus de '
+                 || TO_CHAR(k_retro_j) || ' jours', fnum(v_cnt) || '   ' || fpct(v_cnt, v_nb_ctr));
 
-        print_sub('MM-202 bis. Amplitude de la retroactivite');
+        print_sub('Amplitude de la retroactivite');
         tbl_line('4,30,12,20,12,14');
         po('  |' || fpad('N#', 4) || '|' || fpad('RETARD DE SAISIE', 30) || '|' || fpadl('NB', 12) || '|'
             || fpadl('MONTANT LCY', 20) || '|' || fpadl('% NB', 12) || '|' || fpadl('MAX (JOURS)', 14) || '|');
@@ -2309,7 +2291,7 @@ BEGIN
         tbl_line('4,30,12,20,12,14');
 
         IF v_cnt > 0 THEN
-            print_sub('MM-202 ter. Operations les plus retroactives');
+            print_sub('Operations les plus retroactives');
             d_head('RETARD (JOURS)');
             v_row := 0;
             FOR r IN (SELECT * FROM (
@@ -3041,46 +3023,6 @@ BEGIN
                   v_cnt, v_nb_ctr, v_mt, 'ELEVE');
 
         -- -----------------------------------------------------
-        p_test('MM-308', 'Taux hors des bornes jugees normales');
-        p_obj('reperer les taux nuls, non renseignes ou situes hors de la fourchette');
-        po('             de ' || ftx(k_taux_min) || ' a ' || ftx(k_taux_max) || '.');
-        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
-          FROM ldtb_contract_master m
-         WHERE m.module = k_mod
-           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND (m.main_comp_rate IS NULL
-                OR m.main_comp_rate < k_taux_min
-                OR m.main_comp_rate > k_taux_max);
-        p_verdict('MM-308', 'Taux nul, non renseigne ou hors bornes', v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-        IF v_cnt > 0 THEN
-            d_head('INTERETS ATTENDUS');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT m.contract_ref_no, m.product, m.counterparty,
-                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date,
-                               m.main_comp_amount it
-                          FROM ldtb_contract_master m
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                           AND (m.main_comp_rate IS NULL
-                                OR m.main_comp_rate < k_taux_min
-                                OR m.main_comp_rate > k_taux_max)
-                         ORDER BY m.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
-                      r.lcy_amount, r.main_comp_rate, r.booking_date, r.value_date, r.maturity_date, famt(r.it));
-            END LOOP;
-            d_foot;
-        END IF;
-
-        -- -----------------------------------------------------
         p_test('MM-309', 'Taux ecarte des conditions de marche du mois');
         p_obj('comparer le taux de chaque operation a la moyenne des operations du');
         po('             meme produit souscrites le meme mois (groupes de 3 operations minimum).');
@@ -3355,22 +3297,6 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        p_test('MM-313', 'Provision enregistree apres l''echeance du contrat');
-        p_obj('un contrat echu ne doit plus generer de provision d''interets.');
-        SELECT COUNT(*), COUNT(DISTINCT a.contract_ref_no), NVL(SUM(a.net_accrual), 0)
-          INTO v_cnt, v_cnt2, v_mt
-          FROM ldtb_contract_accrual_history a
-          JOIN ldtb_contract_master m ON m.contract_ref_no = a.contract_ref_no
-         WHERE a.module = k_mod
-           AND m.module = k_mod
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND a.accrual_to_date > m.maturity_date;
-        print_kv('Contrats concernes', fnum(v_cnt2));
-        p_verdict('MM-313', 'Provision enregistree apres l''echeance du contrat',
-                  v_cnt, NULL, v_mt, 'ELEVE');
-
-        -- -----------------------------------------------------
         p_test('MM-314', 'Contrat sans aucune provision alors que la provision est requise');
         p_obj('une composante d''interet marquee ACCRUAL_REQUIRED = Y doit avoir');
         po('             genere au moins une ecriture de provision.');
@@ -3559,85 +3485,6 @@ BEGIN
         po('    LDTB_CONTRACT_LIQ_SUMMARY  synthese par evenement de liquidation, avec');
         po('                               la date de valeur, le total paye et le statut');
         po('    LDTB_CONTRACT_BALANCE      encours restant apres liquidation');
-
-        -- -----------------------------------------------------
-        p_test('MM-401', 'Contrat echu sans aucune liquidation enregistree');
-        p_obj('a l''echeance, le capital doit avoir ete rembourse et l''operation');
-        po('             liquidee dans le systeme.');
-        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
-          FROM ldtb_contract_master m
-         WHERE m.module = k_mod
-           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-           AND m.maturity_date <= k_arrete
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND NOT EXISTS (SELECT 1 FROM ldtb_contract_liq_summary s
-                            WHERE s.contract_ref_no = m.contract_ref_no);
-        p_verdict('MM-401', 'Contrat echu sans aucune liquidation enregistree', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            d_head('ECHU DEPUIS');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT m.contract_ref_no, m.product, m.counterparty,
-                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date
-                          FROM ldtb_contract_master m
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.maturity_date <= k_arrete
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                           AND NOT EXISTS (SELECT 1 FROM ldtb_contract_liq_summary s
-                                            WHERE s.contract_ref_no = m.contract_ref_no)
-                         ORDER BY m.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
-                      r.lcy_amount, r.main_comp_rate, r.booking_date, r.value_date, r.maturity_date,
-                      fnum(TRUNC(k_arrete) - TRUNC(r.maturity_date)) || ' j');
-            END LOOP;
-            d_foot;
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-402', 'Contrat echu conservant un encours residuel');
-        p_obj('apres liquidation, PRINCIPAL_OUTSTANDING_BAL doit etre nul.');
-        SELECT COUNT(*), NVL(SUM(b.principal_outstanding_bal), 0) INTO v_cnt, v_mt
-          FROM ldtb_contract_master m
-          JOIN ldtb_contract_balance b ON b.contract_ref_no = m.contract_ref_no
-         WHERE m.module = k_mod
-           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-           AND m.maturity_date <= k_arrete
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND NVL(b.principal_outstanding_bal, 0) > 0;
-        p_verdict('MM-402', 'Contrat echu conservant un encours residuel', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            d_head('ENCOURS RESIDUEL');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT m.contract_ref_no, m.product, m.counterparty,
-                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date,
-                               b.principal_outstanding_bal enc
-                          FROM ldtb_contract_master m
-                          JOIN ldtb_contract_balance b ON b.contract_ref_no = m.contract_ref_no
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.maturity_date <= k_arrete
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                           AND NVL(b.principal_outstanding_bal, 0) > 0
-                         ORDER BY b.principal_outstanding_bal DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
-                      r.lcy_amount, r.main_comp_rate, r.booking_date, r.value_date, r.maturity_date, famt(r.enc));
-            END LOOP;
-            d_foot;
-        END IF;
 
         -- -----------------------------------------------------
         p_test('MM-403', 'Liquidation partielle : montant paye inferieur au montant du');
@@ -4214,68 +4061,6 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        p_test('MM-503', 'Contrat echu depuis longtemps et toujours non liquide');
-        p_obj('identifier les operations echues depuis plus de ' || TO_CHAR(k_ech_ancien) || ' jours dont le');
-        po('             capital n''a pas ete integralement rembourse.');
-        SELECT COUNT(*), NVL(SUM(nom - rembt), 0) INTO v_cnt, v_mt
-          FROM (
-            SELECT m.lcy_amount nom, m.maturity_date md,
-                   NVL((SELECT SUM(l.amount_paid) FROM ldtb_contract_liq l
-                         WHERE l.contract_ref_no = m.contract_ref_no
-                           AND l.component = 'PRINCIPAL'
-                           AND NOT EXISTS (SELECT 1 FROM ldtb_contract_liq_summary q
-                                            WHERE q.contract_ref_no = l.contract_ref_no
-                                              AND q.event_seq_no = l.event_seq_no
-                                              AND NVL(TRIM(q.payment_status), 'A') <> 'A')), 0) rembt
-              FROM ldtb_contract_master m
-             WHERE m.module = k_mod
-               AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-               AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                    WHERE v.contract_ref_no = m.contract_ref_no)
-          )
-         WHERE TRUNC(k_arrete) - TRUNC(md) > k_ech_ancien
-           AND rembt < nom - k_tol_abs;
-        p_verdict('MM-503', 'Contrat echu depuis plus de ' || TO_CHAR(k_ech_ancien)
-                  || ' jours et non integralement rembourse', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,20,12,7,28,20,12,14,20,18');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 20) || '|' || fpad('BOOKING', 12) || '|' || fpad('PROD', 7) || '|'
-                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|' || fpad('ECHEANCE', 12) || '|'
-                || fpadl('ECHU DEPUIS (J)', 14) || '|' || fpadl('CAPITAL REMBOURSE', 20) || '|'
-                || fpadl('RESTE DU', 18) || '|');
-            tbl_line('4,20,12,7,28,20,12,14,20,18');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) bkg_x
-                 FROM (SELECT * FROM (
-                SELECT kk.* FROM (
-                    SELECT m.contract_ref_no ref, m.product, m.lcy_amount nom, m.maturity_date md,
-                           (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                             WHERE c.customer_no = m.counterparty) etat,
-                           NVL((SELECT SUM(l.amount_paid) FROM ldtb_contract_liq l
-                                 WHERE l.contract_ref_no = m.contract_ref_no
-                                   AND l.component = 'PRINCIPAL'), 0) rembt
-                      FROM ldtb_contract_master m
-                     WHERE m.module = k_mod
-                       AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                       AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                            WHERE v.contract_ref_no = m.contract_ref_no)
-                ) kk
-                WHERE TRUNC(k_arrete) - TRUNC(kk.md) > k_ech_ancien
-                  AND kk.rembt < kk.nom - k_tol_abs
-                ORDER BY kk.nom - kk.rembt DESC
-            ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 20) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(r.product, 7) || '|'
-                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpad(fdt(r.md), 12) || '|'
-                    || fpadl(fnum(TRUNC(k_arrete) - TRUNC(r.md)), 14) || '|' || fpadl(famt(r.rembt), 20) || '|'
-                    || fpadl(famt(r.nom - r.rembt), 18) || '|');
-            END LOOP;
-            tbl_line('4,20,12,7,28,20,12,14,20,18');
-        END IF;
-
-        -- -----------------------------------------------------
         p_test('MM-504', 'Delai de comptabilisation de la mise en place');
         p_obj('mesurer l''ecart entre la date de valeur du contrat et la premiere');
         po('             ecriture comptable qui le constate.');
@@ -4384,7 +4169,7 @@ BEGIN
         po('  Les operations echues depuis plus de ' || TO_CHAR(k_ech_ancien) || ' jours, quel que soit leur etat');
         po('  de remboursement. Ce n''est pas une anomalie mais la population qui devrait');
         po('  etre entierement denouee et soldee comptablement ; elle sert de base aux');
-        po('  tests MM-402, MM-503 et MM-608, qui portent les verdicts.');
+        po('  tests LIF-01, LIF-07 et MM-608, qui portent les verdicts.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master m
          WHERE m.module = k_mod
@@ -4498,97 +4283,6 @@ BEGIN
                 || fpadl(fmio(r.deb), 20) || '|' || fpadl(fmio(r.cre), 20) || '|');
         END LOOP;
         tbl_line('4,22,40,8,8,14,20,20');
-
-        -- -----------------------------------------------------
-        p_test('MM-601', 'Contrat sans aucune ecriture comptable');
-        p_obj('toute operation enregistree doit etre traduite en comptabilite.');
-        SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
-          FROM ldtb_contract_master m
-         WHERE m.module = k_mod
-           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                WHERE v.contract_ref_no = m.contract_ref_no)
-           AND NOT EXISTS (SELECT 1 FROM actb_history h
-                            WHERE h.trn_ref_no = m.contract_ref_no);
-        p_verdict('MM-601', 'Contrat sans aucune ecriture comptable', v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            d_head('STATUT');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT m.contract_ref_no, m.product, m.counterparty,
-                               (SELECT MAX(c.customer_name1) FROM sttm_customer c
-                                 WHERE c.customer_no = m.counterparty) nom,
-                               m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date,
-                               TRIM(m.contract_status) st
-                          FROM ldtb_contract_master m
-                         WHERE m.module = k_mod
-                           AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
-                           AND m.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = m.contract_ref_no)
-                           AND NOT EXISTS (SELECT 1 FROM actb_history h
-                                            WHERE h.trn_ref_no = m.contract_ref_no)
-                         ORDER BY m.lcy_amount DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                d_row(v_row, r.contract_ref_no, r.product, r.counterparty, r.nom,
-                      r.lcy_amount, r.main_comp_rate, r.booking_date, r.value_date, r.maturity_date, 'statut ' || r.st);
-            END LOOP;
-            d_foot;
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-602', 'Ecriture du module sans contrat correspondant');
-        p_obj('toute ecriture du module doit se rattacher a un contrat existant.');
-        SELECT COUNT(*), NVL(SUM(NVL(h.lcy_amount, 0)), 0) INTO v_cnt, v_mt
-          FROM actb_history h
-         WHERE h.module = k_mod
-           AND NOT EXISTS (SELECT 1 FROM ldtb_contract_master m
-                            WHERE m.contract_ref_no = h.trn_ref_no);
-        p_verdict('MM-602', 'Ecriture comptable sans contrat correspondant', v_cnt, NULL, v_mt, 'CRITIQUE');
-
-        -- -----------------------------------------------------
-        p_test('MM-603', 'Desequilibre entre debits et credits');
-        p_obj('pour chaque contrat, la somme des debits doit egaler la somme des credits.');
-        SELECT COUNT(*), NVL(SUM(ABS(deb - cre)), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
-                       SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
-                  FROM actb_history h
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE ABS(deb - cre) > k_tol_abs;
-        p_verdict('MM-603', 'Contrat dont les debits et credits ne s''equilibrent pas',
-                  v_cnt, NULL, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,12,14,20,20,20');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|' || fpad('ECHEANCE', 12) || '|' || fpadl('NB ECRITURES', 14) || '|'
-                || fpadl('TOTAL DEBIT', 20) || '|' || fpadl('TOTAL CREDIT', 20) || '|'
-                || fpadl('ECART', 20) || '|');
-            tbl_line('4,22,12,12,14,20,20,20');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.trn_ref_no) bkg_x,
-                         (SELECT MAX(mm.maturity_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.trn_ref_no) mat_x
-                 FROM (SELECT * FROM (
-                        SELECT trn_ref_no, nb, deb, cre FROM (
-                            SELECT h.trn_ref_no, COUNT(*) nb,
-                                   SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
-                                   SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
-                              FROM actb_history h
-                             WHERE h.module = k_mod
-                             GROUP BY h.trn_ref_no)
-                         WHERE ABS(deb - cre) > k_tol_abs
-                         ORDER BY ABS(deb - cre) DESC
-                      ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.trn_ref_no, 22) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(fdt(r.mat_x), 12) || '|'
-                    || fpadl(fnum(r.nb), 14) || '|' || fpadl(famt(r.deb), 20) || '|'
-                    || fpadl(famt(r.cre), 20) || '|' || fpadl(famt(r.deb - r.cre), 20) || '|');
-            END LOOP;
-            tbl_line('4,22,12,12,14,20,20,20');
-        END IF;
 
         -- -----------------------------------------------------
         p_test('MM-604', 'Montant comptabilise a la mise en place different du nominal');
@@ -4721,49 +4415,6 @@ BEGIN
                   v_cnt, v_nb_ctr, v_tot, 'ELEVE');
 
         -- -----------------------------------------------------
-        p_test('MM-607', 'Ecritures d''extourne');
-        p_obj('recenser les extournes (evenements REVC, REVP, REVR). Une extourne est');
-        po('             un mecanisme normal de correction : elle n''est pas une anomalie en');
-        po('             soi, mais sa volumetrie doit rester maitrisee et chaque extourne');
-        po('             doit trouver sa justification. Le test est restitue pour information ;');
-        po('             les extournes sans ecriture d''origine sont testees en MM-625b.');
-        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
-          INTO v_cnt, v_cnt2, v_mt
-          FROM actb_history h
-         WHERE h.module = k_mod AND h.event IN ('REVC', 'REVP', 'REVR');
-        print_kv('Contrats concernes', fnum(v_cnt2));
-        p_verdict('MM-607', 'Ecritures d''extourne enregistrees', v_cnt, NULL, ABS(v_mt), 'INFO');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,12,10,10,22,6,20,12,16,16');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|' || fpad('ECHEANCE', 12) || '|' || fpad('EVENT', 10) || '|'
-                || fpad('TRN_CODE', 10) || '|' || fpad('COMPTE', 22) || '|' || fpad('D/C', 6) || '|'
-                || fpadl('MONTANT LCY', 20) || '|' || fpad('DATE', 12) || '|' || fpad('SAISI PAR', 16) || '|'
-                || fpad('AUTORISE PAR', 16) || '|');
-            tbl_line('4,22,12,12,10,10,22,6,20,12,16,16');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.trn_ref_no) bkg_x,
-                         (SELECT MAX(mm.maturity_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.trn_ref_no) mat_x
-                 FROM (SELECT * FROM (
-                        SELECT h.trn_ref_no, h.event, h.trn_code, h.ac_no, h.drcr_ind,
-                               h.lcy_amount, h.trn_dt, h.user_id, h.auth_id
-                          FROM actb_history h
-                         WHERE h.module = k_mod AND h.event IN ('REVC', 'REVP', 'REVR')
-                         ORDER BY ABS(NVL(h.lcy_amount, 0)) DESC
-                      ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.trn_ref_no, 22) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(fdt(r.mat_x), 12) || '|'
-                    || fpad(r.event, 10) || '|' || fpad(r.trn_code, 10) || '|' || fpad(r.ac_no, 22) || '|'
-                    || fpad(r.drcr_ind, 6) || '|' || fpadl(famt(r.lcy_amount), 20) || '|'
-                    || fpad(fdt(r.trn_dt), 12) || '|' || fpad(r.user_id, 16) || '|'
-                    || fpad(r.auth_id, 16) || '|');
-            END LOOP;
-            tbl_line('4,22,12,12,10,10,22,6,20,12,16,16');
-        END IF;
-
-        -- -----------------------------------------------------
         p_test('MM-608', 'Ecriture posterieure a l''echeance du contrat');
         p_obj('apres la liquidation d''une operation echue, aucune ecriture nouvelle');
         po('             ne devrait plus lui etre rattachee, hors extourne justifiee.');
@@ -4789,12 +4440,14 @@ BEGIN
     -- =========================================================
     -- 14 BIS. MM-62x : SCHEMAS COMPTABLES ET CYCLE DE VIE DES TITRES
     -- =========================================================
-    print_section('14 BIS. CONTROLES MM-62x : SCHEMAS COMPTABLES ET CYCLE DE VIE DES TITRES');
+    print_section('14 BIS. SCHEMAS COMPTABLES ET CYCLE DE VIE DES TITRES');
     BEGIN
         po('  ACTB_HISTORY est la table ou le cycle de vie d''une operation se');
         po('  materialise reellement. Cette section reconstitue, a partir des ecritures,');
-        po('  le schema comptable applique par produit, puis controle que chaque etape du');
-        po('  cycle est correctement denouee.');
+        po('  le schema comptable reellement applique par produit et deroule un contrat');
+        po('  representatif de bout en bout. Elle etablit la LECTURE ; les VERDICTS sur');
+        po('  ce schema sont portes par les sections 19 a 21 (MAP, INT, LIF) du');
+        po('  referentiel de la partie 7, cales sur les numeros de compte exacts.');
         po('');
         po('  CLE DE LECTURE');
         po('    ACTB_HISTORY.TRN_REF_NO = LDTB_CONTRACT_MASTER.CONTRACT_REF_NO');
@@ -4848,54 +4501,6 @@ BEGIN
         print_kv('  Produits constates d''avance',     k_gl_pca || '%');
         print_kv('  Revenus des titres (resultat)',    k_gl_prod || '%');
         print_kv('  Tresorerie',                       k_gl_treso || '%');
-
-        -- -----------------------------------------------------
-        print_sub('14B.1 Comptes mouvementes par le module');
-        po('  La cle est le numero de compte AC_NO, toujours renseigne. Le compte');
-        po('  general naturel n''est affiche qu''a titre complementaire : il est souvent');
-        po('  vide sur les generaux, ou le numero de compte porte deja la nature.');
-        po('');
-        tbl_line('4,20,42,16,26,16,22,22,14');
-        po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE (AC_NO)', 20) || '|' || fpad('LIBELLE', 42) || '|'
-            || fpad('CPT NATUREL', 16) || '|' || fpad('NATURE RETENUE', 26) || '|'
-            || fpadl('NB ECRITURES', 16) || '|' || fpadl('TOTAL DEBIT', 22) || '|'
-            || fpadl('TOTAL CREDIT', 22) || '|' || fpadl('NB CONTRATS', 14) || '|');
-        tbl_line('4,20,42,16,26,16,22,22,14');
-        v_row := 0;
-        BEGIN
-            FOR r IN (
-                SELECT h.ac_no, MAX(s.nat) nat, MAX(s.lib) lib, COUNT(*) nb,
-                       SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
-                       SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
-                       COUNT(DISTINCT h.trn_ref_no) nbc,
-                       MAX(CASE
-                             WHEN (h.ac_no LIKE k_gl_crat_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_pl || '%') THEN 'creances rattachees PL'
-                             WHEN (h.ac_no LIKE k_gl_crat_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_tr || '%') THEN 'creances rattachees TR'
-                             WHEN (h.ac_no LIKE k_gl_tit_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_pl || '%') THEN 'titres de placement'
-                             WHEN (h.ac_no LIKE k_gl_tit_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_tr || '%') THEN 'titres de transaction'
-                             WHEN (h.ac_no LIKE k_gl_pca || '%' OR NVL(s.nat, ' ') LIKE k_gl_pca || '%') THEN 'produits d avance'
-                             WHEN (h.ac_no LIKE k_gl_prod || '%' OR NVL(s.nat, ' ') LIKE k_gl_prod || '%') THEN 'produits (resultat)'
-                             WHEN (h.ac_no LIKE k_gl_treso || '%' OR NVL(s.nat, ' ') LIKE k_gl_treso || '%') THEN 'tresorerie'
-                             ELSE 'AUTRE A QUALIFIER'
-                           END) nature
-                  FROM actb_history h
-                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
-                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                 WHERE h.module = k_mod
-                 GROUP BY h.ac_no
-                 ORDER BY COUNT(*) DESC
-            ) LOOP
-                v_row := v_row + 1;
-                EXIT WHEN v_row > 40;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|' || fpad(r.lib, 42) || '|'
-                    || fpad(r.nat, 16) || '|' || fpad(r.nature, 26) || '|' || fpadl(fnum(r.nb), 16) || '|'
-                    || fpadl(fmio(r.deb), 22) || '|' || fpadl(fmio(r.cre), 22) || '|'
-                    || fpadl(fnum(r.nbc), 14) || '|');
-            END LOOP;
-        EXCEPTION
-            WHEN OTHERS THEN po('    !! ' || SQLERRM);
-        END;
-        tbl_line('4,20,42,16,26,16,22,22,14');
 
         -- -----------------------------------------------------
         print_sub('14B.2 Schema comptable reconstitue : produit x tag de montant x sens');
@@ -5093,300 +4698,6 @@ BEGIN
 
 
         -- -----------------------------------------------------
-        p_test('MM-621', 'Contrat liquide dont le compte de titres n''est pas solde');
-        p_obj('apres liquidation, la somme des debits du compte de titres doit egaler');
-        po('             la somme de ses credits : le titre est sorti du bilan.');
-        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_crat_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_pl || '%')
-                                  OR (h.ac_no LIKE k_gl_crat_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_tr || '%') THEN 0
-                                WHEN (h.ac_no LIKE k_gl_tit_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_pl || '%')
-                                  OR (h.ac_no LIKE k_gl_tit_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_tr || '%')
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                                     ELSE -NVL(h.lcy_amount, 0) END
-                                ELSE 0 END) sld,
-                       SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq
-                  FROM actb_history h
-                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE n_liq > 0 AND ABS(sld) > k_tol_abs;
-        p_verdict('MM-621', 'Contrat liquide dont le compte de titres n''est pas solde',
-                  v_cnt, v_nb_ctr, v_mt, 'CRITIQUE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,8,28,20,20,20');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|' || fpad('PROD', 8) || '|'
-                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
-                || fpadl('SOLDE TITRES', 20) || '|' || fpad('ECHEANCE', 20) || '|');
-            tbl_line('4,22,12,8,28,20,20,20');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) bkg_x
-                 FROM (SELECT * FROM (
-                        SELECT q.ref, MAX(m.product) prod, MAX(m.lcy_amount) nom,
-                               MAX(m.maturity_date) md, q.sld,
-                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
-                                     WHERE x.customer_no = m.counterparty)) etat
-                          FROM (SELECT h.trn_ref_no ref,
-                                       SUM(CASE WHEN (h.ac_no LIKE k_gl_crat_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_pl || '%')
-                                                  OR (h.ac_no LIKE k_gl_crat_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_tr || '%') THEN 0
-                                                WHEN (h.ac_no LIKE k_gl_tit_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_pl || '%')
-                                                  OR (h.ac_no LIKE k_gl_tit_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_tit_tr || '%')
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                                                     ELSE -NVL(h.lcy_amount, 0) END
-                                                ELSE 0 END) sld,
-                                       SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
-                                                THEN 1 ELSE 0 END) n_liq
-                                  FROM actb_history h
-                                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                                               FROM sttb_account GROUP BY ac_gl_no) s
-                                         ON s.ac_gl_no = h.ac_no
-                                 WHERE h.module = k_mod
-                                 GROUP BY h.trn_ref_no) q
-                          LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
-                                                          AND m.version_no = 1
-                         WHERE q.n_liq > 0 AND ABS(q.sld) > k_tol_abs
-                         GROUP BY q.ref, q.sld
-                         ORDER BY ABS(q.sld) DESC
-                      ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(r.prod, 8) || '|'
-                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpadl(famt(r.sld), 20) || '|'
-                    || fpad(fdt(r.md), 20) || '|');
-            END LOOP;
-            tbl_line('4,22,12,8,28,20,20,20');
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-622', 'Produits constates d''avance non resorbes a l''echeance');
-        p_obj('sur un produit a interets precomptes, le compte de produits constates');
-        po('             d''avance doit revenir a zero au terme de l''operation : la totalite de');
-        po('             l''interet encaisse le premier jour a alors ete virement au resultat.');
-        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_pca || '%' OR NVL(s.nat, ' ') LIKE k_gl_pca || '%')
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                                     ELSE -NVL(h.lcy_amount, 0) END
-                                ELSE 0 END) sld,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_pca || '%' OR NVL(s.nat, ' ') LIKE k_gl_pca || '%') THEN 1 ELSE 0 END) n_pca,
-                       MAX(m.maturity_date) md
-                  FROM actb_history h
-                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                  LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
-                                                  AND m.version_no = 1
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE n_pca > 0 AND md <= k_arrete AND ABS(sld) > k_tol_abs;
-        p_verdict('MM-622', 'Produits constates d''avance non resorbes a l''echeance',
-                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-
-        -- -----------------------------------------------------
-        p_test('MM-623', 'Creances rattachees non soldees apres encaissement des interets');
-        p_obj('sur un produit a interets postcomptes, le compte de creances rattachees');
-        po('             doit revenir a zero une fois l''interet encaisse.');
-        SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_crat_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_pl || '%')
-                                  OR (h.ac_no LIKE k_gl_crat_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_tr || '%')
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                                     ELSE -NVL(h.lcy_amount, 0) END
-                                ELSE 0 END) sld,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_crat_pl || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_pl || '%')
-                                  OR (h.ac_no LIKE k_gl_crat_tr || '%' OR NVL(s.nat, ' ') LIKE k_gl_crat_tr || '%') THEN 1 ELSE 0 END) n_crat,
-                       MAX(m.maturity_date) md
-                  FROM actb_history h
-                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                  LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
-                                                  AND m.version_no = 1
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE n_crat > 0 AND md <= k_arrete AND ABS(sld) > k_tol_abs;
-        p_verdict('MM-623', 'Creances rattachees non soldees apres encaissement',
-                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-
-        -- -----------------------------------------------------
-        p_test('MM-624', 'Provisions comptabilisees differentes des interets contractuels');
-        p_obj('la somme des provisions portees au credit du compte de produits doit');
-        po('             egaler les interets prevus au contrat (MAIN_COMP_AMOUNT), une fois');
-        po('             l''operation arrivee a son terme.');
-        SELECT COUNT(*), NVL(SUM(ABS(prod - it)), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       SUM(CASE WHEN (h.ac_no LIKE k_gl_prod || '%' OR NVL(s.nat, ' ') LIKE k_gl_prod || '%') AND h.drcr_ind = 'C'
-                                THEN NVL(h.lcy_amount, 0) ELSE 0 END)
-                     - SUM(CASE WHEN (h.ac_no LIKE k_gl_prod || '%' OR NVL(s.nat, ' ') LIKE k_gl_prod || '%') AND h.drcr_ind = 'D'
-                                THEN NVL(h.lcy_amount, 0) ELSE 0 END) prod,
-                       MAX(NVL(m.main_comp_amount, 0)) it,
-                       MAX(m.maturity_date) md
-                  FROM actb_history h
-                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                               FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                  JOIN ldtb_contract_master m ON m.contract_ref_no = h.trn_ref_no
-                                             AND m.version_no = 1
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE md <= k_arrete AND it > 0 AND ABS(prod - it) > k_tol_abs;
-        p_verdict('MM-624', 'Produits comptabilises differents des interets contractuels',
-                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,12,8,28,20,20,20,18');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|' || fpad('ECHEANCE', 12) || '|' || fpad('PROD', 8) || '|'
-                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
-                || fpadl('INT. CONTRACTUELS', 20) || '|' || fpadl('PRODUITS COMPTA.', 20) || '|'
-                || fpadl('ECART', 18) || '|');
-            tbl_line('4,22,12,12,8,28,20,20,20,18');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) bkg_x,
-                         (SELECT MAX(mm.maturity_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) mat_x
-                 FROM (SELECT * FROM (
-                        SELECT q.ref, MAX(q.prod) prod, MAX(q.it) it, MAX(m.product) pr,
-                               MAX(m.lcy_amount) nom,
-                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
-                                     WHERE x.customer_no = m.counterparty)) etat
-                          FROM (SELECT h.trn_ref_no ref,
-                                       SUM(CASE WHEN (h.ac_no LIKE k_gl_prod || '%' OR NVL(s.nat, ' ') LIKE k_gl_prod || '%') AND h.drcr_ind = 'C'
-                                                THEN NVL(h.lcy_amount, 0) ELSE 0 END)
-                                     - SUM(CASE WHEN (h.ac_no LIKE k_gl_prod || '%' OR NVL(s.nat, ' ') LIKE k_gl_prod || '%') AND h.drcr_ind = 'D'
-                                                THEN NVL(h.lcy_amount, 0) ELSE 0 END) prod,
-                                       MAX(NVL(m2.main_comp_amount, 0)) it,
-                                       MAX(m2.maturity_date) md
-                                  FROM actb_history h
-                                  LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                                               FROM sttb_account GROUP BY ac_gl_no) s
-                                         ON s.ac_gl_no = h.ac_no
-                                  JOIN ldtb_contract_master m2 ON m2.contract_ref_no = h.trn_ref_no
-                                                              AND m2.version_no = 1
-                                 WHERE h.module = k_mod
-                                 GROUP BY h.trn_ref_no) q
-                          JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
-                                                     AND m.version_no = 1
-                         WHERE q.md <= k_arrete AND q.it > 0 AND ABS(q.prod - q.it) > k_tol_abs
-                         GROUP BY q.ref
-                         ORDER BY ABS(MAX(q.prod) - MAX(q.it)) DESC
-                      ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(fdt(r.mat_x), 12) || '|' || fpad(r.pr, 8) || '|'
-                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|' || fpadl(famt(r.it), 20) || '|'
-                    || fpadl(famt(r.prod), 20) || '|' || fpadl(famt(r.prod - r.it), 18) || '|');
-            END LOOP;
-            tbl_line('4,22,12,12,8,28,20,20,20,18');
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-625', 'Ecritures a montant negatif (extournes)');
-        p_obj('un montant negatif signale une extourne ou une correction retroactive de');
-        po('             taux. Chaque ligne negative doit trouver sa ligne d''origine ; le cumul');
-        po('             par compte et par sens ne doit jamais devenir negatif.');
-        SELECT COUNT(*), COUNT(DISTINCT trn_ref_no), NVL(SUM(lcy_amount), 0)
-          INTO v_cnt, v_cnt2, v_mt
-          FROM actb_history
-         WHERE module = k_mod AND NVL(lcy_amount, 0) < 0;
-        print_kv('Contrats concernes', fnum(v_cnt2));
-        p_verdict('MM-625', 'Ecritures a montant negatif', v_cnt, NULL, ABS(v_mt), 'MOYEN');
-
-        SELECT COUNT(*) INTO v_cnt3
-          FROM (SELECT h.trn_ref_no, h.amount_tag, h.ac_no, h.drcr_ind,
-                       SUM(NVL(h.lcy_amount, 0)) sld
-                  FROM actb_history h
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no, h.amount_tag, h.ac_no, h.drcr_ind)
-         WHERE sld < -k_tol_abs;
-        p_verdict('MM-625b', 'Cumul negatif par contrat, tag, compte et sens (extourne sans origine)',
-                  v_cnt3, NULL, NULL, 'ELEVE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,12,10,18,6,18,12,28,20');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|'
-                || fpad('ECHEANCE', 12) || '|' || fpad('EVENT', 10) || '|' || fpad('TAG DE MONTANT', 18) || '|'
-                || fpad('D/C', 6) || '|' || fpad('COMPTE (AC_NO)', 18) || '|' || fpad('GL NATUREL', 12) || '|'
-                || fpad('LIBELLE DU COMPTE', 28) || '|' || fpadl('MONTANT LCY', 20) || '|');
-            tbl_line('4,22,12,12,10,18,6,18,12,28,20');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT h.trn_ref_no ref, h.event, h.amount_tag, h.drcr_ind,
-                               h.ac_no, s.nat, s.lib, h.lcy_amount mt,
-                               (SELECT MAX(m.booking_date) FROM ldtb_contract_master m
-                                 WHERE m.contract_ref_no = h.trn_ref_no) bd,
-                               (SELECT MAX(m.maturity_date) FROM ldtb_contract_master m
-                                 WHERE m.contract_ref_no = h.trn_ref_no) md
-                          FROM actb_history h
-                          LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
-                                       FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                         WHERE h.module = k_mod AND NVL(h.lcy_amount, 0) < 0
-                         ORDER BY h.lcy_amount
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(fdt(r.bd), 12) || '|'
-                    || fpad(fdt(r.md), 12) || '|' || fpad(r.event, 10) || '|' || fpad(r.amount_tag, 18) || '|'
-                    || fpad(r.drcr_ind, 6) || '|' || fpad(r.ac_no, 18) || '|' || fpad(r.nat, 12) || '|'
-                    || fpad(r.lib, 28) || '|' || fpadl(famt(r.mt), 20) || '|');
-            END LOOP;
-            tbl_line('4,22,12,12,10,18,6,18,12,28,20');
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-626', 'Provisions enregistrees apres la liquidation du contrat');
-        p_obj('la liquidation peut intervenir avant l''echeance (cession ou remboursement');
-        po('             anticipe). Dans ce cas les provisions doivent s''arreter a la meme date :');
-        po('             toute provision posterieure gonfle indument le resultat.');
-        SELECT COUNT(*), NVL(SUM(mt), 0) INTO v_cnt, v_mt
-          FROM (SELECT h.trn_ref_no,
-                       MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN h.trn_dt END) d_liq,
-                       MAX(CASE WHEN h.event = 'ACCR' THEN h.trn_dt END) d_accr,
-                       SUM(CASE WHEN h.event = 'ACCR' THEN NVL(h.lcy_amount, 0) ELSE 0 END) mt
-                  FROM actb_history h
-                 WHERE h.module = k_mod
-                 GROUP BY h.trn_ref_no)
-         WHERE d_liq IS NOT NULL AND d_accr IS NOT NULL
-           AND TRUNC(d_accr) > TRUNC(d_liq) + 1;
-        p_verdict('MM-626', 'Provisions enregistrees apres la liquidation du contrat',
-                  v_cnt, v_nb_ctr, v_mt, 'ELEVE');
-        IF v_cnt > 0 THEN
-            tbl_line('4,22,12,12,8,28,20,16,16,16');
-            po('  |' || fpad('N#', 4) || '|' || fpad('CONTRAT', 22) || '|' || fpad('BOOKING', 12) || '|' || fpad('ECHEANCE', 12) || '|' || fpad('PROD', 8) || '|'
-                || fpad('ETAT EMETTEUR', 28) || '|' || fpadl('NOMINAL', 20) || '|'
-                || fpad('LIQUIDATION', 16) || '|' || fpad('DERN. PROVIS.', 16) || '|'
-                || fpadl('ECART (JOURS)', 16) || '|');
-            tbl_line('4,22,12,12,8,28,20,16,16,16');
-            v_row := 0;
-            FOR r IN (SELECT q0.*,
-                         (SELECT MAX(mm.booking_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) bkg_x,
-                         (SELECT MAX(mm.maturity_date) FROM ldtb_contract_master mm
-                           WHERE mm.contract_ref_no = q0.ref) mat_x
-                 FROM (SELECT * FROM (
-                        SELECT q.ref, q.d_liq, q.d_accr, MAX(m.product) pr, MAX(m.lcy_amount) nom,
-                               MAX((SELECT MAX(x.customer_name1) FROM sttm_customer x
-                                     WHERE x.customer_no = m.counterparty)) etat
-                          FROM (SELECT h.trn_ref_no ref,
-                                       MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
-                                                THEN h.trn_dt END) d_liq,
-                                       MAX(CASE WHEN h.event = 'ACCR' THEN h.trn_dt END) d_accr
-                                  FROM actb_history h
-                                 WHERE h.module = k_mod
-                                 GROUP BY h.trn_ref_no) q
-                          LEFT JOIN ldtb_contract_master m ON m.contract_ref_no = q.ref
-                                                          AND m.version_no = 1
-                         WHERE q.d_liq IS NOT NULL AND q.d_accr IS NOT NULL
-                           AND TRUNC(q.d_accr) > TRUNC(q.d_liq) + 1
-                         GROUP BY q.ref, q.d_liq, q.d_accr
-                         ORDER BY TRUNC(q.d_accr) - TRUNC(q.d_liq) DESC
-                      ) WHERE ROWNUM <= k_top) q0) LOOP
-                v_row := v_row + 1;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 22) || '|' || fpad(fdt(r.bkg_x), 12) || '|' || fpad(fdt(r.mat_x), 12) || '|' || fpad(r.pr, 8) || '|'
-                    || fpad(r.etat, 28) || '|' || fpadl(famt(r.nom), 20) || '|'
-                    || fpad(fdt(r.d_liq), 16) || '|' || fpad(fdt(r.d_accr), 16) || '|'
-                    || fpadl(fnum(TRUNC(r.d_accr) - TRUNC(r.d_liq)), 16) || '|');
-            END LOOP;
-            tbl_line('4,22,12,12,8,28,20,16,16,16');
-        END IF;
-
-        -- -----------------------------------------------------
         p_test('MM-627', 'Tag de montant incoherent avec la composante d''interet du contrat');
         p_obj('un contrat dont la composante principale est INT_BT doit generer des tags');
         po('             INT_BT ; un contrat en INT_OB doit generer des tags INT_OB. Un melange');
@@ -5402,172 +4713,6 @@ BEGIN
            AND h.amount_tag NOT LIKE TRIM(m.main_comp) || '%';
         p_verdict('MM-627', 'Tag de montant incoherent avec la composante du contrat',
                   v_cnt, v_nb_ctr, v_mt, 'MOYEN');
-
-        -- -----------------------------------------------------
-        p_test('MM-628', 'Ecriture rattachee a un compte introuvable au plan comptable');
-        p_obj('tout AC_NO doit exister dans STTB_ACCOUNT. A defaut, la ligne ne peut');
-        po('             etre rattachee a aucun compte et sa nature reste inconnue.');
-        po('             Le compte general naturel n''est PAS exige ici : il est souvent vide');
-        po('             sur les generaux, ou le numero de compte porte deja la nature.');
-        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
-          INTO v_cnt, v_cnt2, v_mt
-          FROM actb_history h
-         WHERE h.module = k_mod
-           AND NOT EXISTS (SELECT 1 FROM sttb_account a WHERE a.ac_gl_no = h.ac_no);
-        print_kv('Contrats concernes', fnum(v_cnt2));
-        p_verdict('MM-628', 'Ecriture dont le compte est absent de STTB_ACCOUNT',
-                  v_cnt, NULL, v_mt, 'ELEVE');
-
-        print_sub('MM-628 bis. Taux de renseignement du compte general naturel');
-        po('  Pour memoire : la proportion de lignes dont AC_NATURAL_GL est vide. Un');
-        po('  taux eleve est normal sur les generaux et ne constitue pas une anomalie ;');
-        po('  il justifie que les tests de cette section raisonnent d''abord sur AC_NO.');
-        BEGIN
-            SELECT COUNT(*),
-                   SUM(CASE WHEN TRIM(s.nat) IS NULL THEN 1 ELSE 0 END),
-                   COUNT(DISTINCT h.ac_no),
-                   COUNT(DISTINCT CASE WHEN TRIM(s.nat) IS NULL THEN h.ac_no END)
-              INTO v_tot, v_cnt, v_cnt2, v_cnt3
-              FROM actb_history h
-              LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                           FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-             WHERE h.module = k_mod;
-            print_kv('Ecritures du module',                   fnum(v_tot));
-            print_kv('Dont sans compte general naturel',      fnum(v_cnt) || '   ' || fpct(v_cnt, v_tot));
-            print_kv('Comptes distincts mouvementes',         fnum(v_cnt2));
-            print_kv('Dont sans compte general naturel',      fnum(v_cnt3) || '   ' || fpct(v_cnt3, v_cnt2));
-        EXCEPTION
-            WHEN OTHERS THEN po('    !! ' || SQLERRM);
-        END;
-
-        -- -----------------------------------------------------
-        p_test('MM-629', 'Compte mouvemente hors du schema comptable attendu');
-        p_obj('les operations ne devraient toucher que les titres, les creances');
-        po('             rattachees, les produits constates d''avance, les produits et la');
-        po('             tresorerie. Tout autre compte doit etre explique.');
-        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
-          INTO v_cnt, v_cnt2, v_mt
-          FROM actb_history h
-          LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat
-                       FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-         WHERE h.module = k_mod
-           AND h.ac_no NOT LIKE k_gl_tit_pl || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_tit_pl || '%'
-           AND h.ac_no NOT LIKE k_gl_tit_tr || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_tit_tr || '%'
-           AND h.ac_no NOT LIKE k_gl_pca || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_pca || '%'
-           AND h.ac_no NOT LIKE k_gl_prod || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_prod || '%'
-           AND h.ac_no NOT LIKE k_gl_treso || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_treso || '%';
-        print_kv('Contrats concernes', fnum(v_cnt2));
-        p_verdict('MM-629', 'Compte mouvemente hors du schema comptable attendu',
-                  v_cnt, NULL, v_mt, 'MOYEN');
-        IF v_cnt > 0 THEN
-            tbl_line('4,18,12,34,16,22,22,14');
-            po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE (AC_NO)', 18) || '|' || fpad('GL NATUREL', 12) || '|'
-                || fpad('LIBELLE', 34) || '|' || fpadl('NB ECRITURES', 16) || '|' || fpadl('TOTAL DEBIT', 22) || '|'
-                || fpadl('TOTAL CREDIT', 22) || '|' || fpadl('NB CONTRATS', 14) || '|');
-            tbl_line('4,18,12,34,16,22,22,14');
-            v_row := 0;
-            FOR r IN (SELECT h.ac_no, MAX(s.nat) nat, MAX(s.lib) lib, COUNT(*) nb,
-                             SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
-                             SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
-                             COUNT(DISTINCT h.trn_ref_no) nbc
-                        FROM actb_history h
-                        LEFT JOIN (SELECT ac_gl_no, MAX(ac_natural_gl) nat, MAX(ac_gl_desc) lib
-                                     FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
-                       WHERE h.module = k_mod
-                         AND h.ac_no NOT LIKE k_gl_tit_pl || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_tit_pl || '%'
-                         AND h.ac_no NOT LIKE k_gl_tit_tr || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_tit_tr || '%'
-                         AND h.ac_no NOT LIKE k_gl_pca || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_pca || '%'
-                         AND h.ac_no NOT LIKE k_gl_prod || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_prod || '%'
-                         AND h.ac_no NOT LIKE k_gl_treso || '%' AND NVL(s.nat, ' ') NOT LIKE k_gl_treso || '%'
-                       GROUP BY h.ac_no
-                       ORDER BY COUNT(*) DESC) LOOP
-                v_row := v_row + 1;
-                EXIT WHEN v_row > k_top;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 18) || '|' || fpad(r.nat, 12) || '|'
-                    || fpad(r.lib, 34) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.deb), 22) || '|'
-                    || fpadl(fmio(r.cre), 22) || '|' || fpadl(fnum(r.nbc), 14) || '|');
-            END LOOP;
-            tbl_line('4,18,12,34,16,22,22,14');
-        END IF;
-
-        -- -----------------------------------------------------
-        p_test('MM-630', 'Desequilibre debit credit par tag de montant');
-        p_obj('chaque tag de montant porte les deux jambes d''une meme ecriture : ses');
-        po('             debits doivent egaler ses credits, sur l''ensemble du module.');
-        tbl_line('4,20,16,22,22,22,14');
-        po('  |' || fpad('N#', 4) || '|' || fpad('TAG DE MONTANT', 20) || '|' || fpadl('NB ECRITURES', 16) || '|'
-            || fpadl('TOTAL DEBIT', 22) || '|' || fpadl('TOTAL CREDIT', 22) || '|'
-            || fpadl('ECART', 22) || '|' || fpadl('VERDICT', 14) || '|');
-        tbl_line('4,20,16,22,22,22,14');
-        v_row := 0;
-        v_cnt := 0;
-        BEGIN
-            FOR r IN (SELECT h.amount_tag, COUNT(*) nb,
-                             SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
-                             SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
-                        FROM actb_history h
-                       WHERE h.module = k_mod
-                       GROUP BY h.amount_tag
-                       ORDER BY COUNT(*) DESC) LOOP
-                v_row := v_row + 1;
-                IF ABS(r.deb - r.cre) > k_tol_abs THEN
-                    v_cnt := v_cnt + 1;
-                END IF;
-                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.amount_tag, 20) || '|'
-                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(famt(r.deb), 22) || '|'
-                    || fpadl(famt(r.cre), 22) || '|' || fpadl(famt(r.deb - r.cre), 22) || '|'
-                    || fpadl(CASE WHEN ABS(r.deb - r.cre) > k_tol_abs THEN 'ECART' ELSE 'OK' END, 14) || '|');
-            END LOOP;
-        EXCEPTION
-            WHEN OTHERS THEN po('    !! ' || SQLERRM);
-        END;
-        tbl_line('4,20,16,22,22,22,14');
-        p_verdict('MM-630', 'Tag de montant dont les debits n''egalent pas les credits',
-                  v_cnt, v_row, NULL, 'CRITIQUE');
-
-    EXCEPTION
-        WHEN OTHERS THEN
-            po('');
-            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
-            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
-    END;
-
-    -- ########################################################################
-    print_part('PARTIE 6 : GOUVERNANCE, SEPARATION DES TACHES ET PISTE D''AUDIT');
-    -- ########################################################################
-
-    -- =========================================================
-    -- 15. MM-7xx : GOUVERNANCE ET PISTE D'AUDIT
-    -- =========================================================
-    print_section('15. CONTROLES MM-7xx : GOUVERNANCE ET PISTE D''AUDIT');
-    BEGIN
-        po('  LDTB_CONTRACT_MASTER ne conserve ni le saisisseur ni le validateur du');
-        po('  contrat. La piste d''audit passe donc par ACTB_HISTORY (USER_ID et AUTH_ID)');
-        po('  et par LDTB_CONTRACT_CONTROL (verrous de saisie).');
-
-        print_sub('15.1 Qui saisit et qui autorise les operations du module ' || k_mod);
-        tbl_line('4,20,20,14,16,14,20,14');
-        po('  |' || fpad('N#', 4) || '|' || fpad('SAISI PAR', 20) || '|' || fpad('AUTORISE PAR', 20) || '|'
-            || fpadl('NB CONTRATS', 14) || '|' || fpadl('NB ECRITURES', 16) || '|'
-            || fpad('DERNIERE', 14) || '|' || fpadl('MONTANT LCY', 20) || '|'
-            || fpadl('AUTO-AUTOR.', 14) || '|');
-        tbl_line('4,20,20,14,16,14,20,14');
-        v_row := 0;
-        FOR r IN (
-            SELECT h.user_id, h.auth_id, COUNT(DISTINCT h.trn_ref_no) nbc, COUNT(*) nb,
-                   MAX(h.trn_dt) d2, SUM(NVL(h.lcy_amount, 0)) mt
-              FROM actb_history h
-             WHERE h.module = k_mod
-             GROUP BY h.user_id, h.auth_id
-             ORDER BY 4 DESC
-        ) LOOP
-            v_row := v_row + 1;
-            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.user_id, 20) || '|' || fpad(r.auth_id, 20) || '|'
-                || fpadl(fnum(r.nbc), 14) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpad(fdt(r.d2), 14) || '|'
-                || fpadl(fmio(r.mt), 20) || '|'
-                || fpadl(CASE WHEN r.user_id = r.auth_id THEN 'OUI' ELSE 'non' END, 14) || '|');
-        END LOOP;
-        tbl_line('4,20,20,14,16,14,20,14');
 
         -- -----------------------------------------------------
         p_test('MM-701', 'Ecritures auto-autorisees par un utilisateur nominatif');
@@ -6086,7 +5231,8 @@ BEGIN
         p_test('EXT-03', 'Tout contrat du referentiel porte des ecritures comptables');
         p_obj('sur les quatre produits de marche monetaire (' || k_prod_mm || '),');
         po('             tout contrat doit avoir au moins une ecriture dans ACTB_HISTORY.');
-        po('             Recoupe MM-601, qui teste la meme chose sans filtre de produit.');
+        po('             Remplace l''ancien MM-601, qui testait la meme chose sans filtre');
+        po('             de produit.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master m
          WHERE m.module = k_mod
@@ -6132,7 +5278,7 @@ BEGIN
         p_obj('tout TRN_REF_NO du module doit correspondre a un CONTRACT_REF_NO du');
         po('             referentiel des contrats. Une ecriture orpheline est soit un contrat');
         po('             purge alors que sa comptabilite subsiste, soit une ecriture passee');
-        po('             sur une reference qui n''existe pas. Recoupe MM-602.');
+        po('             sur une reference qui n''existe pas. Remplace l''ancien MM-602.');
         SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), NVL(SUM(NVL(h.lcy_amount, 0)), 0)
           INTO v_cnt, v_cnt2, v_mt
           FROM actb_history h
@@ -6193,7 +5339,7 @@ BEGIN
         -- -----------------------------------------------------
         p_test('DBL-01', 'Equilibre debit credit de chaque contrat');
         p_obj('sur la vie entiere d''un contrat, la somme signee des ecritures doit');
-        po('             etre nulle. Recoupe MM-603.');
+        po('             etre nulle. Remplace l''ancien MM-603.');
         SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
           FROM (SELECT h.trn_ref_no,
                        SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -6636,8 +5782,8 @@ BEGIN
         -- -----------------------------------------------------
         p_test('MAP-05', 'Tout compte mouvemente existe et n''est ni ferme ni bloque');
         p_obj('un compte inconnu du plan comptable, non autorise, ferme, bloque ou');
-        po('             gele ne devrait recevoir aucune ecriture. Recoupe MM-628 pour la');
-        po('             seule existence ; ce test y ajoute les statuts.');
+        po('             gele ne devrait recevoir aucune ecriture. Remplace l''ancien MM-628,');
+        po('             qui ne testait que l''existence ; ce test y ajoute les statuts.');
         tbl_line('4,22,40,10,10,10,10,10,14,16');
         po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE (AC_NO)', 22) || '|' || fpad('LIBELLE', 40) || '|'
             || fpad('EXISTE', 10) || '|' || fpad('AUTH', 10) || '|' || fpad('BLOQUE', 10) || '|'
@@ -6959,8 +6105,8 @@ BEGIN
         p_test('INT-04', 'Aucune provision hors de la vie du contrat');
         p_obj('une provision datee avant la date de valeur ou apres l''echeance (ou');
         po('             apres la liquidation si elle est anterieure) est un interet reconnu');
-        po('             sur une periode ou le titre n''etait pas detenu. Recoupe MM-313 et');
-        po('             MM-626, sur la maille comptable cette fois.');
+        po('             sur une periode ou le titre n''etait pas detenu. Remplace les anciens');
+        po('             MM-313 et MM-626, sur la maille comptable cette fois.');
         SELECT COUNT(*), COUNT(DISTINCT ref), NVL(SUM(ABS(mt)), 0) INTO v_cnt, v_cnt2, v_mt
           FROM (SELECT h.trn_ref_no ref, h.trn_dt dt, NVL(h.lcy_amount, 0) mt,
                        (SELECT MAX(m.value_date) FROM ldtb_contract_master m
@@ -7072,7 +6218,7 @@ BEGIN
         -- -----------------------------------------------------
         p_test('INT-07', 'Le taux est renseigne et plausible');
         p_obj('taux nul, non renseigne ou hors de la fourchette convenue avec la');
-        po('             tresorerie (' || ftx(k_taux_min) || ' a ' || ftx(k_taux_max) || '). Recoupe MM-308.');
+        po('             tresorerie (' || ftx(k_taux_min) || ' a ' || ftx(k_taux_max) || '). Remplace l''ancien MM-308.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master m
          WHERE m.module = k_mod
@@ -7138,7 +6284,8 @@ BEGIN
         p_test('LIF-01', 'Tout contrat echu a ete liquide');
         p_obj('un contrat dont l''echeance est passee doit porter une ecriture');
         po('             PRINCIPAL_LIQD. Son absence signifie que le remboursement n''a pas ete');
-        po('             comptabilise. Recoupe MM-401, sur la maille comptable.');
+        po('             comptabilise. Remplace l''ancien MM-401, qui lisait la table des');
+        po('             liquidations et non la comptabilite.');
         SELECT COUNT(*), NVL(SUM(m.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master m
          WHERE m.module = k_mod
@@ -7190,7 +6337,8 @@ BEGIN
         p_test('LIF-02', 'Le compte de titres est solde apres liquidation');
         p_obj('apres PRINCIPAL_LIQD, le solde signe des comptes de titres du contrat');
         po('             doit etre nul : le titre est sorti du bilan. Un residu est une');
-        po('             liquidation incomplete. Recoupe MM-621, ici sur les comptes exacts.');
+        po('             liquidation incomplete. Remplace l''ancien MM-621, qui raisonnait sur');
+        po('             des prefixes de compte et non sur les numeros exacts.');
         SELECT COUNT(*), NVL(SUM(ABS(sld)), 0) INTO v_cnt, v_mt
           FROM (SELECT h.trn_ref_no,
                        SUM(CASE WHEN h.ac_no IN (k_ac_tit_otap, k_ac_tit_mtpd, k_ac_tit_tr)
@@ -8497,7 +7645,8 @@ BEGIN
         p_obj('deux contrats portant le meme nominal, le meme taux, la meme date de');
         po('             valeur et la meme echeance sont soit une operation fractionnee');
         po('             volontairement, soit une double saisie. Chaque groupe doit etre');
-        po('             justifie. Recoupe MM-101, qui utilise le meme faisceau d''indices.');
+        po('             justifie. Remplace l''ancien MM-101, qui utilisait le meme faisceau');
+        po('             d''indices.');
         SELECT COUNT(*), NVL(SUM(mt), 0) INTO v_cnt, v_mt
           FROM (SELECT COUNT(*) nb, SUM(m.lcy_amount) mt
                   FROM ldtb_contract_master m
@@ -8791,10 +7940,12 @@ BEGIN
         po('  5. La piste d''audit des contrats repose sur les ecritures comptables :');
         po('     LDTB_CONTRACT_MASTER ne conserve ni le saisisseur ni le validateur du');
         po('     contrat lui-meme.');
-        po('  6. Douze controles candidats ont ete volontairement ecartes du decompte');
-        po('     des tests, et quatre autres recalibres, parce qu''ils ne discriminaient');
-        po('     rien sur ce portefeuille. La section 0.7 en donne la liste et le motif ;');
-        po('     l''information correspondante reste imprimee sous forme descriptive.');
+        po('  6. Douze controles candidats ont ete ecartes du decompte des tests faute');
+        po('     de discriminer quoi que ce soit sur ce portefeuille, deux ont ete');
+        po('     recalibres, et vingt-et-un ont ete retires parce que le referentiel de');
+        po('     la partie 7 les reprend sur une maille plus fine ou sur une source plus');
+        po('     sure. La section 0.7 donne les trois listes et, pour chaque test retire,');
+        po('     celui qui le porte desormais. Aucun controle n''est perdu.');
         po('  7. Huit controles de la partie 7 ne peuvent etre clos sans une piece');
         po('     exterieure a la base : releve de compte BEAC (CSH-01 a CSH-03),');
         po('     balance generale et etat de position titres (CUT-02 a CUT-05),');

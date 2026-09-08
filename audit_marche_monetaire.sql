@@ -1636,7 +1636,7 @@ BEGIN
             v_row := 0;
             FOR r IN (SELECT * FROM (
                         SELECT m.contract_ref_no, m.product, m.counterparty, m.lcy_amount,
-                               m.main_comp_rate, m.value_date, m.maturity_date
+                               m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date
                           FROM ldtb_contract_master m
                          WHERE m.module = k_mod
                            AND m.booking_date BETWEEN k_dt_deb AND k_dt_fin
@@ -2313,7 +2313,6 @@ BEGIN
                                (SELECT MAX(c.customer_name1) FROM sttm_customer c
                                  WHERE c.customer_no = m.counterparty) nom,
                                m.lcy_amount, m.main_comp_rate, m.booking_date, m.value_date, m.maturity_date,
-                               m.booking_date,
                                TRUNC(m.booking_date) - TRUNC(m.booking_date, 'IW') + 1 jr
                           FROM ldtb_contract_master m
                          WHERE m.module = k_mod

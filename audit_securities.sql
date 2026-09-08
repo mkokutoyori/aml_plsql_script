@@ -36,7 +36,8 @@
 --             1.8 to 1.12  the portfolio as the accounting shows it, and the
 --                          reconciliation of the two, securities still held then
 --                          securities already out of the book
---             1.13, 1.14   walkthrough of the large deals and the high rates
+--             1.13 to 1.17 the contracts that never reached the accounts
+--             1.18, 1.19   walkthrough of the large deals and the high rates
 --   PART 2  - SECURITIES LIFE CYCLE      LC-01 to LC-06, LIF-01 to LIF-07
 --   PART 3  - EXTRACTION INTEGRITY       EXT-01 to EXT-04
 --   PART 4  - DOUBLE ENTRY               DBL-01 to DBL-04
@@ -99,6 +100,7 @@ DECLARE
 
     -- Number of detail lines printed per test
     k_top         NUMBER := 30;
+    k_top_all     NUMBER := 200;        -- cap on the exhaustive lists (1.17)
 
     -- ========================================================================
     -- CHART OF ACCOUNTS OF THE MODULE
@@ -445,19 +447,27 @@ DECLARE
         v_out  DATE;
         v_held NUMBER;
         v_st   VARCHAR2(20);
+        v_nb   NUMBER := 0;
     BEGIN
         BEGIN
-            SELECT MIN(CASE WHEN h.amount_tag = 'PRINCIPAL' THEN h.trn_dt END),
+            SELECT COUNT(*),
+                   MIN(CASE WHEN h.amount_tag = 'PRINCIPAL' THEN h.trn_dt END),
                    MIN(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
                              AND NVL(h.lcy_amount, 0) > 0 THEN h.trn_dt END)
-              INTO v_in, v_out
+              INTO v_nb, v_in, v_out
               FROM actb_history h
              WHERE h.trn_ref_no = p_ref AND h.module = k_mod;
         EXCEPTION
-            WHEN OTHERS THEN v_in := NULL; v_out := NULL;
+            WHEN OTHERS THEN v_nb := 0; v_in := NULL; v_out := NULL;
         END;
         v_in := NVL(v_in, p_vd);
-        IF v_out IS NOT NULL THEN
+        IF v_nb = 0 THEN
+            -- No accounting at all: the deal has no life to measure. Saying
+            -- HELD here would credit the bank with a position the balance
+            -- sheet has never carried. See section 1.17 and EXT-03.
+            v_held := NULL;
+            v_st   := 'NO ENTRY';
+        ELSIF v_out IS NOT NULL THEN
             v_held := TRUNC(v_out) - TRUNC(v_in);
             v_st   := CASE WHEN p_md IS NOT NULL
                             AND TRUNC(v_out) < TRUNC(p_md) - k_late_d THEN 'SOLD'
@@ -595,7 +605,8 @@ DECLARE
         tbl_line(v_w);
         IF v_n = 0 THEN
             po('    NO ACCOUNTING ENTRY AT ALL for this contract. The deal exists in');
-            po('    the deal master and nowhere in the accounts (see EXT-03).');
+            po('    the deal master and nowhere in the accounts. See sections 1.13 to');
+            po('    1.17, and EXT-03 which carries the verdict.');
         END IF;
 
         -- Closing position, read from the entries
@@ -699,6 +710,7 @@ BEGIN
         print_kv('Day count basis used for estimates',   TO_CHAR(k_day_basis));
         print_kv('ALM concentration limit per issuer',   fmio(k_conc_lim));
         print_kv('Detail lines printed per test',        TO_CHAR(k_top));
+        print_kv('Cap on the exhaustive lists (1.17)',   TO_CHAR(k_top_all));
 
         print_sub('0.3 Audit scope');
         po('  LDTB_CONTRACT_MASTER is shared with the LD module and holds one row');
@@ -1463,9 +1475,395 @@ BEGIN
     END;
 
     -- =========================================================
-    -- 1 TER. WALKTHROUGH OF THE DEALS THAT MATTER MOST
+    -- 1 TER. THE CONTRACTS THAT NEVER REACHED THE ACCOUNTS
     -- =========================================================
-    print_section('1 TER. WALKTHROUGH OF THE DEALS THAT MATTER MOST');
+    print_section('1 TER. THE CONTRACTS THAT NEVER REACHED THE ACCOUNTS');
+    BEGIN
+        po('  ACTB_HISTORY is where the life of a contract is recorded. A contract');
+        po('  with NO row there has no life at all in the accounts. It exists in the');
+        po('  front office, it carries a nominal, a rate, a counterparty and a');
+        po('  maturity, and the balance sheet has never heard of it.');
+        po('');
+        po('  That matters twice over. First the position is invisible: nothing was');
+        po('  debited, nothing has been accrued, nothing will be collected, and no');
+        po('  cash movement will ever be reconciled against it. Second, EVERY control');
+        po('  of this report is anchored on the entries, so these contracts fall');
+        po('  silently outside the reach of all of them. A control cannot report on a');
+        po('  contract that produced nothing to test. They must therefore be listed');
+        po('  by name and explained one by one, which is what this section does.');
+        po('');
+        po('  EXT-03, in part 3, carries the verdict. This section is the analysis');
+        po('  behind it: how many, for how much, whether the accounting went');
+        po('  somewhere else, what the management tables still say about them, and');
+        po('  which contracts exactly.');
+        po('');
+        po('  The mirror case, an accounting entry carrying a reference that no');
+        po('  contract matches, is EXT-04 in part 3.');
+
+        -- ---------------------------------------------------------
+        print_sub('1.13 How many, and for how much');
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod);
+        print_kv('Contracts in scope (CONTRACT_REF_NO)', fnum(v_nb_ctr));
+        print_kv('With no entry in ACTB_HISTORY for module ' || k_mod,
+                 fnum(v_cnt) || '   ' || fpct(v_cnt, v_nb_ctr));
+        print_kv('Their cumulative nominal (LCY_AMOUNT)',
+                 famt(v_mt) || ' XAF   ' || fpct(v_mt, v_mt_ctr));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt2, v_mt2
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no);
+        print_kv('Of those, no entry under ANY module at all',
+                 fnum(v_cnt2) || '   ' || fpct(v_cnt2, v_cnt));
+        print_kv('Of those, entries exist but under another module',
+                 fnum(v_cnt - v_cnt2) || '   ' || fpct(v_cnt - v_cnt2, v_cnt));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt3, v_tot
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND INSTR(',' || k_prod_all || ',', ',' || TRIM(c.product) || ',') > 0
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod);
+        print_kv('Of those, on the audited products (' || k_prod_all || ')',
+                 fnum(v_cnt3) || '   nominal ' || fmio(v_tot));
+        po('     That last figure is the population of EXT-03.');
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_row, v_tot2
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND c.maturity_date > k_asof
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod);
+        print_kv('Of those, whose maturity is still ahead of ' || fdt(k_asof),
+                 fnum(v_row) || '   nominal ' || fmio(v_tot2));
+        po('');
+        po('  READING . ' ||
+           CASE WHEN v_cnt = 0
+                     THEN 'every contract of the deal master carries accounting.'
+                          || ' Nothing to explain here.'
+                WHEN v_row > 0
+                     THEN 'the bank still shows ' || fmio(v_tot2) || ' of deals whose'
+                          || ' maturity has not been reached and which the accounts have'
+                          || ' never recorded. Those are invisible positions, to be'
+                          || ' explained before anything else.'
+                ELSE 'the contracts concerned have all passed their maturity. The'
+                     || ' question is whether they were ever booked, or booked and'
+                     || ' purged, or captured and cancelled.'
+           END);
+
+        -- ---------------------------------------------------------
+        print_sub('1.14 Did the accounting go somewhere else');
+        po('  A contract absent from module ' || k_mod || ' may still carry entries under another');
+        po('  module, for instance after a migration or when the deal was rebooked.');
+        po('  Where it does, the accounting exists but this audit does not see it,');
+        po('  and the scope of the review has to be widened before concluding.');
+        tbl_head('4,16,22,20,30,32',
+                 'N#|MODULE|CONTRACTS|ENTRIES|SIGNED AMOUNT|READING',
+                 '|MODULE|TRN_REF_NO| |LCY_AMOUNT| ',
+                 'RLRRRL');
+        v_row := 0;
+        FOR r IN (SELECT NVL(h.module, '-') mdl, COUNT(DISTINCT h.trn_ref_no) nb,
+                         COUNT(*) nl,
+                         SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                             ELSE -NVL(h.lcy_amount, 0) END) mt
+                    FROM actb_history h
+                   WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                                  WHERE c.contract_ref_no = h.trn_ref_no
+                                    AND c.module = k_mod
+                                    AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                                    AND c.version_no = (SELECT MAX(v.version_no)
+                                                          FROM ldtb_contract_master v
+                                                         WHERE v.contract_ref_no
+                                                               = c.contract_ref_no)
+                                    AND NOT EXISTS (SELECT 1 FROM actb_history h2
+                                                     WHERE h2.trn_ref_no = c.contract_ref_no
+                                                       AND h2.module = k_mod))
+                   GROUP BY h.module
+                   ORDER BY COUNT(*) DESC) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.mdl, 16) || '|'
+                || fpadl(fnum(r.nb), 22) || '|' || fpadl(fnum(r.nl), 20) || '|'
+                || fpadl(fmio(r.mt), 30) || '|'
+                || fpad('accounted outside ' || k_mod, 32) || '|');
+        END LOOP;
+        tbl_line('4,16,22,20,30,32');
+        IF v_row = 0 THEN
+            po('  Not one of these contracts carries an entry under any module.');
+            po('  They were never accounted for at all.');
+        END IF;
+
+        -- ---------------------------------------------------------
+        print_sub('1.15 The population by product, status and version');
+        po('  CONTRACT_STATUS and USER_DEFINED_STATUS are the front office view of');
+        po('  the deal. A cancelled or unauthorised contract legitimately produces no');
+        po('  entry; an active one that produces none does not. AMENDED counts the');
+        po('  contracts held in more than one version, which is where a capture and');
+        po('  reversal usually shows.');
+        tbl_head('4,12,12,18,16,26,14,16,16',
+                 'N#|PRODUCT|STATUS|USER STATUS|CONTRACTS|NOMINAL|AMENDED|FIRST BOOKING'
+                 || '|LAST BOOKING',
+                 '|PRODUCT|CONTRACT_STATUS|USER_DEFINED_STATUS|CONTRACT_REF_NO|LCY_AMOUNT'
+                 || '|VERSION_NO|BOOKING_DATE|BOOKING_DATE',
+                 'RLLLRRRLL');
+        v_row := 0;
+        FOR r IN (SELECT TRIM(c.product) prod,
+                         NVL(TRIM(c.contract_status), '-') st,
+                         NVL(TRIM(c.user_defined_status), '-') ust,
+                         COUNT(*) nb, SUM(NVL(c.lcy_amount, 0)) mt,
+                         SUM(CASE WHEN c.version_no > 1 THEN 1 ELSE 0 END) nb_amd,
+                         MIN(c.booking_date) d1, MAX(c.booking_date) d2
+                    FROM ldtb_contract_master c
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                     AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                      WHERE h.trn_ref_no = c.contract_ref_no
+                                        AND h.module = k_mod)
+                   GROUP BY TRIM(c.product), NVL(TRIM(c.contract_status), '-'),
+                            NVL(TRIM(c.user_defined_status), '-')
+                   ORDER BY SUM(NVL(c.lcy_amount, 0)) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
+                || fpad(r.st, 12) || '|' || fpad(r.ust, 18) || '|'
+                || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fnum(r.nb_amd), 14) || '|' || fpad(fdt(r.d1), 16) || '|'
+                || fpad(fdt(r.d2), 16) || '|');
+        END LOOP;
+        tbl_line('4,12,12,18,16,26,14,16,16');
+        IF v_row = 0 THEN
+            po('  Nothing to break down.');
+        END IF;
+
+        -- ---------------------------------------------------------
+        print_sub('1.16 What the management tables still say about them');
+        po('  These contracts produced no accounting. If a management table');
+        po('  nevertheless carries a balance, a schedule or an accrual for them, the');
+        po('  two sources disagree, and under the rule of this report THE ENTRIES');
+        po('  WIN: the position does not exist in the accounts and the management');
+        po('  figure is the thing to explain. Each line below is a disagreement to');
+        po('  be raised with the back office.');
+        tbl_head('4,44,18,18,28,30',
+                 'N#|MANAGEMENT TABLE (COLUMN SUMMED)|CONTRACTS|ROWS|AMOUNT CARRIED|READING',
+                 '| |CONTRACT_REF_NO| | | ',
+                 'RLRRRL');
+        v_row := 0;
+
+        BEGIN
+            SELECT COUNT(DISTINCT t.contract_ref_no), COUNT(*),
+                   NVL(SUM(NVL(t.amount_due, 0)), 0)
+              INTO v_cnt, v_cnt2, v_tot
+              FROM ldtb_contract_liq t
+             WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = t.contract_ref_no
+                              AND c.module = k_mod
+                              AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                              AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                               WHERE h.trn_ref_no = c.contract_ref_no
+                                                 AND h.module = k_mod));
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1; v_cnt2 := -1; v_tot := 0;
+        END;
+        v_row := v_row + 1;
+        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+            || fpad('LDTB_CONTRACT_LIQ (AMOUNT_DUE)', 44) || '|'
+            || fpadl(CASE WHEN v_cnt < 0 THEN '-' ELSE fnum(v_cnt) END, 18) || '|'
+            || fpadl(CASE WHEN v_cnt2 < 0 THEN '-' ELSE fnum(v_cnt2) END, 18) || '|'
+            || fpadl(famt(v_tot), 28) || '|'
+            || fpad(CASE WHEN v_cnt < 0 THEN 'table not readable'
+                         WHEN v_cnt = 0 THEN 'consistent, nothing there'
+                         ELSE 'DISAGREEMENT to explain' END, 30) || '|');
+
+        BEGIN
+            SELECT COUNT(DISTINCT t.contract_ref_no), COUNT(*),
+                   NVL(SUM(NVL(t.principal_outstanding_bal, 0)), 0)
+              INTO v_cnt, v_cnt2, v_tot
+              FROM ldtb_contract_balance t
+             WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = t.contract_ref_no
+                              AND c.module = k_mod
+                              AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                              AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                               WHERE h.trn_ref_no = c.contract_ref_no
+                                                 AND h.module = k_mod));
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1; v_cnt2 := -1; v_tot := 0;
+        END;
+        v_row := v_row + 1;
+        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+            || fpad('LDTB_CONTRACT_BALANCE (PRINCIPAL_OUTSTANDING_BAL)', 44) || '|'
+            || fpadl(CASE WHEN v_cnt < 0 THEN '-' ELSE fnum(v_cnt) END, 18) || '|'
+            || fpadl(CASE WHEN v_cnt2 < 0 THEN '-' ELSE fnum(v_cnt2) END, 18) || '|'
+            || fpadl(famt(v_tot), 28) || '|'
+            || fpad(CASE WHEN v_cnt < 0 THEN 'table not readable'
+                         WHEN v_cnt = 0 THEN 'consistent, nothing there'
+                         ELSE 'DISAGREEMENT to explain' END, 30) || '|');
+
+        BEGIN
+            SELECT COUNT(DISTINCT t.contract_ref_no), COUNT(*),
+                   NVL(SUM(NVL(t.till_date_accrual, 0)), 0)
+              INTO v_cnt, v_cnt2, v_tot
+              FROM ldtb_contract_accrual_history t
+             WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = t.contract_ref_no
+                              AND c.module = k_mod
+                              AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                              AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                               WHERE h.trn_ref_no = c.contract_ref_no
+                                                 AND h.module = k_mod));
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1; v_cnt2 := -1; v_tot := 0;
+        END;
+        v_row := v_row + 1;
+        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+            || fpad('LDTB_CONTRACT_ACCRUAL_HISTORY (TILL_DATE_ACCRUAL)', 44) || '|'
+            || fpadl(CASE WHEN v_cnt < 0 THEN '-' ELSE fnum(v_cnt) END, 18) || '|'
+            || fpadl(CASE WHEN v_cnt2 < 0 THEN '-' ELSE fnum(v_cnt2) END, 18) || '|'
+            || fpadl(famt(v_tot), 28) || '|'
+            || fpad(CASE WHEN v_cnt < 0 THEN 'table not readable'
+                         WHEN v_cnt = 0 THEN 'consistent, nothing there'
+                         ELSE 'DISAGREEMENT to explain' END, 30) || '|');
+
+        BEGIN
+            SELECT COUNT(DISTINCT t.contract_ref_no), COUNT(*),
+                   NVL(SUM(NVL(t.till_date_accrual, 0)), 0)
+              INTO v_cnt, v_cnt2, v_tot
+              FROM ldtb_contract_iccf_details t
+             WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = t.contract_ref_no
+                              AND c.module = k_mod
+                              AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                              AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                               WHERE h.trn_ref_no = c.contract_ref_no
+                                                 AND h.module = k_mod));
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1; v_cnt2 := -1; v_tot := 0;
+        END;
+        v_row := v_row + 1;
+        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+            || fpad('LDTB_CONTRACT_ICCF_DETAILS (TILL_DATE_ACCRUAL)', 44) || '|'
+            || fpadl(CASE WHEN v_cnt < 0 THEN '-' ELSE fnum(v_cnt) END, 18) || '|'
+            || fpadl(CASE WHEN v_cnt2 < 0 THEN '-' ELSE fnum(v_cnt2) END, 18) || '|'
+            || fpadl(famt(v_tot), 28) || '|'
+            || fpad(CASE WHEN v_cnt < 0 THEN 'table not readable'
+                         WHEN v_cnt = 0 THEN 'consistent, nothing there'
+                         ELSE 'DISAGREEMENT to explain' END, 30) || '|');
+
+        BEGIN
+            SELECT COUNT(DISTINCT t.contract_ref_no), COUNT(*),
+                   NVL(SUM(NVL(t.amount, 0)), 0)
+              INTO v_cnt, v_cnt2, v_tot
+              FROM ldtb_contract_schedules t
+             WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = t.contract_ref_no
+                              AND c.module = k_mod
+                              AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                              AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                               WHERE h.trn_ref_no = c.contract_ref_no
+                                                 AND h.module = k_mod));
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1; v_cnt2 := -1; v_tot := 0;
+        END;
+        v_row := v_row + 1;
+        po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+            || fpad('LDTB_CONTRACT_SCHEDULES (AMOUNT)', 44) || '|'
+            || fpadl(CASE WHEN v_cnt < 0 THEN '-' ELSE fnum(v_cnt) END, 18) || '|'
+            || fpadl(CASE WHEN v_cnt2 < 0 THEN '-' ELSE fnum(v_cnt2) END, 18) || '|'
+            || fpadl(famt(v_tot), 28) || '|'
+            || fpad(CASE WHEN v_cnt < 0 THEN 'table not readable'
+                         WHEN v_cnt = 0 THEN 'consistent, nothing there'
+                         ELSE 'DISAGREEMENT to explain' END, 30) || '|');
+        tbl_line('4,44,18,18,28,30');
+        po('  A schedule with no accounting is a deal the system planned and never');
+        po('  booked. An accrual or a balance with no accounting is worse: a figure');
+        po('  that feeds management reporting and that the general ledger does not');
+        po('  carry.');
+
+        -- ---------------------------------------------------------
+        print_sub('1.17 Every contract concerned, named');
+        po('  The exhaustive list, largest nominal first, capped at ' || fnum(k_top_all) || ' lines. EXIT');
+        po('  reads NO ENTRY for all of them, which is the point: there is no');
+        po('  accounting event to date, so there is no holding period to measure.');
+        po('  The last column carries CONTRACT_STATUS, the version number, and the');
+        po('  mention OTHER MOD when the reference does carry entries under another');
+        po('  module.');
+        SELECT COUNT(*) INTO v_cnt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod);
+        IF v_cnt = 0 THEN
+            po('');
+            po('  Not one contract of the deal master is missing from the accounts.');
+        ELSE
+            sec_head('STATUS / VERSION');
+            v_row := 0;
+            FOR r IN (SELECT * FROM (
+                        SELECT c.contract_ref_no ref, TRIM(c.product) product,
+                               (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                                 WHERE x.customer_no = c.counterparty) issuer,
+                               c.lcy_amount nom, c.main_comp_rate rate,
+                               c.booking_date bd, c.value_date vd, c.maturity_date md,
+                               NVL(TRIM(c.contract_status), '-') st, c.version_no ver,
+                               (SELECT COUNT(*) FROM actb_history h
+                                 WHERE h.trn_ref_no = c.contract_ref_no) nb_any
+                          FROM ldtb_contract_master c
+                         WHERE c.module = k_mod
+                           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                           AND c.version_no = (SELECT MAX(v.version_no)
+                                                 FROM ldtb_contract_master v
+                                                WHERE v.contract_ref_no = c.contract_ref_no)
+                           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                                            WHERE h.trn_ref_no = c.contract_ref_no
+                                              AND h.module = k_mod)
+                         ORDER BY c.lcy_amount DESC, c.contract_ref_no
+                      ) WHERE ROWNUM <= k_top_all) LOOP
+                v_row := v_row + 1;
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md,
+                        r.st || ' v' || fnum(r.ver)
+                        || CASE WHEN r.nb_any > 0 THEN ' OTHER MOD' ELSE '' END);
+            END LOOP;
+            sec_foot;
+            IF v_cnt > k_top_all THEN
+                po('  ' || fnum(v_cnt - k_top_all) || ' further contracts are not printed.'
+                   || ' Raise the cap in the parameter block to list them all.');
+            END IF;
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERRUPTED : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 1 QUATER. WALKTHROUGH OF THE DEALS THAT MATTER MOST
+    -- =========================================================
+    print_section('1 QUATER. WALKTHROUGH OF THE DEALS THAT MATTER MOST');
     BEGIN
         po('  Two populations are walked through end to end, contract by contract:');
         po('  the deals above ' || fmio(k_mt_large) || ' by nominal, and the deals carrying a rate at');
@@ -1500,7 +1898,7 @@ BEGIN
                  fnum(v_cnt2) || '   ' || fpct(v_cnt2, v_nb_ctr));
         print_kv('Their cumulative nominal', fmio(v_mt2) || '   ' || fpct(v_mt2, v_mt_ctr));
 
-        print_sub('1.13 Every deal at or above ' || fmio(k_mt_large));
+        print_sub('1.18 Every deal at or above ' || fmio(k_mt_large));
         IF v_cnt = 0 THEN
             po('  No deal reaches that threshold.');
         END IF;
@@ -1516,9 +1914,9 @@ BEGIN
             walk_contract(c.ref, 'LARGE DEAL, ' || fmio(c.nom) || ' at ' || ftx(c.rate));
         END LOOP;
 
-        print_sub('1.14 Every deal at or above ' || ftx(k_rate_high)
+        print_sub('1.19 Every deal at or above ' || ftx(k_rate_high)
                   || ', below ' || fmio(k_mt_large));
-        po('  Deals above both thresholds have already been walked through in 1.13');
+        po('  Deals above both thresholds have already been walked through in 1.18');
         po('  and are not repeated here.');
         IF v_cnt2 = 0 THEN
             po('  No deal reaches that rate outside the large deals.');
@@ -2611,7 +3009,10 @@ BEGIN
         po('                   without entries exists in the front office and nowhere in the');
         po('                   accounts: the position is invisible to the balance sheet.');
         p_how('contracts of the last version, in scope and on the four products,');
-        po('                   with no matching TRN_REF_NO in ACTB_HISTORY.');
+        po('                   with no matching TRN_REF_NO in ACTB_HISTORY. Sections 1.13 to');
+        po('                   1.17 analyse this population in full: whether the accounting went');
+        po('                   to another module, what the management tables still carry for');
+        po('                   them, and the name of every contract concerned.');
         SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
           FROM ldtb_contract_master c
          WHERE c.module = k_mod
@@ -5498,6 +5899,17 @@ BEGIN
         print_kv('Cumulative nominal',          famt(v_mt_ctr) || ' XAF (' || fmio(v_mt_ctr) || ')');
         print_kv('Last accounting entry',       fdt(v_d_last));
         print_kv('Last accrual entry',          fdt(v_d_accr));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NOT EXISTS (SELECT 1 FROM actb_history h
+                            WHERE h.trn_ref_no = c.contract_ref_no
+                              AND h.module = k_mod);
+        print_kv('Contracts with no accounting entry (sections 1.13 to 1.17)',
+                 fnum(v_cnt) || '   nominal ' || fmio(v_mt));
 
         print_sub('12.6 Limitations of the review');
         po('  1. The controls read the data recorded in FLEXCUBE. They do not');
@@ -5531,7 +5943,12 @@ BEGIN
         po('     accrual entry of the module, ' || fdt(v_d_accr) || '. Beyond that date the absence');
         po('     of an accrual is the module having stopped, not a gap in the');
         po('     series, and it is reported as such.');
-        po('  8. Operations are attached to the LAST VERSION of their contract.');
+        po('  8. The contracts that produced no accounting entry (sections 1.13 to');
+        po('     1.17) are outside the reach of every control of this report: there');
+        po('     is nothing to test on a deal that generated nothing. They are');
+        po('     counted and named there, and EXT-03 carries the verdict, but no');
+        po('     other control can conclude on them.');
+        po('  9. Operations are attached to the LAST VERSION of their contract.');
         po('     Amendments are detected by REV-05 but earlier versions are not');
         po('     replayed line by line.');
 

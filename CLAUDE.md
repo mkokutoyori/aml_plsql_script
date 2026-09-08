@@ -64,6 +64,30 @@ what yield realised), not a finding. What *is* a finding is an accrual that
 kept running after the sale, income booked for a period the bank did not hold
 the security, or a balance left behind on the balance sheet.
 
+## Contracts with no entry in ACTB_HISTORY
+
+A contract of `LDTB_CONTRACT_MASTER` with **no row at all** in `ACTB_HISTORY`
+has no life in the accounts: the balance sheet has never carried it. Because
+every control is anchored on the entries, these contracts fall silently
+outside all of them — a control cannot conclude on a deal that produced
+nothing. They must therefore be counted, explained and **named** in their own
+right (`audit_securities.sql` sections 1.13 to 1.17; EXT-03 carries the
+verdict, EXT-04 is the mirror case of an entry with no contract).
+
+Things worth establishing about that population, in order: whether entries
+exist under **another module** (the accounting exists, the audit scope is too
+narrow); the `CONTRACT_STATUS` / `USER_DEFINED_STATUS` and version count (a
+cancelled or unauthorised deal legitimately produces nothing); whether the
+maturity is still ahead (an invisible live position, the worst case); and what
+`LDTB_CONTRACT_LIQ`, `LDTB_CONTRACT_BALANCE`,
+`LDTB_CONTRACT_ACCRUAL_HISTORY`, `LDTB_CONTRACT_ICCF_DETAILS` and
+`LDTB_CONTRACT_SCHEDULES` still carry for them — a management figure with no
+accounting behind it is a disagreement, and the entries win.
+
+`sec_row` prints `NO ENTRY` in the EXIT column for these contracts and leaves
+the holding period blank. Never let it show `HELD`: that would credit the bank
+with a position the general ledger has never carried.
+
 ## Reading ACTB_HISTORY correctly
 
 - **Key on `AC_NO`, not on `AC_NATURAL_GL`.** The natural GL is often empty,

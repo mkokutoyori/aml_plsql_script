@@ -32,7 +32,8 @@
 --   PART 0  - scope, parameters, chart of accounts, legend
 --   PART 1  - THE BANK'S SECURITIES PORTFOLIO
 --             1.1 to 1.7   the portfolio as the deals describe it
---             1.8 to 1.12  the portfolio as the accounting shows it
+--             1.8 to 1.12  the portfolio as the accounting shows it, and the
+--                          reconciliation of the two, live book then matured book
 --             1.13, 1.14   walkthrough of the large deals and the high rates
 --   PART 2  - SECURITIES LIFE CYCLE      LC-01 to LC-06, LIF-01 to LIF-07
 --   PART 3  - EXTRACTION INTEGRITY       EXT-01 to EXT-04
@@ -1174,12 +1175,15 @@ BEGIN
         END LOOP;
         tbl_line('4,14,18,26,18,26,26');
 
-        print_sub('1.12 The portfolio reconciled: deals against entries');
-        po('  Per product, the nominal of the live contracts as the deal master');
-        po('  states it, against the signed balance of the security accounts as');
-        po('  ACTB_HISTORY carries it. A gap means the balance sheet does not hold');
-        po('  the portfolio the front office believes it holds. THE ENTRIES ARE');
-        po('  RIGHT: the gap is a finding, quantified again in CUT-03 and LIF-06.');
+        print_sub('1.12 a. Live contracts: what the deals say against what the accounts hold');
+        po('  Per product, the nominal of the contracts not yet matured as the deal');
+        po('  master states it, against the balance the security account carries for');
+        po('  those same contracts. The two should be the same number.');
+        po('');
+        po('  A gap here is a LIVE position that the accounts do not carry properly:');
+        po('  either the bank holds a security the balance sheet ignores, or the');
+        po('  balance sheet holds more than the front office bought. THE ENTRIES ARE');
+        po('  RIGHT; the contracts behind the gap are named in LIF-06.');
         tbl_head('4,12,20,28,28,26,16',
                  'N#|PRODUCT|LIVE CONTRACTS|NOMINAL PER THE DEALS|BALANCE PER THE ENTRIES|GAP|READING',
                  '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT|LCY_AMOUNT| | ',
@@ -1206,8 +1210,11 @@ BEGIN
                AND SUBSTR(h.ac_no, 1, 4) = r.cl
                AND EXISTS (SELECT 1 FROM ldtb_contract_master c
                             WHERE c.contract_ref_no = h.trn_ref_no
-                              AND c.version_no = 1
-                              AND TRIM(c.product) = r.prod);
+                              AND c.version_no = (SELECT MAX(v.version_no)
+                                                    FROM ldtb_contract_master v
+                                                   WHERE v.contract_ref_no = c.contract_ref_no)
+                              AND TRIM(c.product) = r.prod
+                              AND c.maturity_date > k_asof);
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
                 || fpadl(fnum(v_cnt), 20) || '|' || fpadl(fmio(v_tot), 28) || '|'
@@ -1217,6 +1224,51 @@ BEGIN
                               ELSE 'ENTRIES LOWER' END, 16) || '|');
         END LOOP;
         tbl_line('4,12,20,28,28,26,16');
+
+        print_sub('1.12 b. Matured contracts: what should have left the balance sheet');
+        po('  A contract that has matured and been redeemed must leave nothing');
+        po('  behind. The balance of its security account must be nil. Anything');
+        po('  still carried here is a position the bank was repaid for and never');
+        po('  took off its books, or one the counterparty has not repaid at all.');
+        po('  The contracts behind it are named in LIF-01 and LIF-07.');
+        tbl_head('4,12,24,30,24',
+                 'N#|PRODUCT|MATURED CONTRACTS|BALANCE STILL CARRIED|READING',
+                 '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| ',
+                 'RLRRR');
+        v_row := 0;
+        FOR r IN (SELECT 1 ord, 'OTAP' prod, k_cl_bond_pl cl FROM DUAL UNION ALL
+                  SELECT 2, 'MTPD', k_cl_bill_pl FROM DUAL UNION ALL
+                  SELECT 3, 'TBTR', k_cl_bill_tr FROM DUAL UNION ALL
+                  SELECT 4, 'BTTR', k_cl_bill_tr FROM DUAL
+                  ORDER BY 1) LOOP
+            SELECT COUNT(*) INTO v_cnt
+              FROM ldtb_contract_master c
+             WHERE c.module = k_mod
+               AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+               AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                    WHERE v.contract_ref_no = c.contract_ref_no)
+               AND c.maturity_date <= k_asof
+               AND TRIM(c.product) = r.prod;
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                           ELSE -NVL(h.lcy_amount, 0) END), 0)
+              INTO v_tot2
+              FROM actb_history h
+             WHERE h.module = k_mod
+               AND SUBSTR(h.ac_no, 1, 4) = r.cl
+               AND EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = h.trn_ref_no
+                              AND c.version_no = (SELECT MAX(v.version_no)
+                                                    FROM ldtb_contract_master v
+                                                   WHERE v.contract_ref_no = c.contract_ref_no)
+                              AND TRIM(c.product) = r.prod
+                              AND c.maturity_date <= k_asof);
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
+                || fpadl(fnum(v_cnt), 24) || '|' || fpadl(fmio(v_tot2), 30) || '|'
+                || fpadl(CASE WHEN ABS(v_tot2) <= k_tol_abs THEN 'NOTHING LEFT'
+                              ELSE 'STILL OPEN' END, 24) || '|');
+        END LOOP;
+        tbl_line('4,12,24,30,24');
 
     EXCEPTION
         WHEN OTHERS THEN

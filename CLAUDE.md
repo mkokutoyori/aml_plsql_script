@@ -88,6 +88,40 @@ accounting behind it is a disagreement, and the entries win.
 the holding period blank. Never let it show `HELD`: that would credit the bank
 with a position the general ledger has never carried.
 
+## Rebuilding the coupon: never assume the day-count basis
+
+A coupon follows from three figures and nothing else: `LCY_AMOUNT`,
+`MAIN_COMP_RATE`, and the number of days held —
+`coupon = nominal x rate / 100 x days / basis`.
+
+`MAIN_COMP_AMOUNT` is the front office's statement of that figure, not proof
+of it. A control that compares the accounting to `MAIN_COMP_AMOUNT` finds the
+books in perfect agreement with a wrong figure whenever the deal itself was
+captured wrong. The CPN family (part 6 BIS of `audit_securities.sql`) closes
+that blind spot: it rebuilds the coupon from principal and rate and tests
+`MAIN_COMP_AMOUNT` itself (CPN-01, which carries INT-02), the accrued coupon
+carried for securities still held (CPN-02), the coupon recognised over the
+holding period for securities out of the book (CPN-03), and the rate the
+accounting implies (CPN-04).
+
+**Never hard-code a single day-count basis.** A control fixed on /360 fires on
+nearly every contract of a portfolio priced on another basis: it describes the
+convention, not an anomaly, and drowns the real findings — the previous French
+script proved this (687/687 lines reconciled once every convention was tested,
+15.9% on /360 alone). Recompute each contract under ACT/360, ACT/365, ACT/366
+and 30/360, retain the convention that reproduces the stated amount, and raise
+an exception only when **none** does. The retained convention then serves every
+downstream test, so the accrued coupon is measured on the deal's own basis
+rather than one the auditor picked. 30/360 uses a different day count from the
+actual-day conventions, so contracts fitted on it whose month count differs
+from the actual count are set aside and reported separately rather than
+compared on the wrong metric.
+
+When a reperformance fails, print what *would* explain the booked figure — the
+implied rate at the stated nominal, and the implied nominal at the stated rate.
+One of the two is usually what was really meant, and it tells the auditor at
+once whether the rate or the principal was captured wrong.
+
 ## Reading ACTB_HISTORY correctly
 
 - **Key on `AC_NO`, not on `AC_NATURAL_GL`.** The natural GL is often empty,

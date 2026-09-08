@@ -43,6 +43,7 @@
 --   PART 4  - DOUBLE ENTRY               DBL-01 to DBL-04
 --   PART 5  - ACCOUNT MAPPING            MAP-01 to MAP-06
 --   PART 6  - INTEREST ACCURACY          INT-01 to INT-07
+--   PART 6B - THE COUPON REPERFORMED     CPN-01 to CPN-04
 --   PART 7  - REVERSALS AND AMENDMENTS   REV-01 to REV-06
 --   PART 8  - CASH RECONCILIATION        CSH-01 to CSH-03
 --   PART 9  - PERIOD END                 CUT-01 to CUT-05
@@ -85,6 +86,8 @@ DECLARE
     -- Recalculation tolerance
     k_tol_abs     NUMBER := 1;           -- absolute tolerance, in XAF
     k_tol_pro     NUMBER := 2;           -- tolerance on a prorated figure, in percent
+    k_tol_cpn     NUMBER := 0.1;         -- tolerance on a recomputed coupon, in percent
+    k_tol_rate    NUMBER := 0.05;        -- tolerance on an implied rate, in rate points
 
     -- Business thresholds
     k_mt_large    NUMBER := 5000000000;  -- large deal walkthrough threshold (5 Bn)
@@ -701,6 +704,8 @@ BEGIN
         print_kv('Absolute tolerance on recalculations', famt(k_tol_abs) || ' XAF');
         print_kv('Tolerance on a figure prorated over the holding period',
                  ftx(k_tol_pro));
+        print_kv('Tolerance on a recomputed coupon',      ftx(k_tol_cpn));
+        print_kv('Tolerance on an implied rate',          ftx(k_tol_rate) || ' of rate');
         print_kv('Large deal walkthrough threshold',     famt(k_mt_large) || ' XAF (' || fmio(k_mt_large) || ')');
         print_kv('High rate walkthrough threshold',      ftx(k_rate_high));
         print_kv('Plausible rate range',                 ftx(k_rate_min) || ' to ' || ftx(k_rate_max));
@@ -3843,14 +3848,24 @@ BEGIN
     print_part('PART 6 : INTEREST ACCURACY');
     -- ########################################################################
     po('');
-    po('  Two of the seven INT controls have already been run in part 2, because');
-    po('  they close the life cycle: INT-01, income over the life against the deal');
-    po('  interest, is carried by LC-04, and INT-04, no accrual outside the life');
-    po('  of the contract, is carried by LC-06. This part carries the five others.');
+    po('  Three of the seven INT controls are run elsewhere, because they belong');
+    po('  with the tests that carry them:');
     po('');
-    po('  The remaining question is whether the interest amount of the deal is');
-    po('  arithmetically right, and whether the accounting recorded it at the');
-    po('  right pace, day by day, with no gap and no overshoot.');
+    po('    INT-01  income over the life against the deal interest, carried by');
+    po('            LC-04 in part 2, which closes the life cycle');
+    po('    INT-04  no accrual outside the life of the contract, carried by LC-06');
+    po('            in part 2, for the same reason');
+    po('    INT-02  the deal interest is arithmetically exact, carried by CPN-01');
+    po('            in part 6 BIS. It used to be tested here on a single hard coded');
+    po('            basis of ' || TO_CHAR(k_day_basis) || ' days, which fires on nearly every contract of a');
+    po('            portfolio that does not use that basis and proves nothing.');
+    po('            CPN-01 recomputes it under the four conventions in use and');
+    po('            reports only the contracts no convention can reproduce.');
+    po('');
+    po('  This part carries the four others. The question left here is whether the');
+    po('  accounting recorded the interest at the right pace, day by day, with no');
+    po('  gap and no overshoot, and whether the rate and the basis of the deals');
+    po('  hold together.');
 
     print_section('6. INT CONTROLS : INTEREST ACCURACY');
     BEGIN
@@ -3859,64 +3874,6 @@ BEGIN
         print_kv('Last accrual entry of the module (ACTB_HISTORY)', fdt(v_d_accr));
         po('  The pace tests are bounded at that date. Beyond it, a missing accrual');
         po('  is not a gap in the series but the module having stopped accruing.');
-
-        -- -----------------------------------------------------
-        p_test('INT-02', 'The deal interest amount is arithmetically exact');
-        p_obj('independent recalculation: nominal times rate times tenor divided');
-        po('                   by ' || TO_CHAR(k_day_basis) || '. A gap reveals a wrong rate, a wrong basis or a wrong');
-        po('                   tenor inside the contract itself, before any accounting is done.');
-        p_how('LCY_AMOUNT times MAIN_COMP_RATE divided by 100, times');
-        po('                   MATURITY_DATE minus VALUE_DATE, divided by ' || TO_CHAR(k_day_basis)
-            || ', against MAIN_COMP_AMOUNT.');
-        SELECT COUNT(*), NVL(SUM(ABS(gap)), 0) INTO v_cnt, v_mt
-          FROM (SELECT c.contract_ref_no,
-                       NVL(c.main_comp_amount, 0)
-                       - ROUND(NVL(c.lcy_amount, 0) * NVL(c.main_comp_rate, 0) / 100
-                               * (c.maturity_date - c.value_date) / k_day_basis, 2) gap
-                  FROM ldtb_contract_master c
-                 WHERE c.module = k_mod
-                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                        WHERE v.contract_ref_no = c.contract_ref_no)
-                   AND NVL(c.main_comp_amount, 0) > 0
-                   AND c.maturity_date > c.value_date)
-         WHERE ABS(gap) > k_tol_abs;
-        p_verdict('INT-02', 'Deal interest different from the nominal times rate times tenor',
-                  v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
-        IF v_cnt > 0 THEN
-            sec_head('DEAL INT. / RECOMPUTED');
-            v_row := 0;
-            FOR r IN (SELECT * FROM (
-                        SELECT c.contract_ref_no ref, c.product, c.counterparty,
-                               (SELECT MAX(x.customer_name1) FROM sttm_customer x
-                                 WHERE x.customer_no = c.counterparty) issuer,
-                               c.lcy_amount, c.main_comp_rate, c.booking_date,
-                               c.value_date, c.maturity_date,
-                               NVL(c.main_comp_amount, 0) deal_int,
-                               ROUND(NVL(c.lcy_amount, 0) * NVL(c.main_comp_rate, 0) / 100
-                                     * (c.maturity_date - c.value_date) / k_day_basis, 2) th
-                          FROM ldtb_contract_master c
-                         WHERE c.module = k_mod
-                           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
-                           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
-                                                WHERE v.contract_ref_no = c.contract_ref_no)
-                           AND NVL(c.main_comp_amount, 0) > 0
-                           AND c.maturity_date > c.value_date
-                           AND ABS(NVL(c.main_comp_amount, 0)
-                                   - ROUND(NVL(c.lcy_amount, 0) * NVL(c.main_comp_rate, 0) / 100
-                                           * (c.maturity_date - c.value_date) / k_day_basis, 2))
-                               > k_tol_abs
-                         ORDER BY ABS(NVL(c.main_comp_amount, 0)
-                                   - ROUND(NVL(c.lcy_amount, 0) * NVL(c.main_comp_rate, 0) / 100
-                                           * (c.maturity_date - c.value_date) / k_day_basis, 2)) DESC
-                      ) WHERE ROWNUM <= k_top) LOOP
-                v_row := v_row + 1;
-                sec_row(v_row, r.ref, r.product, r.issuer, r.lcy_amount, r.main_comp_rate,
-                        r.booking_date, r.value_date, r.maturity_date,
-                        famt(r.deal_int) || ' / ' || famt(r.th));
-            END LOOP;
-            sec_foot;
-        END IF;
 
         -- -----------------------------------------------------
         p_test('INT-03', 'The daily accrual is a whole multiple of the theoretical day');
@@ -4232,6 +4189,1258 @@ BEGIN
             po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
     END;
 
+    -- ########################################################################
+    print_part('PART 6 BIS : THE COUPON, REPERFORMED FROM PRINCIPAL AND RATE');
+    -- ########################################################################
+    po('');
+    po('  Everything the bank earns on a security follows from three figures and');
+    po('  nothing else: the PRINCIPAL it lent, the RATE it was promised, and the');
+    po('  NUMBER OF DAYS it held the paper. This part rebuilds the coupon from');
+    po('  those three, and confronts it with what the contract states and with');
+    po('  what the accounts recorded.');
+    po('');
+    po('    coupon  =  LCY_AMOUNT  x  MAIN_COMP_RATE / 100  x  days / basis');
+    po('');
+    po('  It is deliberately independent of MAIN_COMP_AMOUNT. Everywhere else in');
+    po('  this report that column is taken as the interest of the deal; here it is');
+    po('  the thing being tested. If the interest of the deal is itself wrong, a');
+    po('  control that compares the accounting to it will find the books in');
+    po('  perfect agreement with a wrong figure. That is the blind spot this part');
+    po('  closes.');
+    po('');
+    po('  THE DAY COUNT BASIS IS NOT ASSUMED. A single basis hard coded across the');
+    po('  portfolio makes a control fire on almost every contract and proves');
+    po('  nothing. Each contract is therefore recomputed under the four');
+    po('  conventions in use, and the one that reproduces the stated figure is');
+    po('  retained as the convention of that deal.');
+    po('');
+    po('    ACT/360   actual days, year of 360 days, the CEMAC market usage');
+    po('    ACT/365   actual days, year of 365 days');
+    po('    ACT/366   actual days, year of 366 days, leap year');
+    po('    30/360    months of 30 days, year of 360 days, bond usage');
+    po('');
+    po('  A contract is an exception only when NO convention reproduces the');
+    po('  amount. The convention retained then serves every other test of this');
+    po('  part, so the accrued coupon is measured against the deal own basis and');
+    po('  not against a basis the auditor picked.');
+    po('');
+    po('  MATRIX COVERAGE . CPN-01 also carries INT-02, the arithmetic exactness');
+    po('  of the deal interest, which was previously tested on a single basis in');
+    po('  part 6 and is now tested properly here.');
+
+    print_section('6 BIS. CPN CONTROLS : THE COUPON REPERFORMED');
+    BEGIN
+        SELECT MAX(h.trn_dt) INTO v_d_accr
+          FROM actb_history h WHERE h.module = k_mod AND h.event = 'ACCR';
+        print_kv('Last accrual entry of the module (ACTB_HISTORY)', fdt(v_d_accr));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NVL(c.main_comp_amount, 0) > 0
+           AND NVL(c.lcy_amount, 0) > 0
+           AND NVL(c.main_comp_rate, 0) > 0
+           AND c.maturity_date > c.value_date;
+        print_kv('Contracts a coupon can be recomputed for',
+                 fnum(v_cnt) || '   ' || fpct(v_cnt, v_nb_ctr));
+        print_kv('Their cumulative nominal',
+                 fmio(v_mt) || '   ' || fpct(v_mt, v_mt_ctr));
+        po('  A contract is left out when the nominal, the rate or the deal interest');
+        po('  is nil or absent, or when the maturity does not follow the value date.');
+        po('  Those cases are reported by INT-07 and by STA-01, not here: a coupon');
+        po('  cannot be recomputed from a figure that is missing.');
+
+        -- -----------------------------------------------------
+        p_test('CPN-01 / INT-02', 'The deal interest follows from the principal, the rate'
+               || ' and the tenor');
+        p_obj('MAIN_COMP_AMOUNT is what the front office says the deal will');
+        po('                   earn. It must be exactly the principal times the rate times the');
+        po('                   tenor over the basis. A gap is not an accounting error, it is an');
+        po('                   error in the deal itself, captured before a single entry was');
+        po('                   passed, and every accrual that follows will carry it forward.');
+        p_how('per contract, LCY_AMOUNT times MAIN_COMP_RATE divided by 100,');
+        po('                   times the day count, over the basis, under the four conventions.');
+        po('                   The convention giving the smallest gap is retained. A contract is');
+        po('                   an exception only when even the best convention misses by more');
+        po('                   than ' || ftx(k_tol_cpn) || ' of the amount. Also carries matrix reference INT-02.');
+        WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+        SELECT COUNT(*), NVL(SUM(gbest), 0) INTO v_cnt, v_mt
+          FROM w
+         WHERE gbest > GREATEST(k_tol_abs, k_tol_cpn * deal_int / 100);
+        p_verdict('CPN-01 / INT-02',
+                  'Deal interest no day count convention can reproduce',
+                  v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
+        IF v_cnt > 0 THEN
+            sec_head('STATED / REBUILT');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.bd, w.vd, w.md,
+                           w.deal_int, w.abest, w.conv, w.gbest,
+                           (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                             WHERE x.customer_no = w.cpty) issuer
+                      FROM w
+                     WHERE gbest > GREATEST(k_tol_abs, k_tol_cpn * deal_int / 100)
+                     ORDER BY gbest DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md,
+                        famt(r.deal_int) || ' / ' || famt(r.abest));
+            END LOOP;
+            sec_foot;
+
+            print_sub('CPN-01 a. What figure would explain the amount that was booked');
+            po('     Read the last two columns as questions to put to the front office.');
+            po('     IMPLIED RATE is the rate that would produce MAIN_COMP_AMOUNT on the');
+            po('     stated nominal; IMPLIED NOMINAL is the principal that would produce');
+            po('     it at the stated rate. One of the two is usually the figure that was');
+            po('     really meant, and it says at once whether the rate or the nominal was');
+            po('     captured wrong.');
+            tbl_head('4,24,11,22,14,22,22,10,14,22',
+                     'N#|CONTRACT|PRODUCT|NOMINAL|RATE|DEAL INTEREST|BEST REBUILT|BASIS'
+                     || '|IMPLIED RATE|IMPLIED NOMINAL',
+                     '|CONTRACT_REF_NO|PRODUCT|LCY_AMOUNT|MAIN_COMP_RATE|MAIN_COMP_AMOUNT'
+                     || '| | | | ',
+                     'RLLRRRRLRR');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.deal_int, w.abest,
+                           w.conv, w.gbest, w.basis, w.dbest,
+                           ROUND(deal_int * basis * 100
+                                 / NULLIF(nom * dbest, 0), 4) irate,
+                           ROUND(deal_int * basis * 100
+                                 / NULLIF(rate * dbest, 0), 2) inom
+                      FROM w
+                     WHERE gbest > GREATEST(k_tol_abs, k_tol_cpn * deal_int / 100)
+                     ORDER BY gbest DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
+                    || fpad(r.product, 11) || '|' || fpadl(famt(r.nom), 22) || '|'
+                    || fpadl(ftx(r.rate), 14) || '|' || fpadl(famt(r.deal_int), 22) || '|'
+                    || fpadl(famt(r.abest), 22) || '|' || fpad(r.conv, 10) || '|'
+                    || fpadl(ftx(r.irate), 14) || '|' || fpadl(famt(r.inom), 22) || '|');
+            END LOOP;
+            tbl_line('4,24,11,22,14,22,22,10,14,22');
+        END IF;
+
+        print_sub('CPN-01 b. Which convention the portfolio actually uses');
+        po('     Descriptive. Where one product concentrates on a single convention');
+        po('     and a handful of its deals sit on another, those few are worth a');
+        po('     question even when they reconcile: the same paper should not be');
+        po('     priced on two different bases. INT-06 looks at the same question');
+        po('     from the implied basis; this table looks at it from the fit.');
+        tbl_head('4,12,14,18,26,26,14,22',
+                 'N#|PRODUCT|CONVENTION|CONTRACTS|NOMINAL|DEAL INTEREST|RECONCILED'
+                 || '|LARGEST GAP',
+                 '|PRODUCT| |CONTRACT_REF_NO|LCY_AMOUNT|MAIN_COMP_AMOUNT| | ',
+                 'RLLRRRRR');
+        v_row := 0;
+        FOR r IN (
+            WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+            SELECT product, conv, COUNT(*) nb, SUM(nom) mt, SUM(deal_int) mti,
+                   SUM(CASE WHEN gbest
+                                 <= GREATEST(k_tol_abs, k_tol_cpn * deal_int / 100)
+                            THEN 1 ELSE 0 END) nb_ok,
+                   MAX(gbest) gmax
+              FROM w
+             GROUP BY product, conv
+             ORDER BY SUM(nom) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.product, 12) || '|'
+                || fpad(r.conv, 14) || '|' || fpadl(fnum(r.nb), 18) || '|'
+                || fpadl(fmio(r.mt), 26) || '|' || fpadl(fmio(r.mti), 26) || '|'
+                || fpadl(fnum(r.nb_ok) || ' / ' || fnum(r.nb), 14) || '|'
+                || fpadl(famt(r.gmax), 22) || '|');
+        END LOOP;
+        tbl_line('4,12,14,18,26,26,14,22');
+
+        -- -----------------------------------------------------
+        p_test('CPN-02', 'The accrued coupon carried today follows from principal and rate');
+        p_obj('this is the coupon couru on the balance sheet. For a security the');
+        po('                   bank STILL HOLDS, the balance of the accrued receivable classes '
+                             || k_cl_accr_pl);
+        po('                   and ' || k_cl_accr_tr || ' must equal the principal times the rate times the days');
+        po('                   run since the value date, over the basis of the deal. Too little');
+        po('                   understates both the asset and the income of the period; too much');
+        po('                   is income the bank has not earned yet.');
+        p_how('per contract still held, no PRINCIPAL_LIQD entry, on the post');
+        po('                   counted products (' || k_prod_post || '), expected coupon = LCY_AMOUNT times');
+        po('                   MAIN_COMP_RATE over 100, times the days from VALUE_DATE to the');
+        po('                   earlier of MATURITY_DATE and ' || fdt(v_d_accr) || ', over the basis retained by');
+        po('                   CPN-01. Against the signed balance of the accrued classes read');
+        po('                   from ACTB_HISTORY. Tolerance ' || ftx(k_tol_cpn) || ' of the expected coupon.');
+        po('                   Contracts fitted on 30/360 whose month count differs from the');
+        po('                   actual day count are set aside and counted separately, the two');
+        po('                   day counts not being comparable.');
+        WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+        SELECT COUNT(*), NVL(SUM(ABS(expc - carr)), 0) INTO v_cnt, v_mt
+          FROM (SELECT ROUND(nom * rate / 100
+                             * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
+                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 4)
+                                   IN (k_cl_accr_pl, k_cl_accr_tr)), 0) carr
+                  FROM w
+                 WHERE out_dt IS NULL
+                   AND vd < v_d_accr
+                   AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
+                   AND NOT (conv = '30/360' AND d_30 <> d_act))
+         WHERE ABS(expc - carr) > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100);
+        p_verdict('CPN-02', 'Accrued coupon different from principal times rate times days',
+                  v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
+        IF v_cnt > 0 THEN
+            sec_head('EXPECTED / CARRIED');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.bd, w.vd, w.md,
+                           ROUND(nom * rate / 100
+                                 * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 4)
+                                   IN (k_cl_accr_pl, k_cl_accr_tr)), 0) carr,
+                           (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                             WHERE x.customer_no = w.cpty) issuer
+                      FROM w
+                     WHERE out_dt IS NULL
+                       AND vd < v_d_accr
+                       AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
+                       AND NOT (conv = '30/360' AND d_30 <> d_act)
+                ) WHERE ABS(expc - carr)
+                        > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100)
+                   ORDER BY ABS(expc - carr) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md,
+                        famt(r.expc) || ' / ' || famt(r.carr));
+            END LOOP;
+            sec_foot;
+
+            print_sub('CPN-02 a. The accrued coupon, line by line');
+            po('     DAILY COUPON is the principal times the rate divided by the basis.');
+            po('     Multiply it by DAYS RUN and the expected coupon follows. Comparing');
+            po('     the daily figure with the gap tells you at once whether the');
+            po('     difference is a few missing days or a wrong daily amount.');
+            tbl_head('4,24,11,10,14,20,24,24,22',
+                     'N#|CONTRACT|PRODUCT|BASIS|DAYS RUN|DAILY COUPON|EXPECTED COUPON'
+                     || '|CARRIED IN ACCOUNTS|GAP',
+                     '|CONTRACT_REF_NO|PRODUCT| |days| | |LCY_AMOUNT on ' || k_cl_accr_pl
+                     || '| ',
+                     'RLLRRRRRR');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.conv, w.basis,
+                           TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd) drun,
+                           ROUND(nom * rate / 100 / basis, 2) dcpn,
+                           ROUND(nom * rate / 100
+                                 * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 4)
+                                   IN (k_cl_accr_pl, k_cl_accr_tr)), 0) carr
+                      FROM w
+                     WHERE out_dt IS NULL
+                       AND vd < v_d_accr
+                       AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
+                       AND NOT (conv = '30/360' AND d_30 <> d_act)
+                ) WHERE ABS(expc - carr)
+                        > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100)
+                   ORDER BY ABS(expc - carr) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
+                    || fpad(r.product, 11) || '|' || fpadl(TO_CHAR(r.basis), 10) || '|'
+                    || fpadl(fnum(r.drun), 14) || '|' || fpadl(famt(r.dcpn), 20) || '|'
+                    || fpadl(famt(r.expc), 24) || '|' || fpadl(famt(r.carr), 24) || '|'
+                    || fpadl(famt(r.expc - r.carr), 22) || '|');
+            END LOOP;
+            tbl_line('4,24,11,10,14,20,24,24,22');
+        END IF;
+        WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+        SELECT COUNT(*) INTO v_cnt2
+          FROM w
+         WHERE out_dt IS NULL
+           AND vd < v_d_accr
+           AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
+           AND conv = '30/360' AND d_30 <> d_act;
+        print_kv('Contracts set aside, fitted on 30/360 with a different day count',
+                 fnum(v_cnt2));
+
+        -- -----------------------------------------------------
+        p_test('CPN-03', 'The coupon recognised over the holding period follows from'
+               || ' principal and rate');
+        p_obj('for a security that has LEFT THE BOOK, redeemed at maturity or');
+        po('                   sold before it, the income recognised on class ' || k_cl_income || ' over its whole');
+        po('                   life must equal the principal times the rate times the days the');
+        po('                   bank actually held it, over the basis of the deal. LC-04 asks the');
+        po('                   same question against MAIN_COMP_AMOUNT; this one asks it against');
+        po('                   the principal and the rate, so a deal whose interest figure is');
+        po('                   itself wrong cannot hide behind books that agree with it.');
+        p_how('per contract carrying a PRINCIPAL_LIQD entry, expected coupon =');
+        po('                   LCY_AMOUNT times MAIN_COMP_RATE over 100, times the days from');
+        po('                   VALUE_DATE to that entry, over the basis retained by CPN-01.');
+        po('                   Against the signed income of class ' || k_cl_income || ' read from ACTB_HISTORY.');
+        po('                   Tolerance ' || ftx(k_tol_cpn) || ' of the expected coupon.');
+        WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+        SELECT COUNT(*), NVL(SUM(ABS(expc - inc)), 0) INTO v_cnt, v_mt
+          FROM (SELECT ROUND(nom * rate / 100
+                             * (TRUNC(out_dt) - TRUNC(vd)) / basis, 2) expc,
+                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) inc
+                  FROM w
+                 WHERE out_dt IS NOT NULL
+                   AND NOT (conv = '30/360' AND d_30 <> d_act))
+         WHERE ABS(expc - inc) > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100);
+        p_verdict('CPN-03', 'Coupon recognised different from principal times rate times days',
+                  v_cnt, v_nb_ctr, v_mt, 'HIGH');
+        IF v_cnt > 0 THEN
+            sec_head('EXPECTED / RECOGNISED');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.bd, w.vd, w.md,
+                           ROUND(nom * rate / 100
+                                 * (TRUNC(out_dt) - TRUNC(vd)) / basis, 2) expc,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) inc,
+                           (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                             WHERE x.customer_no = w.cpty) issuer
+                      FROM w
+                     WHERE out_dt IS NOT NULL
+                       AND NOT (conv = '30/360' AND d_30 <> d_act)
+                ) WHERE ABS(expc - inc)
+                        > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100)
+                   ORDER BY ABS(expc - inc) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md,
+                        famt(r.expc) || ' / ' || famt(r.inc));
+            END LOOP;
+            sec_foot;
+        END IF;
+
+        -- -----------------------------------------------------
+        p_test('CPN-04', 'The rate the accounting implies is the rate of the contract');
+        p_obj('the same test read as a rate rather than as an amount, which is');
+        po('                   how a treasurer reads it. Take what the books actually recognised');
+        po('                   on a security that has left the book, bring it back to the');
+        po('                   principal and to a full year, and the result must be');
+        po('                   MAIN_COMP_RATE. A gap of a few points says the paper did not');
+        po('                   yield what it was bought for, and names the deal to explain.');
+        p_how('implied rate = income of class ' || k_cl_income || ' times the basis times 100,');
+        po('                   divided by LCY_AMOUNT times the days held. Against');
+        po('                   MAIN_COMP_RATE, tolerance ' || ftx(k_tol_rate) || ' of rate. Contracts held less');
+        po('                   than one day, or with no income at all, are excluded: a rate');
+        po('                   cannot be implied from nothing and the case belongs to CPN-03.');
+        po('                   The AMOUNT reported in the summary is the rate gap applied to the');
+        po('                   nominal for a full year, that is what a point of rate is worth on');
+        po('                   that principal, not a booked figure.');
+        WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+        SELECT COUNT(*), NVL(SUM(ABS(irate - rate) * nom / 100), 0) INTO v_cnt, v_mt
+          FROM (SELECT w.rate, w.nom,
+                       ROUND(NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) * basis * 100
+                             / NULLIF(nom * (TRUNC(out_dt) - TRUNC(vd)), 0), 4) irate
+                  FROM w
+                 WHERE out_dt IS NOT NULL
+                   AND TRUNC(out_dt) - TRUNC(vd) > 0
+                   AND NOT (conv = '30/360' AND d_30 <> d_act)
+                   AND NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) <> 0)
+         WHERE ABS(irate - rate) > k_tol_rate;
+        p_verdict('CPN-04', 'Rate implied by the accounting away from MAIN_COMP_RATE',
+                  v_cnt, v_nb_ctr, v_mt, 'HIGH');
+        IF v_cnt > 0 THEN
+            sec_head('CONTRACT / IMPLIED RATE');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.bd, w.vd, w.md,
+                           ROUND(NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) * basis * 100
+                                 / NULLIF(nom * (TRUNC(out_dt) - TRUNC(vd)), 0), 4) irate,
+                           (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                             WHERE x.customer_no = w.cpty) issuer
+                      FROM w
+                     WHERE out_dt IS NOT NULL
+                       AND TRUNC(out_dt) - TRUNC(vd) > 0
+                       AND NOT (conv = '30/360' AND d_30 <> d_act)
+                       AND NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) <> 0
+                ) WHERE ABS(irate - rate) > k_tol_rate
+                   ORDER BY ABS(irate - rate) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
+                        r.bd, r.vd, r.md,
+                        ftx(r.rate) || ' / ' || ftx(r.irate));
+            END LOOP;
+            sec_foot;
+
+            print_sub('CPN-04 a. Contract rate against the rate the books imply');
+            tbl_head('4,24,11,22,14,16,24,16,16,18',
+                     'N#|CONTRACT|PRODUCT|NOMINAL|BASIS|DAYS HELD|INCOME RECOGNISED'
+                     || '|CONTRACT RATE|IMPLIED RATE|GAP IN POINTS',
+                     '|CONTRACT_REF_NO|PRODUCT|LCY_AMOUNT| |days|LCY_AMOUNT on '
+                     || k_cl_income || '|MAIN_COMP_RATE| | ',
+                     'RLLRRRRRRR');
+            v_row := 0;
+            FOR r IN (
+                WITH b AS (
+                SELECT c.contract_ref_no ref, TRIM(c.product) product, c.counterparty cpty,
+                       NVL(c.lcy_amount, 0) nom, NVL(c.main_comp_rate, 0) rate,
+                       c.booking_date bd, c.value_date vd, c.maturity_date md,
+                       NVL(c.main_comp_amount, 0) deal_int,
+                       TRUNC(c.maturity_date) - TRUNC(c.value_date) d_act,
+                       360 * (EXTRACT(YEAR FROM c.maturity_date)
+                              - EXTRACT(YEAR FROM c.value_date))
+                       + 30 * (EXTRACT(MONTH FROM c.maturity_date)
+                               - EXTRACT(MONTH FROM c.value_date))
+                       + (LEAST(EXTRACT(DAY FROM c.maturity_date), 30)
+                          - LEAST(EXTRACT(DAY FROM c.value_date), 30)) d_30,
+                       (SELECT MIN(h.trn_dt) FROM actb_history h
+                         WHERE h.trn_ref_no = c.contract_ref_no
+                           AND h.module = k_mod
+                           AND h.amount_tag = 'PRINCIPAL_LIQD'
+                           AND NVL(h.lcy_amount, 0) > 0) out_dt
+                  FROM ldtb_contract_master c
+                 WHERE c.module = k_mod
+                   AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                   AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                        WHERE v.contract_ref_no = c.contract_ref_no)
+                   AND NVL(c.main_comp_amount, 0) > 0
+                   AND NVL(c.lcy_amount, 0) > 0
+                   AND NVL(c.main_comp_rate, 0) > 0
+                   AND c.maturity_date > c.value_date
+            ), a AS (
+                SELECT b.*,
+                       ROUND(nom * rate / 100 * d_act / 360, 2) a360,
+                       ROUND(nom * rate / 100 * d_act / 365, 2) a365,
+                       ROUND(nom * rate / 100 * d_act / 366, 2) a366,
+                       ROUND(nom * rate / 100 * d_30  / 360, 2) a30
+                  FROM b
+            ), q AS (
+                SELECT a.*,
+                       ABS(deal_int - a360) g360, ABS(deal_int - a365) g365,
+                       ABS(deal_int - a366) g366, ABS(deal_int - a30)  g30
+                  FROM a
+            ), w AS (
+                SELECT q.*,
+                       LEAST(g360, g365, g366, g30) gbest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 'ACT/360'
+                            WHEN g365 <= LEAST(g366, g30)       THEN 'ACT/365'
+                            WHEN g366 <= g30                    THEN 'ACT/366'
+                            ELSE '30/360' END conv,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN a360
+                            WHEN g365 <= LEAST(g366, g30)       THEN a365
+                            WHEN g366 <= g30                    THEN a366
+                            ELSE a30 END abest,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN 360
+                            WHEN g365 <= LEAST(g366, g30)       THEN 365
+                            WHEN g366 <= g30                    THEN 366
+                            ELSE 360 END basis,
+                       CASE WHEN g360 <= LEAST(g365, g366, g30) THEN d_act
+                            WHEN g365 <= LEAST(g366, g30)       THEN d_act
+                            WHEN g366 <= g30                    THEN d_act
+                            ELSE d_30 END dbest
+                  FROM q
+            )
+                SELECT * FROM (
+                SELECT * FROM (
+                    SELECT w.ref, w.product, w.nom, w.rate, w.basis,
+                           TRUNC(out_dt) - TRUNC(vd) dheld,
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) inc,
+                           ROUND(NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) * basis * 100
+                                 / NULLIF(nom * (TRUNC(out_dt) - TRUNC(vd)), 0), 4) irate
+                      FROM w
+                     WHERE out_dt IS NOT NULL
+                       AND TRUNC(out_dt) - TRUNC(vd) > 0
+                       AND NOT (conv = '30/360' AND d_30 <> d_act)
+                       AND NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                       ELSE -NVL(h.lcy_amount, 0) END)
+                              FROM actb_history h
+                             WHERE h.trn_ref_no = w.ref
+                               AND h.module = k_mod
+                               AND SUBSTR(h.ac_no, 1, 3) = k_cl_income), 0) <> 0
+                ) WHERE ABS(irate - rate) > k_tol_rate
+                   ORDER BY ABS(irate - rate) DESC
+                ) WHERE ROWNUM <= k_top) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
+                    || fpad(r.product, 11) || '|' || fpadl(famt(r.nom), 22) || '|'
+                    || fpadl(TO_CHAR(r.basis), 14) || '|' || fpadl(fnum(r.dheld), 16) || '|'
+                    || fpadl(famt(r.inc), 24) || '|' || fpadl(ftx(r.rate), 16) || '|'
+                    || fpadl(ftx(r.irate), 16) || '|'
+                    || fpadl(ftx(r.irate - r.rate), 18) || '|');
+            END LOOP;
+            tbl_line('4,24,11,22,14,16,24,16,16,18');
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERRUPTED : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
     -- ########################################################################
     print_part('PART 7 : REVERSALS, CANCELLATIONS AND AMENDMENTS');
     -- ########################################################################
@@ -5846,6 +7055,13 @@ BEGIN
         po('  audit framework. Where two references test the same object, one test');
         po('  carries both codes and runs once, so nothing is counted twice.');
         po('');
+        po('  Four controls have been added beyond the matrix, the CPN family of');
+        po('  part 6 BIS. They rebuild the coupon from the principal, the rate and');
+        po('  the days held, under every day count convention, instead of taking');
+        po('  MAIN_COMP_AMOUNT as given. Nothing in the original matrix challenged');
+        po('  that column, so a deal whose interest was captured wrong would have');
+        po('  passed every test with books that agreed with the wrong figure.');
+        po('');
         tbl_head('4,10,52,10,18,22',
                  'N#|FAMILY|SCOPE OF THE FAMILY|COUNT|PART|CLOSED IN THE DATABASE',
                  '| | | | | ',
@@ -5863,16 +7079,18 @@ BEGIN
                 SELECT 5, 'MAP', 'Account mapping against the expected scheme',
                        '6', '5', 'yes' FROM DUAL UNION ALL
                 SELECT 6, 'INT', 'Interest accuracy and pace',
-                       '7', '2 and 6', 'yes' FROM DUAL UNION ALL
-                SELECT 7, 'REV', 'Reversals, cancellations and amendments',
+                       '7', '2, 6 and 6 BIS', 'yes' FROM DUAL UNION ALL
+                SELECT 7, 'CPN', 'The coupon rebuilt from principal, rate and days',
+                       '4 added', '6 BIS', 'yes' FROM DUAL UNION ALL
+                SELECT 8, 'REV', 'Reversals, cancellations and amendments',
                        '6', '2 and 7', 'yes' FROM DUAL UNION ALL
-                SELECT 8, 'CSH', 'Cash reconciliation',
+                SELECT 9, 'CSH', 'Cash reconciliation',
                        '3', '8', 'partly, BEAC statement needed' FROM DUAL UNION ALL
-                SELECT 9, 'CUT', 'Period end and justification of the balances',
+                SELECT 10, 'CUT', 'Period end and justification of the balances',
                        '5', '9', 'partly, trial balance needed' FROM DUAL UNION ALL
-                SELECT 10, 'CLS', 'Classification and valuation',
+                SELECT 11, 'CLS', 'Classification and valuation',
                        '3', '10', 'partly, accounting policy needed' FROM DUAL UNION ALL
-                SELECT 11, 'STA', 'Static data, duplicates and limits',
+                SELECT 12, 'STA', 'Static data, duplicates and limits',
                        '5', '11', 'yes, ALM limit to be set' FROM DUAL
             ) ORDER BY n
         ) LOOP
@@ -5886,10 +7104,11 @@ BEGIN
         po('    LC-01 / LIF-02   security account nil after redemption');
         po('    LC-03 / LIF-03   accrued receivable cleared after collection');
         po('    LC-02 / LIF-04   deferred income released at maturity');
-        po('  and three more carry a second reference on their own:');
-        po('    LC-04 also covers INT-01, income over the life against the deal');
-        po('    LC-06 also covers INT-04, no accrual outside the life');
-        po('    LC-05 also covers REV-01, negative entries matched to their original');
+        po('  and four more carry a second reference on their own:');
+        po('    LC-04  also covers INT-01, income over the life against the deal');
+        po('    LC-06  also covers INT-04, no accrual outside the life');
+        po('    LC-05  also covers REV-01, negative entries matched to their original');
+        po('    CPN-01 also covers INT-02, the deal interest is arithmetically exact');
 
         print_sub('12.5 Scope reviewed');
         print_kv('Module audited',              k_mod);
@@ -5948,7 +7167,13 @@ BEGIN
         po('     is nothing to test on a deal that generated nothing. They are');
         po('     counted and named there, and EXT-03 carries the verdict, but no');
         po('     other control can conclude on them.');
-        po('  9. Operations are attached to the LAST VERSION of their contract.');
+        po('  9. The CPN controls of part 6 BIS retain, for each contract, the day');
+        po('     count convention that reproduces MAIN_COMP_AMOUNT. That is a fit,');
+        po('     not a declaration: where the contract file states the convention,');
+        po('     the two must be compared before concluding. Contracts fitted on');
+        po('     30/360 whose month count differs from the actual day count are set');
+        po('     aside by CPN-02 to CPN-04 and counted separately.');
+        po(' 10. Operations are attached to the LAST VERSION of their contract.');
         po('     Amendments are detected by REV-05 but earlier versions are not');
         po('     replayed line by line.');
 

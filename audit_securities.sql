@@ -30,7 +30,10 @@
 --
 -- REPORT LAYOUT
 --   PART 0  - scope, parameters, chart of accounts, legend
---   PART 1  - THE BANK'S SECURITIES PORTFOLIO                 (to be added)
+--   PART 1  - THE BANK'S SECURITIES PORTFOLIO
+--             1.1 to 1.7   the portfolio as the deals describe it
+--             1.8 to 1.12  the portfolio as the accounting shows it
+--             1.13, 1.14   walkthrough of the large deals and the high rates
 --   PART 2  - SECURITIES LIFE CYCLE      LC-01 to LC-06, LIF-01 to LIF-07
 --   PART 3  - EXTRACTION INTEGRITY       EXT-01 to EXT-04
 --   PART 4  - DOUBLE ENTRY               DBL-01 to DBL-04
@@ -443,6 +446,172 @@ DECLARE
         tbl_line(k_sec_w);
     END;
 
+    -- ========================================================================
+    -- THE CONTRACT WALKTHROUGH
+    -- Prints one contract end to end: its terms as the deal master states
+    -- them, then every accounting entry it produced, then the position it
+    -- leaves on the balance sheet. Daily accruals are summarised into one
+    -- line per tag, direction and account, otherwise a five year bond would
+    -- print two thousand lines and hide the four that matter.
+    -- ========================================================================
+    PROCEDURE walk_contract(p_ref VARCHAR2, p_head VARCHAR2 DEFAULT NULL) IS
+        v_w     VARCHAR2(80) := '4,26,10,20,6,22,8,32,24,10';
+        v_n     NUMBER := 0;
+        v_bsec  NUMBER := 0;
+        v_bacc  NUMBER := 0;
+        v_bdef  NUMBER := 0;
+        v_binc  NUMBER := 0;
+        v_bcash NUMBER := 0;
+        v_nliq  NUMBER := 0;
+        v_nent  NUMBER := 0;
+    BEGIN
+        po('');
+        po('  ' || v_sub);
+        po('  CONTRACT ' || p_ref || CASE WHEN p_head IS NULL THEN ''
+                                          ELSE '   -   ' || p_head END);
+        po('  ' || v_sub);
+
+        -- Terms of the deal, last version
+        BEGIN
+            FOR d IN (SELECT c.product, c.counterparty, c.lcy_amount nom, c.main_comp_rate rate,
+                             c.main_comp_amount deal_int, c.main_comp comp,
+                             c.booking_date bd, c.value_date vd, c.maturity_date md,
+                             TRIM(c.contract_status) st, c.version_no ver,
+                             (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                               WHERE x.customer_no = c.counterparty) issuer,
+                             (SELECT MAX(x.customer_category) FROM sttm_customer x
+                               WHERE x.customer_no = c.counterparty) cat,
+                             (SELECT MAX(x.country) FROM sttm_customer x
+                               WHERE x.customer_no = c.counterparty) ctry
+                        FROM ldtb_contract_master c
+                       WHERE c.contract_ref_no = p_ref
+                         AND c.version_no = (SELECT MAX(v.version_no)
+                                               FROM ldtb_contract_master v
+                                              WHERE v.contract_ref_no = c.contract_ref_no)) LOOP
+                print_kv('    Issuer (COUNTERPARTY / CUSTOMER_NAME1)',
+                         d.counterparty || '   ' || d.issuer
+                         || '   [' || NVL(d.cat, '-') || ' / ' || NVL(d.ctry, '-') || ']');
+                print_kv('    Product (PRODUCT)',                d.product);
+                print_kv('    Nominal (LCY_AMOUNT)',             famt(d.nom) || ' XAF');
+                print_kv('    Rate (MAIN_COMP_RATE)',            ftx(d.rate));
+                print_kv('    Deal interest (MAIN_COMP_AMOUNT)', famt(d.deal_int) || ' XAF'
+                         || '   component ' || NVL(d.comp, '-'));
+                print_kv('    Booked (BOOKING_DATE)',            fdt(d.bd));
+                print_kv('    Value to maturity (VALUE_DATE, MATURITY_DATE)',
+                         fdt(d.vd) || ' to ' || fdt(d.md)
+                         || '   (' || fnum(d.md - d.vd) || ' days)');
+                print_kv('    Status (CONTRACT_STATUS), version (VERSION_NO)',
+                         NVL(d.st, '-') || '   version ' || fnum(d.ver));
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! terms not readable : ' || SQLERRM);
+        END;
+
+        -- Accounting entries, the truth of the life cycle
+        po('');
+        po('    ACCOUNTING ENTRIES (ACTB_HISTORY), daily accruals summarised');
+        tbl_head(v_w,
+                 'N#|DATE|EVENT|AMOUNT TAG|D/C|ACCOUNT|CLASS|ACCOUNT NAME|AMOUNT|LINES',
+                 '|TRN_DT|EVENT|AMOUNT_TAG|DRCR_IND|AC_NO| |AC_GL_DESC|LCY_AMOUNT| ',
+                 'RLLLLLLLRR');
+        BEGIN
+            FOR r IN (
+                SELECT dt, event, amount_tag, drcr_ind, ac_no, lib, mt, nb, ord FROM (
+                    SELECT TO_CHAR(h.trn_dt, 'DD/MM/YYYY') dt, h.event, h.amount_tag,
+                           h.drcr_ind, h.ac_no, s.lib, NVL(h.lcy_amount, 0) mt, 1 nb,
+                           h.trn_dt ord
+                      FROM actb_history h
+                      LEFT JOIN (SELECT ac_gl_no, MAX(ac_gl_desc) lib
+                                   FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                     WHERE h.trn_ref_no = p_ref
+                       AND h.module = k_mod
+                       AND h.event <> 'ACCR'
+                    UNION ALL
+                    SELECT TO_CHAR(MIN(h.trn_dt), 'DD/MM/YYYY') || ' to '
+                           || TO_CHAR(MAX(h.trn_dt), 'DD/MM/YYYY'), 'ACCR', h.amount_tag,
+                           h.drcr_ind, h.ac_no, MAX(s.lib), SUM(NVL(h.lcy_amount, 0)),
+                           COUNT(*), MIN(h.trn_dt)
+                      FROM actb_history h
+                      LEFT JOIN (SELECT ac_gl_no, MAX(ac_gl_desc) lib
+                                   FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                     WHERE h.trn_ref_no = p_ref
+                       AND h.module = k_mod
+                       AND h.event = 'ACCR'
+                     GROUP BY h.amount_tag, h.drcr_ind, h.ac_no
+                ) ORDER BY ord, ABS(mt) DESC, drcr_ind DESC
+            ) LOOP
+                v_n := v_n + 1;
+                EXIT WHEN v_n > 60;
+                po('  |' || fpadl(TO_CHAR(v_n), 4) || '|' || fpad(r.dt, 26) || '|'
+                    || fpad(r.event, 10) || '|' || fpad(r.amount_tag, 20) || '|'
+                    || fpad(r.drcr_ind, 6) || '|' || fpad(r.ac_no, 22) || '|'
+                    || fpad(SUBSTR(r.ac_no, 1, 4), 8) || '|' || fpad(r.lib, 32) || '|'
+                    || fpadl(famt(r.mt), 24) || '|' || fpadl(fnum(r.nb), 10) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! entries not readable : ' || SQLERRM);
+        END;
+        tbl_line(v_w);
+        IF v_n = 0 THEN
+            po('    NO ACCOUNTING ENTRY AT ALL for this contract. The deal exists in');
+            po('    the deal master and nowhere in the accounts (see EXT-03).');
+        END IF;
+
+        -- Closing position, read from the entries
+        BEGIN
+            SELECT NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
+                                     IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) IN (k_cl_accr_pl, k_cl_accr_tr)
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) = k_cl_defer
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 3) = k_cl_income
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN h.ac_no = k_ac_nostro OR SUBSTR(h.ac_no, 1, 2) = k_cl_cash
+                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END), 0),
+                   COUNT(*)
+              INTO v_bsec, v_bacc, v_bdef, v_binc, v_bcash, v_nliq, v_nent
+              FROM actb_history h
+             WHERE h.trn_ref_no = p_ref AND h.module = k_mod;
+            po('');
+            po('    POSITION LEFT ON THE BALANCE SHEET, read from the entries');
+            print_kv('    Securities (' || k_cl_bond_pl || ', ' || k_cl_bill_pl || ', '
+                     || k_cl_bill_tr || ')', famt(v_bsec));
+            print_kv('    Accrued receivable (' || k_cl_accr_pl || ', ' || k_cl_accr_tr || ')',
+                     famt(v_bacc));
+            print_kv('    Deferred income (' || k_cl_defer || ')',      famt(v_bdef));
+            print_kv('    Income recognised (' || k_cl_income || ')',   famt(v_binc));
+            print_kv('    Net cash movement (' || k_cl_cash || ')',     famt(v_bcash));
+            print_kv('    Redemption entries, total entries',
+                     fnum(v_nliq) || '   /   ' || fnum(v_nent));
+            po('    READING . ' ||
+               CASE WHEN v_nent = 0 THEN 'no accounting at all'
+                    WHEN v_nliq > 0 AND ABS(v_bsec) <= k_tol_abs
+                         AND ABS(v_bacc) <= k_tol_abs AND ABS(v_bdef) <= k_tol_abs
+                         THEN 'redeemed and fully unwound, nothing left on the balance sheet'
+                    WHEN v_nliq > 0
+                         THEN 'redeemed BUT a balance is still open, see part 2'
+                    WHEN ABS(v_bsec) > k_tol_abs
+                         THEN 'live position of ' || famt(v_bsec) || ' XAF still carried'
+                    ELSE 'no redemption entry and no security balance, to be explained'
+               END);
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! position not readable : ' || SQLERRM);
+        END;
+    END;
+
     -- Row count of a table, tolerant to a missing or unreadable object
     FUNCTION f_count(p_tab VARCHAR2, p_where VARCHAR2 DEFAULT NULL)
         RETURN NUMBER IS
@@ -634,6 +803,507 @@ BEGIN
         po('  status) are printed here and there as a cross check. Where they');
         po('  disagree with the entries, THE ENTRIES WIN, and the disagreement is');
         po('  itself reported as a finding.');
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERRUPTED : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+
+    -- ########################################################################
+    print_part('PART 1 : THE BANK''S SECURITIES PORTFOLIO');
+    -- ########################################################################
+    po('');
+    po('  What the bank holds, from whom, for how long, at what price, and what');
+    po('  the accounts say about it. Three tables answer that question and no');
+    po('  others are needed:');
+    po('');
+    po('    LDTB_CONTRACT_MASTER   the TERMS of each deal: product, nominal, rate,');
+    po('                           dates, counterparty. Last version only.');
+    po('    ACTB_HISTORY           what the deal actually DID: every entry it');
+    po('                           produced, and therefore the real position.');
+    po('    STTM_CUSTOMER          who the issuer is: name, category, country.');
+    po('');
+    po('  The portfolio is presented twice on purpose. First as the deals');
+    po('  describe it, then as the accounting shows it, and the two are');
+    po('  confronted in section 1.12. Where they differ, THE ENTRIES ARE RIGHT.');
+
+    -- =========================================================
+    -- 1. THE PORTFOLIO AS THE DEALS DESCRIBE IT
+    -- =========================================================
+    print_section('1. THE PORTFOLIO AS THE DEALS DESCRIBE IT');
+    BEGIN
+
+        print_sub('1.1 Headline figures');
+        print_kv('Contracts in scope (CONTRACT_REF_NO)',       fnum(v_nb_ctr));
+        print_kv('Cumulative nominal (LCY_AMOUNT)',            famt(v_mt_ctr) || ' XAF');
+        print_kv('Cumulative nominal in millions',             fmio(v_mt_ctr));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND c.maturity_date > k_asof;
+        print_kv('Live at ' || fdt(k_asof) || ' (MATURITY_DATE in the future)',
+                 fnum(v_cnt) || '   ' || fpct(v_cnt, v_nb_ctr));
+        print_kv('Live nominal',                               fmio(v_mt) || '   ' || fpct(v_mt, v_mt_ctr));
+        print_kv('Matured contracts',                          fnum(v_nb_ctr - v_cnt));
+        print_kv('Matured nominal',                            fmio(v_mt_ctr - v_mt));
+        SELECT MIN(c.value_date), MAX(c.maturity_date), ROUND(AVG(c.main_comp_rate), 4),
+               ROUND(AVG(c.maturity_date - c.value_date))
+          INTO v_d_max, v_d_last, v_tot, v_tot2
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no);
+        print_kv('Earliest value date (VALUE_DATE)',           fdt(v_d_max));
+        print_kv('Latest maturity (MATURITY_DATE)',            fdt(v_d_last));
+        print_kv('Average rate (MAIN_COMP_RATE)',              ftx(v_tot));
+        print_kv('Average tenor',                              fnum(v_tot2) || ' days');
+
+        print_sub('1.2 Breakdown by product');
+        tbl_head('4,12,20,26,16,18,18,18,18',
+                 'N#|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|AVERAGE TENOR|LIVE|MATURED',
+                 '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE|MATURITY_DATE minus'
+                 || ' VALUE_DATE| | ',
+                 'RLRRRRRRR');
+        v_row := 0;
+        FOR r IN (SELECT c.product, COUNT(*) nb, SUM(c.lcy_amount) mt,
+                         ROUND(AVG(c.main_comp_rate), 4) rate,
+                         ROUND(AVG(c.maturity_date - c.value_date)) tenor,
+                         SUM(CASE WHEN c.maturity_date > k_asof THEN 1 ELSE 0 END) nb_live,
+                         SUM(CASE WHEN c.maturity_date <= k_asof THEN 1 ELSE 0 END) nb_mat
+                    FROM ldtb_contract_master c
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                   GROUP BY c.product
+                   ORDER BY SUM(c.lcy_amount) DESC) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.product, 12) || '|'
+                || fpadl(fnum(r.nb), 20) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|' || fpadl(ftx(r.rate), 18) || '|'
+                || fpadl(fnum(r.tenor) || ' d', 18) || '|' || fpadl(fnum(r.nb_live), 18) || '|'
+                || fpadl(fnum(r.nb_mat), 18) || '|');
+        END LOOP;
+        tbl_line('4,12,20,26,16,18,18,18,18');
+
+        print_sub('1.3 Breakdown by issuer');
+        po('  The issuers are read from STTM_CUSTOMER through COUNTERPARTY. On a');
+        po('  sovereign portfolio the category is expected to be a government one.');
+        tbl_head('4,16,34,10,10,10,18,26,16,18',
+                 'N#|CIF|ISSUER|TYPE|CATEGORY|COUNTRY|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE',
+                 '|COUNTERPARTY|CUSTOMER_NAME1|CUSTOMER_TYPE|CUSTOMER_CATEGORY|COUNTRY'
+                 || '|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE',
+                 'RLLLLLRRRR');
+        v_row := 0;
+        FOR r IN (SELECT c.counterparty cif,
+                         MAX(x.customer_name1) issuer, MAX(x.customer_type) typ,
+                         MAX(x.customer_category) cat, MAX(x.country) ctry,
+                         COUNT(*) nb, SUM(c.lcy_amount) mt,
+                         ROUND(AVG(c.main_comp_rate), 4) rate
+                    FROM ldtb_contract_master c
+                    LEFT JOIN sttm_customer x ON x.customer_no = c.counterparty
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                   GROUP BY c.counterparty
+                   ORDER BY SUM(c.lcy_amount) DESC) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.cif, 16) || '|'
+                || fpad(r.issuer, 34) || '|' || fpad(r.typ, 10) || '|' || fpad(r.cat, 10) || '|'
+                || fpad(r.ctry, 10) || '|' || fpadl(fnum(r.nb), 18) || '|'
+                || fpadl(fmio(r.mt), 26) || '|' || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|'
+                || fpadl(ftx(r.rate), 18) || '|');
+        END LOOP;
+        tbl_line('4,16,34,10,10,10,18,26,16,18');
+
+        print_sub('1.4 Issuer against product');
+        tbl_head('4,34,12,18,26,16,18,16',
+                 'N#|ISSUER|PRODUCT|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|LIVE',
+                 '|CUSTOMER_NAME1|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE| ',
+                 'RLLRRRRR');
+        v_row := 0;
+        FOR r IN (SELECT MAX(x.customer_name1) issuer, c.product, COUNT(*) nb,
+                         SUM(c.lcy_amount) mt, ROUND(AVG(c.main_comp_rate), 4) rate,
+                         SUM(CASE WHEN c.maturity_date > k_asof THEN 1 ELSE 0 END) nb_live
+                    FROM ldtb_contract_master c
+                    LEFT JOIN sttm_customer x ON x.customer_no = c.counterparty
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                   GROUP BY c.counterparty, c.product
+                   ORDER BY SUM(c.lcy_amount) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.issuer, 34) || '|'
+                || fpad(r.product, 12) || '|' || fpadl(fnum(r.nb), 18) || '|'
+                || fpadl(fmio(r.mt), 26) || '|' || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|'
+                || fpadl(ftx(r.rate), 18) || '|' || fpadl(fnum(r.nb_live), 16) || '|');
+        END LOOP;
+        tbl_line('4,34,12,18,26,16,18,16');
+
+        print_sub('1.5 Maturity schedule of the live book');
+        po('  What remains to be repaid, and when. The band is computed from');
+        po('  MATURITY_DATE against the reporting date ' || fdt(k_asof) || '.');
+        tbl_head('4,30,18,26,16,18,18',
+                 'N#|BAND|CONTRACTS|NOMINAL|SHARE|AVERAGE RATE|FIRST MATURITY',
+                 '|MATURITY_DATE|CONTRACT_REF_NO|LCY_AMOUNT| |MAIN_COMP_RATE|MATURITY_DATE',
+                 'RLRRRRL');
+        v_row := 0;
+        FOR r IN (SELECT band, COUNT(*) nb, SUM(nom) mt, ROUND(AVG(rate), 4) rate,
+                         MIN(md) first_md FROM (
+                    SELECT c.lcy_amount nom, c.main_comp_rate rate, c.maturity_date md,
+                           CASE WHEN c.maturity_date <= ADD_MONTHS(k_asof, 1)  THEN '1. within one month'
+                                WHEN c.maturity_date <= ADD_MONTHS(k_asof, 3)  THEN '2. one to three months'
+                                WHEN c.maturity_date <= ADD_MONTHS(k_asof, 6)  THEN '3. three to six months'
+                                WHEN c.maturity_date <= ADD_MONTHS(k_asof, 12) THEN '4. six to twelve months'
+                                WHEN c.maturity_date <= ADD_MONTHS(k_asof, 36) THEN '5. one to three years'
+                                ELSE                                                '6. beyond three years'
+                           END band
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no)
+                       AND c.maturity_date > k_asof)
+                   GROUP BY band ORDER BY band) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.band, 30) || '|'
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|' || fpadl(ftx(r.rate), 18) || '|'
+                || fpad(fdt(r.first_md), 18) || '|');
+        END LOOP;
+        tbl_line('4,30,18,26,16,18,18');
+
+        print_sub('1.6 Nominal, rate and tenor bands');
+        tbl_head('4,34,18,26,16',
+                 'N#|NOMINAL BAND|CONTRACTS|NOMINAL|SHARE',
+                 '|LCY_AMOUNT|CONTRACT_REF_NO|LCY_AMOUNT| ',
+                 'RLRRR');
+        v_row := 0;
+        FOR r IN (SELECT band, COUNT(*) nb, SUM(nom) mt FROM (
+                    SELECT c.lcy_amount nom,
+                           CASE WHEN c.lcy_amount >= 10000000000 THEN '1. ten billion and above'
+                                WHEN c.lcy_amount >= k_mt_large  THEN '2. five to ten billion'
+                                WHEN c.lcy_amount >= 1000000000  THEN '3. one to five billion'
+                                WHEN c.lcy_amount >= 500000000   THEN '4. half to one billion'
+                                WHEN c.lcy_amount >= 100000000   THEN '5. hundred to five hundred million'
+                                ELSE                                  '6. below one hundred million'
+                           END band
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no))
+                   GROUP BY band ORDER BY band) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.band, 34) || '|'
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|');
+        END LOOP;
+        tbl_line('4,34,18,26,16');
+        po('');
+        tbl_head('4,34,18,26,16',
+                 'N#|RATE BAND|CONTRACTS|NOMINAL|SHARE',
+                 '|MAIN_COMP_RATE|CONTRACT_REF_NO|LCY_AMOUNT| ',
+                 'RLRRR');
+        v_row := 0;
+        FOR r IN (SELECT band, COUNT(*) nb, SUM(nom) mt FROM (
+                    SELECT c.lcy_amount nom,
+                           CASE WHEN c.main_comp_rate IS NULL      THEN '9. rate not populated'
+                                WHEN c.main_comp_rate >= 10        THEN '1. ten percent and above'
+                                WHEN c.main_comp_rate >= k_rate_high THEN '2. eight to ten percent'
+                                WHEN c.main_comp_rate >= 6         THEN '3. six to eight percent'
+                                WHEN c.main_comp_rate >= 4         THEN '4. four to six percent'
+                                WHEN c.main_comp_rate >= 2         THEN '5. two to four percent'
+                                ELSE                                    '6. below two percent'
+                           END band
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no))
+                   GROUP BY band ORDER BY band) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.band, 34) || '|'
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpadl(fpct(r.mt, v_mt_ctr), 16) || '|');
+        END LOOP;
+        tbl_line('4,34,18,26,16');
+
+        print_sub('1.7 The twenty five largest exposures');
+        sec_head('SHARE OF PORTFOLIO');
+        v_row := 0;
+        FOR r IN (SELECT * FROM (
+                    SELECT c.contract_ref_no ref, c.product, c.counterparty,
+                           (SELECT MAX(x.customer_name1) FROM sttm_customer x
+                             WHERE x.customer_no = c.counterparty) issuer,
+                           c.lcy_amount, c.main_comp_rate, c.booking_date,
+                           c.value_date, c.maturity_date
+                      FROM ldtb_contract_master c
+                     WHERE c.module = k_mod
+                       AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                       AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                            WHERE v.contract_ref_no = c.contract_ref_no)
+                     ORDER BY c.lcy_amount DESC, c.contract_ref_no
+                  ) WHERE ROWNUM <= 25) LOOP
+            v_row := v_row + 1;
+            sec_row(v_row, r.ref, r.product, r.issuer, r.lcy_amount, r.main_comp_rate,
+                    r.booking_date, r.value_date, r.maturity_date,
+                    fpct(r.lcy_amount, v_mt_ctr));
+        END LOOP;
+        sec_foot;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERRUPTED : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 1 BIS. THE PORTFOLIO AS THE ACCOUNTING SHOWS IT
+    -- =========================================================
+    print_section('1 BIS. THE PORTFOLIO AS THE ACCOUNTING SHOWS IT');
+    BEGIN
+        po('  The same portfolio, read from ACTB_HISTORY. This is the version that');
+        po('  the balance sheet carries and that the auditor must be able to');
+        po('  justify. The join key is TRN_REF_NO = CONTRACT_REF_NO.');
+
+        print_sub('1.8 Accounting footprint of the module');
+        SELECT COUNT(*), COUNT(DISTINCT h.trn_ref_no), MIN(h.trn_dt), MAX(h.trn_dt)
+          INTO v_cnt, v_cnt2, v_d_max, v_d_last
+          FROM actb_history h WHERE h.module = k_mod;
+        print_kv('Entries of the module (ACTB_HISTORY)',        fnum(v_cnt));
+        print_kv('Distinct references moved (TRN_REF_NO)',      fnum(v_cnt2));
+        print_kv('First entry (TRN_DT)',                        fdt(v_d_max));
+        print_kv('Last entry (TRN_DT)',                         fdt(v_d_last));
+        SELECT COUNT(DISTINCT h.ac_no), COUNT(DISTINCT h.amount_tag), COUNT(DISTINCT h.event)
+          INTO v_cnt, v_cnt2, v_cnt3
+          FROM actb_history h WHERE h.module = k_mod;
+        print_kv('Distinct accounts moved (AC_NO)',             fnum(v_cnt));
+        print_kv('Distinct amount tags (AMOUNT_TAG)',           fnum(v_cnt2));
+        print_kv('Distinct events (EVENT)',                     fnum(v_cnt3));
+
+        print_sub('1.9 Entries by event, tag and direction');
+        tbl_head('4,12,22,8,18,26,16,16',
+                 'N#|EVENT|AMOUNT TAG|D/C|ENTRIES|AMOUNT|FIRST|LAST',
+                 '|EVENT|AMOUNT_TAG|DRCR_IND| |LCY_AMOUNT|TRN_DT|TRN_DT',
+                 'RLLLRRLL');
+        v_row := 0;
+        FOR r IN (SELECT h.event, h.amount_tag, h.drcr_ind, COUNT(*) nb,
+                         SUM(NVL(h.lcy_amount, 0)) mt, MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                    FROM actb_history h
+                   WHERE h.module = k_mod
+                   GROUP BY h.event, h.amount_tag, h.drcr_ind
+                   ORDER BY COUNT(*) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.event, 12) || '|'
+                || fpad(r.amount_tag, 22) || '|' || fpad(r.drcr_ind, 8) || '|'
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.mt), 26) || '|'
+                || fpad(fdt(r.d1), 16) || '|' || fpad(fdt(r.d2), 16) || '|');
+        END LOOP;
+        tbl_line('4,12,22,8,18,26,16,16');
+
+        print_sub('1.10 Accounts moved and the balance they carry');
+        po('  Signed balance = debits minus credits. On an asset account a positive');
+        po('  balance is a position held; on an income account the sign is reversed');
+        po('  and shown as credits minus debits.');
+        tbl_head('4,22,8,40,18,26,26,26,16',
+                 'N#|ACCOUNT|CLASS|ACCOUNT NAME|ENTRIES|TOTAL DEBIT|TOTAL CREDIT|SIGNED BALANCE|CONTRACTS',
+                 '|AC_NO| |AC_GL_DESC| |LCY_AMOUNT|LCY_AMOUNT| |TRN_REF_NO',
+                 'RLLLRRRRR');
+        v_row := 0;
+        FOR r IN (SELECT h.ac_no, MAX(s.lib) lib, COUNT(*) nb,
+                         SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                         SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
+                         COUNT(DISTINCT h.trn_ref_no) nbc
+                    FROM actb_history h
+                    LEFT JOIN (SELECT ac_gl_no, MAX(ac_gl_desc) lib
+                                 FROM sttb_account GROUP BY ac_gl_no) s ON s.ac_gl_no = h.ac_no
+                   WHERE h.module = k_mod
+                   GROUP BY h.ac_no
+                   ORDER BY COUNT(*) DESC) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 22) || '|'
+                || fpad(SUBSTR(r.ac_no, 1, 4), 8) || '|' || fpad(r.lib, 40) || '|'
+                || fpadl(fnum(r.nb), 18) || '|' || fpadl(fmio(r.deb), 26) || '|'
+                || fpadl(fmio(r.cre), 26) || '|'
+                || fpadl(fmio(CASE WHEN SUBSTR(r.ac_no, 1, 3) = k_cl_income
+                                        OR SUBSTR(r.ac_no, 1, 4) = k_cl_defer
+                                   THEN r.cre - r.deb ELSE r.deb - r.cre END), 26) || '|'
+                || fpadl(fnum(r.nbc), 16) || '|');
+        END LOOP;
+        tbl_line('4,22,8,40,18,26,26,26,16');
+
+        print_sub('1.11 Purchases and redemptions, month by month');
+        po('  Read from the PRINCIPAL and PRINCIPAL_LIQD tags on the security');
+        po('  accounts: what entered the book and what left it, as the accounting');
+        po('  records it, not as the deal dates suggest.');
+        tbl_head('4,14,18,26,18,26,26',
+                 'N#|MONTH|PURCHASES|AMOUNT BOUGHT|REDEMPTIONS|AMOUNT REDEEMED|NET MOVEMENT',
+                 '|TRN_DT|TRN_REF_NO|LCY_AMOUNT|TRN_REF_NO|LCY_AMOUNT| ',
+                 'RLRRRRR');
+        v_row := 0;
+        FOR r IN (SELECT * FROM (
+                    SELECT TO_CHAR(h.trn_dt, 'YYYY-MM') mth,
+                           COUNT(DISTINCT CASE WHEN h.amount_tag = 'PRINCIPAL'
+                                               THEN h.trn_ref_no END) nb_buy,
+                           SUM(CASE WHEN h.amount_tag = 'PRINCIPAL' AND h.drcr_ind = 'D'
+                                    THEN NVL(h.lcy_amount, 0) ELSE 0 END) mt_buy,
+                           COUNT(DISTINCT CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
+                                               THEN h.trn_ref_no END) nb_red,
+                           SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' AND h.drcr_ind = 'C'
+                                    THEN NVL(h.lcy_amount, 0) ELSE 0 END) mt_red
+                      FROM actb_history h
+                     WHERE h.module = k_mod
+                       AND h.amount_tag IN ('PRINCIPAL', 'PRINCIPAL_LIQD')
+                       AND SUBSTR(h.ac_no, 1, 4)
+                           IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
+                     GROUP BY TO_CHAR(h.trn_dt, 'YYYY-MM')
+                     ORDER BY 1 DESC
+                  ) WHERE ROWNUM <= k_top) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.mth, 14) || '|'
+                || fpadl(fnum(r.nb_buy), 18) || '|' || fpadl(fmio(r.mt_buy), 26) || '|'
+                || fpadl(fnum(r.nb_red), 18) || '|' || fpadl(fmio(r.mt_red), 26) || '|'
+                || fpadl(fmio(r.mt_buy - r.mt_red), 26) || '|');
+        END LOOP;
+        tbl_line('4,14,18,26,18,26,26');
+
+        print_sub('1.12 The portfolio reconciled: deals against entries');
+        po('  Per product, the nominal of the live contracts as the deal master');
+        po('  states it, against the signed balance of the security accounts as');
+        po('  ACTB_HISTORY carries it. A gap means the balance sheet does not hold');
+        po('  the portfolio the front office believes it holds. THE ENTRIES ARE');
+        po('  RIGHT: the gap is a finding, quantified again in CUT-03 and LIF-06.');
+        tbl_head('4,12,20,28,28,26,16',
+                 'N#|PRODUCT|LIVE CONTRACTS|NOMINAL PER THE DEALS|BALANCE PER THE ENTRIES|GAP|READING',
+                 '|PRODUCT|CONTRACT_REF_NO|LCY_AMOUNT|LCY_AMOUNT| | ',
+                 'RLRRRRR');
+        v_row := 0;
+        FOR r IN (SELECT 1 ord, 'OTAP' prod, k_cl_bond_pl cl FROM DUAL UNION ALL
+                  SELECT 2, 'MTPD', k_cl_bill_pl FROM DUAL UNION ALL
+                  SELECT 3, 'TBTR', k_cl_bill_tr FROM DUAL UNION ALL
+                  SELECT 4, 'BTTR', k_cl_bill_tr FROM DUAL
+                  ORDER BY 1) LOOP
+            SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_tot
+              FROM ldtb_contract_master c
+             WHERE c.module = k_mod
+               AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+               AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                    WHERE v.contract_ref_no = c.contract_ref_no)
+               AND c.maturity_date > k_asof
+               AND TRIM(c.product) = r.prod;
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                           ELSE -NVL(h.lcy_amount, 0) END), 0)
+              INTO v_tot2
+              FROM actb_history h
+             WHERE h.module = k_mod
+               AND SUBSTR(h.ac_no, 1, 4) = r.cl
+               AND EXISTS (SELECT 1 FROM ldtb_contract_master c
+                            WHERE c.contract_ref_no = h.trn_ref_no
+                              AND c.version_no = 1
+                              AND TRIM(c.product) = r.prod);
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
+                || fpadl(fnum(v_cnt), 20) || '|' || fpadl(fmio(v_tot), 28) || '|'
+                || fpadl(fmio(v_tot2), 28) || '|' || fpadl(fmio(v_tot2 - v_tot), 26) || '|'
+                || fpadl(CASE WHEN ABS(v_tot2 - v_tot) <= k_tol_abs THEN 'MATCHES'
+                              WHEN v_tot2 > v_tot THEN 'ENTRIES HIGHER'
+                              ELSE 'ENTRIES LOWER' END, 16) || '|');
+        END LOOP;
+        tbl_line('4,12,20,28,28,26,16');
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERRUPTED : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 1 TER. WALKTHROUGH OF THE DEALS THAT MATTER MOST
+    -- =========================================================
+    print_section('1 TER. WALKTHROUGH OF THE DEALS THAT MATTER MOST');
+    BEGIN
+        po('  Two populations are walked through end to end, contract by contract:');
+        po('  the deals above ' || fmio(k_mt_large) || ' by nominal, and the deals carrying a rate at');
+        po('  or above ' || ftx(k_rate_high) || '. The first are where the money is; the second are');
+        po('  where the pricing is out of the ordinary and has to be explained.');
+        po('');
+        po('  Each walkthrough prints the terms of the deal, then EVERY accounting');
+        po('  entry it produced, then the position it leaves on the balance sheet.');
+        po('  Daily accruals are summarised into one line per tag, direction and');
+        po('  account, otherwise a five year bond would print two thousand lines');
+        po('  and hide the four that matter.');
+
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt, v_mt
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NVL(c.lcy_amount, 0) >= k_mt_large;
+        print_kv('Deals at or above ' || fmio(k_mt_large), fnum(v_cnt)
+                 || '   ' || fpct(v_cnt, v_nb_ctr));
+        print_kv('Their cumulative nominal', fmio(v_mt) || '   ' || fpct(v_mt, v_mt_ctr));
+        SELECT COUNT(*), NVL(SUM(c.lcy_amount), 0) INTO v_cnt2, v_mt2
+          FROM ldtb_contract_master c
+         WHERE c.module = k_mod
+           AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+           AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                WHERE v.contract_ref_no = c.contract_ref_no)
+           AND NVL(c.main_comp_rate, 0) >= k_rate_high
+           AND NVL(c.lcy_amount, 0) < k_mt_large;
+        print_kv('Deals at or above ' || ftx(k_rate_high) || ' not already listed above',
+                 fnum(v_cnt2) || '   ' || fpct(v_cnt2, v_nb_ctr));
+        print_kv('Their cumulative nominal', fmio(v_mt2) || '   ' || fpct(v_mt2, v_mt_ctr));
+
+        print_sub('1.13 Every deal at or above ' || fmio(k_mt_large));
+        IF v_cnt = 0 THEN
+            po('  No deal reaches that threshold.');
+        END IF;
+        FOR c IN (SELECT c.contract_ref_no ref, c.lcy_amount nom, c.main_comp_rate rate,
+                         c.product
+                    FROM ldtb_contract_master c
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                     AND NVL(c.lcy_amount, 0) >= k_mt_large
+                   ORDER BY c.lcy_amount DESC, c.contract_ref_no) LOOP
+            walk_contract(c.ref, 'LARGE DEAL, ' || fmio(c.nom) || ' at ' || ftx(c.rate));
+        END LOOP;
+
+        print_sub('1.14 Every deal at or above ' || ftx(k_rate_high)
+                  || ', below ' || fmio(k_mt_large));
+        po('  Deals above both thresholds have already been walked through in 1.13');
+        po('  and are not repeated here.');
+        IF v_cnt2 = 0 THEN
+            po('  No deal reaches that rate outside the large deals.');
+        END IF;
+        FOR c IN (SELECT c.contract_ref_no ref, c.lcy_amount nom, c.main_comp_rate rate,
+                         c.product
+                    FROM ldtb_contract_master c
+                   WHERE c.module = k_mod
+                     AND c.booking_date BETWEEN k_dt_from AND k_dt_to
+                     AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
+                                          WHERE v.contract_ref_no = c.contract_ref_no)
+                     AND NVL(c.main_comp_rate, 0) >= k_rate_high
+                     AND NVL(c.lcy_amount, 0) < k_mt_large
+                   ORDER BY c.main_comp_rate DESC, c.lcy_amount DESC, c.contract_ref_no) LOOP
+            walk_contract(c.ref, 'HIGH RATE, ' || ftx(c.rate) || ' on ' || fmio(c.nom));
+        END LOOP;
 
     EXCEPTION
         WHEN OTHERS THEN

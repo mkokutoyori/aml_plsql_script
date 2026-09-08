@@ -26,7 +26,10 @@
 --     4. la reevaluation de change (RVTB_ACC_REVAL) ;
 --     5. les soldes en devises (GLTB_GL_BAL.CCY_CODE, ACTB_ACCBAL_HISTORY.ACC_CCY,
 --        STTM_CUST_ACCOUNT.CCY, STTB_ACCOUNT.AC_GL_CCY) ;
---     6. les comptes de correspondants (nostro / vostro) candidats.
+--     6. les comptes de correspondants (nostro / vostro) candidats ;
+--     7. les transferts internationaux (module de transfert de fonds, messagerie
+--        SWIFT, flux entrants et sortants), inclus dans le perimetre a la
+--        demande du commanditaire.
 --
 -- CADRE REGLEMENTAIRE VISE (rappele en section 22)
 --   Reglement n 02/18/CEMAC/UMAC/CM du 21/12/2018, en vigueur le 01/03/2019,
@@ -74,11 +77,13 @@
 --   Partie 2 - sections  6 a 10 : referentiel des devises et des cours
 --   Partie 3 - sections 11 a 16 : empreinte du change dans la comptabilite
 --   Partie 4 - sections 17 a 21 : comptes, clients et position de change
---   Partie 5 - sections 22 a 23 : cadre CEMAC et controles candidats
+--   Partie 5 - sections 22 a 27 : les transferts internationaux
+--   Partie 6 - sections 28 a 29 : cadre CEMAC et controles candidats
 --
 -- DUREE
---   Les parties 3 et 4 lisent integralement ACTB_HISTORY (plusieurs millions de
---   lignes) et ACTB_ACCBAL_HISTORY : prevoir plusieurs minutes d'execution.
+--   Les parties 3, 4 et 5 lisent integralement ACTB_HISTORY (plusieurs millions
+--   de lignes) : prevoir plusieurs minutes d'execution. La partie 5 en fait
+--   plusieurs lectures filtrees sur le module de transfert.
 -- ============================================================================
 
 SET DEFINE OFF
@@ -121,6 +126,14 @@ DECLARE
     k_s_justif NUMBER := 5000000;    -- seuil de justification / domiciliation
     k_s_carte  NUMBER := 1000000;    -- plafond mensuel des paiements a distance
     k_j_rapat  NUMBER := 150;        -- delai de rapatriement des recettes d'export
+
+    -- Module portant les transferts de fonds. La section 23 affiche la
+    -- repartition de toutes les ecritures par module : si les transferts
+    -- internationaux de cette banque sont ailleurs, corriger cette constante.
+    k_mod_ft   VARCHAR2(4) := 'FT';
+    -- Largeur de la bande examinee sous le seuil de justification, pour
+    -- detecter un eventuel fractionnement des operations.
+    k_bande    NUMBER := 0.20;       -- 20 pourcent sous le seuil
 
     -- ---------- Helpers d'affichage ----------
     PROCEDURE po(t VARCHAR2) IS
@@ -391,7 +404,7 @@ DECLARE
 BEGIN
 
     po(v_sep);
-    po('   PARTIE 1/5 : CONTEXTE ET DECOUVERTE DU PERIMETRE DE CHANGE');
+    po('   PARTIE 1/6 : CONTEXTE ET DECOUVERTE DU PERIMETRE DE CHANGE');
     po(v_sep);
 
     -- =========================================================
@@ -755,7 +768,7 @@ BEGIN
     END;
 
     po(v_sep);
-    po('   PARTIE 2/5 : LE REFERENTIEL DES DEVISES ET DES COURS');
+    po('   PARTIE 2/6 : LE REFERENTIEL DES DEVISES ET DES COURS');
     po(v_sep);
 
     -- =========================================================
@@ -1065,7 +1078,7 @@ BEGIN
     END;
 
     po(v_sep);
-    po('   PARTIE 3/5 : L''EMPREINTE DU CHANGE DANS LA COMPTABILITE');
+    po('   PARTIE 3/6 : L''EMPREINTE DU CHANGE DANS LA COMPTABILITE');
     po(v_sep);
     po('  ATTENTION : ACTB_HISTORY est volumineuse. Cette partie peut demander');
     po('  plusieurs minutes d''execution.');
@@ -1451,7 +1464,7 @@ BEGIN
     END;
 
     po(v_sep);
-    po('   PARTIE 4/5 : COMPTES, CLIENTS ET POSITION DE CHANGE');
+    po('   PARTIE 4/6 : COMPTES, CLIENTS ET POSITION DE CHANGE');
     po(v_sep);
 
     -- =========================================================
@@ -1898,13 +1911,668 @@ BEGIN
     END;
 
     po(v_sep);
-    po('   PARTIE 5/5 : CADRE CEMAC ET CONTROLES CANDIDATS');
+    po('   PARTIE 5/6 : LES TRANSFERTS INTERNATIONAUX');
+    po(v_sep);
+    po('  Les transferts avec l''etranger sont inclus dans le perimetre de la revue.');
+    po('  Ils sont le principal vecteur des obligations de domiciliation, de');
+    po('  justification et de rapatriement posees par la reglementation des changes.');
+    po('  Cette partie lit le sous-ensemble des ecritures du module de transfert :');
+    po('  prevoir plusieurs minutes d''execution.');
+
+    -- =========================================================
+    -- 22. DECOUVERTE DU MODULE DES TRANSFERTS ET DE LA MESSAGERIE
+    -- =========================================================
+    print_section('22. DECOUVERTE DU MODULE DES TRANSFERTS ET DE LA MESSAGERIE');
+    BEGIN
+        po('  Le dictionnaire fourni ne couvre ni le module de transfert de fonds ni la');
+        po('  messagerie SWIFT. Comme pour le change, la decouverte passe par le');
+        po('  dictionnaire Oracle.');
+
+        print_sub('22.1 Familles de tables candidates');
+        tbl_line('4,14,54,14,18');
+        po('  |' || fpad('N#', 4) || '|' || fpad('PREFIXE', 14) || '|' || fpad('FAMILLE', 54) || '|'
+            || fpadl('NB TABLES', 14) || '|' || fpadl('LIGNES (STATS)', 18) || '|');
+        tbl_line('4,14,54,14,18');
+        v_row := 0;
+        FOR p IN (
+            SELECT 'FTT' pfx, 'Module Funds Transfer (transferts de fonds)' lib, 1 ord FROM DUAL UNION ALL
+            SELECT 'MST',      'Messagerie SWIFT (messages entrants et sortants)',  2 FROM DUAL UNION ALL
+            SELECT 'IST',      'Instructions de reglement (settlement)',            3 FROM DUAL UNION ALL
+            SELECT 'PCT',      'Paiements et compensation',                         4 FROM DUAL UNION ALL
+            SELECT 'PMT',      'Paiements',                                         5 FROM DUAL UNION ALL
+            SELECT 'DET',      'Data Entry (saisies comptables directes)',          6 FROM DUAL UNION ALL
+            SELECT 'RTT',      'Retail Teller (operations de guichet)',             7 FROM DUAL
+            ORDER BY 3
+        ) LOOP
+            BEGIN
+                SELECT COUNT(*), NVL(SUM(num_rows), 0) INTO v_cnt, v_tot
+                  FROM all_tables
+                 WHERE table_name LIKE p.pfx || '%'
+                   AND owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA');
+            EXCEPTION
+                WHEN OTHERS THEN v_cnt := -1; v_tot := 0;
+            END;
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(p.pfx || '%', 14) || '|' || fpad(p.lib, 54) || '|'
+                || fpadl(CASE WHEN v_cnt < 0 THEN 'ERR' ELSE fnum(v_cnt) END, 14) || '|'
+                || fpadl(fnum(v_tot), 18) || '|');
+        END LOOP;
+        tbl_line('4,14,54,14,18');
+
+        print_sub('22.2 Tables de transfert et de messagerie porteuses de donnees');
+        tbl_line('4,42,18,18');
+        po('  |' || fpad('N#', 4) || '|' || fpad('TABLE', 42) || '|' || fpadl('LIGNES (STATS)', 18) || '|'
+            || fpadl('DERNIERE ANALYSE', 18) || '|');
+        tbl_line('4,42,18,18');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT table_name, num_rows, last_analyzed
+                        FROM all_tables
+                       WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+                         AND (table_name LIKE 'FTT%' OR table_name LIKE 'MST%'
+                              OR table_name LIKE 'IST%' OR table_name LIKE 'PCT%'
+                              OR table_name LIKE 'PMT%')
+                         AND NVL(num_rows, 0) > 0
+                       ORDER BY num_rows DESC) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 60;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.table_name, 42) || '|'
+                    || fpadl(fnum(r.num_rows), 18) || '|' || fpadl(fdt(r.last_analyzed), 18) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,42,18,18');
+        IF v_row = 0 THEN
+            po('    (aucune table de transfert ou de messagerie alimentee selon les statistiques)');
+        END IF;
+
+        print_sub('22.3 Tables dont le nom evoque le transfert, le message ou le beneficiaire');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT table_name, num_rows
+                        FROM all_tables
+                       WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+                         AND (table_name LIKE '%SWIFT%' OR table_name LIKE '%MSG%'
+                              OR table_name LIKE '%TRANSFER%' OR table_name LIKE '%BENEF%'
+                              OR table_name LIKE '%REMIT%' OR table_name LIKE '%SETTLE%')
+                         AND NVL(num_rows, 0) > 0
+                       ORDER BY num_rows DESC) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 40;
+                print_kv('  ' || r.table_name, fnum(r.num_rows) || ' lignes');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        IF v_row = 0 THEN
+            po('    (aucune table correspondante, ou statistiques absentes)');
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 23. CARTOGRAPHIE DES ECRITURES DU MODULE DE TRANSFERT
+    -- =========================================================
+    print_section('23. CARTOGRAPHIE DES ECRITURES DU MODULE DE TRANSFERT');
+    BEGIN
+        print_kv('Module de transfert retenu', k_mod_ft);
+        po('  Le tableau ci-dessous rappelle la repartition de TOUTES les ecritures par');
+        po('  module. Si les transferts internationaux de cette banque ne sont pas dans');
+        po('  le module retenu, corriger la constante k_mod_ft en tete du script.');
+        po('');
+        tbl_line('4,10,18,14,22,16,16,12');
+        po('  |' || fpad('N#', 4) || '|' || fpad('MODULE', 10) || '|' || fpadl('NB ECRITURES', 18) || '|'
+            || fpadl('NB DEVISES', 14) || '|' || fpadl('TOTAL LCY', 22) || '|'
+            || fpad('1ERE ECRIT.', 16) || '|' || fpad('DER. ECRIT.', 16) || '|'
+            || fpadl('% NB', 12) || '|');
+        tbl_line('4,10,18,14,22,16,16,12');
+        v_row := 0;
+        BEGIN
+            SELECT COUNT(*) INTO v_tot FROM actb_history;
+            FOR r IN (SELECT h.module, COUNT(*) nb, COUNT(DISTINCT h.ac_ccy) nbc,
+                             SUM(NVL(h.lcy_amount, 0)) mt, MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                        FROM actb_history h
+                       GROUP BY h.module
+                       ORDER BY COUNT(*) DESC) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.module, 10) || '|'
+                    || fpadl(fnum(r.nb), 18) || '|' || fpadl(fnum(r.nbc), 14) || '|'
+                    || fpadl(fmio(r.mt), 22) || '|' || fpad(fdt(r.d1), 16) || '|'
+                    || fpad(fdt(r.d2), 16) || '|' || fpadl(fpct(r.nb, v_tot), 12) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,10,18,14,22,16,16,12');
+
+        print_sub('23.1 Profil des colonnes sur le perimetre des transferts');
+        profile_table('ACTB_HISTORY', 'MODULE = ''' || k_mod_ft || '''',
+                      'PROFIL DES COLONNES : ACTB_HISTORY  [module ' || k_mod_ft || ']');
+
+        print_sub('23.2 Analyse multi-axes des ecritures de transfert');
+        v_dim := '~';
+        v_row := 0;
+        BEGIN
+            FOR r IN (
+                SELECT ord, dim, val, k, tot FROM (
+                    SELECT dd.ord AS ord,
+                           dd.dim AS dim,
+                           NVL(TRIM(CASE dd.dim
+                                WHEN 'ANNEE'          THEN TO_CHAR(h.trn_dt, 'YYYY')
+                                WHEN 'DEVISE'         THEN h.ac_ccy
+                                WHEN 'EVENT'          THEN h.event
+                                WHEN 'TRN_CODE'       THEN h.trn_code
+                                WHEN 'AMOUNT_TAG'     THEN h.amount_tag
+                                WHEN 'SENS'           THEN h.drcr_ind
+                                WHEN 'PRODUIT'        THEN h.product
+                                WHEN 'AGENCE'         THEN h.ac_branch
+                                WHEN 'CLIENT_OU_GL'   THEN h.cust_gl
+                                WHEN 'SAISI_PAR'      THEN h.user_id
+                                WHEN 'AUTORISE_PAR'   THEN h.auth_id
+                                WHEN 'REF_EXTERNE'    THEN CASE WHEN TRIM(h.external_ref_no) IS NULL
+                                                                THEN 'NON RENSEIGNEE' ELSE 'RENSEIGNEE' END
+                           END), '(vide)') AS val,
+                           COUNT(*) AS k,
+                           SUM(NVL(h.lcy_amount, 0)) AS tot,
+                           ROW_NUMBER() OVER (PARTITION BY dd.dim ORDER BY COUNT(*) DESC) AS rn
+                    FROM actb_history h
+                    CROSS JOIN (
+                        SELECT 'ANNEE' dim, 1 ord FROM DUAL UNION ALL
+                        SELECT 'DEVISE',       2 FROM DUAL UNION ALL
+                        SELECT 'EVENT',        3 FROM DUAL UNION ALL
+                        SELECT 'TRN_CODE',     4 FROM DUAL UNION ALL
+                        SELECT 'AMOUNT_TAG',   5 FROM DUAL UNION ALL
+                        SELECT 'SENS',         6 FROM DUAL UNION ALL
+                        SELECT 'PRODUIT',      7 FROM DUAL UNION ALL
+                        SELECT 'AGENCE',       8 FROM DUAL UNION ALL
+                        SELECT 'CLIENT_OU_GL', 9 FROM DUAL UNION ALL
+                        SELECT 'SAISI_PAR',   10 FROM DUAL UNION ALL
+                        SELECT 'AUTORISE_PAR',11 FROM DUAL UNION ALL
+                        SELECT 'REF_EXTERNE', 12 FROM DUAL
+                    ) dd
+                    WHERE h.module = k_mod_ft
+                    GROUP BY dd.ord, dd.dim,
+                             CASE dd.dim
+                                WHEN 'ANNEE'          THEN TO_CHAR(h.trn_dt, 'YYYY')
+                                WHEN 'DEVISE'         THEN h.ac_ccy
+                                WHEN 'EVENT'          THEN h.event
+                                WHEN 'TRN_CODE'       THEN h.trn_code
+                                WHEN 'AMOUNT_TAG'     THEN h.amount_tag
+                                WHEN 'SENS'           THEN h.drcr_ind
+                                WHEN 'PRODUIT'        THEN h.product
+                                WHEN 'AGENCE'         THEN h.ac_branch
+                                WHEN 'CLIENT_OU_GL'   THEN h.cust_gl
+                                WHEN 'SAISI_PAR'      THEN h.user_id
+                                WHEN 'AUTORISE_PAR'   THEN h.auth_id
+                                WHEN 'REF_EXTERNE'    THEN CASE WHEN TRIM(h.external_ref_no) IS NULL
+                                                                THEN 'NON RENSEIGNEE' ELSE 'RENSEIGNEE' END
+                             END
+                ) WHERE rn <= 15
+                ORDER BY ord, k DESC
+            ) LOOP
+                IF v_dim <> r.dim THEN
+                    v_dim := r.dim;
+                    print_sub('23.2.' || TO_CHAR(r.ord) || ' Axe . ' || r.dim);
+                    tbl_line('34,16,22');
+                    po('  |' || fpad('VALEUR', 34) || '|' || fpadl('NB ECRITURES', 16) || '|'
+                        || fpadl('TOTAL LCY', 22) || '|');
+                    tbl_line('34,16,22');
+                END IF;
+                po('  |' || fpad(r.val, 34) || '|' || fpadl(fnum(r.k), 16) || '|'
+                    || fpadl(fmio(r.tot), 22) || '|');
+                v_row := v_row + 1;
+            END LOOP;
+            IF v_row > 0 THEN
+                tbl_line('34,16,22');
+            ELSE
+                po('    (aucune ecriture dans le module ' || k_mod_ft || ')');
+            END IF;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 24. QUALIFICATION DES TRANSFERTS INTERNATIONAUX
+    -- =========================================================
+    print_section('24. QUALIFICATION DES TRANSFERTS INTERNATIONAUX');
+    BEGIN
+        po('  FLEXCUBE ne porte pas d''indicateur "transfert international". Il faut le');
+        po('  reconstituer. Trois indices sont disponibles dans la comptabilite :');
+        po('    - l''operation est libellee en devise etrangere ;');
+        po('    - elle mouvemente un general en devise etrangere (correspondant) ;');
+        po('    - elle porte une reference externe (message recu ou emis).');
+        po('  Le tableau croise ces indices au niveau de l''operation, pas de l''ecriture.');
+
+        print_sub('24.1 Croisement des indices, au niveau de l''operation');
+        tbl_line('4,20,20,20,16,22,16');
+        po('  |' || fpad('N#', 4) || '|' || fpad('DEVISE', 20) || '|' || fpad('CORRESPONDANT', 20) || '|'
+            || fpad('REF. EXTERNE', 20) || '|' || fpadl('NB OPERATIONS', 16) || '|'
+            || fpadl('TOTAL LCY', 22) || '|' || fpadl('% OPERATIONS', 16) || '|');
+        tbl_line('4,20,20,20,16,22,16');
+        v_row := 0;
+        BEGIN
+            SELECT COUNT(DISTINCT h.trn_ref_no) INTO v_tot
+              FROM actb_history h WHERE h.module = k_mod_ft;
+            FOR r IN (
+                SELECT CASE WHEN n_fx > 0 THEN 'devise etrangere' ELSE 'monnaie locale' END dev,
+                       CASE WHEN n_corr > 0 THEN 'general en devise' ELSE 'aucun' END corr,
+                       CASE WHEN n_ext > 0 THEN 'renseignee' ELSE 'absente' END ext,
+                       COUNT(*) nb, SUM(mt) mt
+                  FROM (SELECT h.trn_ref_no,
+                               SUM(CASE WHEN h.ac_ccy <> k_lcy THEN 1 ELSE 0 END) n_fx,
+                               SUM(CASE WHEN h.cust_gl = 'G' AND h.ac_ccy <> k_lcy
+                                        THEN 1 ELSE 0 END) n_corr,
+                               SUM(CASE WHEN TRIM(h.external_ref_no) IS NOT NULL
+                                        THEN 1 ELSE 0 END) n_ext,
+                               MAX(NVL(h.lcy_amount, 0)) mt
+                          FROM actb_history h
+                         WHERE h.module = k_mod_ft
+                         GROUP BY h.trn_ref_no)
+                 GROUP BY CASE WHEN n_fx > 0 THEN 'devise etrangere' ELSE 'monnaie locale' END,
+                          CASE WHEN n_corr > 0 THEN 'general en devise' ELSE 'aucun' END,
+                          CASE WHEN n_ext > 0 THEN 'renseignee' ELSE 'absente' END
+                 ORDER BY COUNT(*) DESC
+            ) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.dev, 20) || '|' || fpad(r.corr, 20) || '|'
+                    || fpad(r.ext, 20) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.mt), 22) || '|'
+                    || fpadl(fpct(r.nb, v_tot), 16) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,20,20,20,16,22,16');
+        po('  Une operation cumulant devise etrangere et general en devise est un');
+        po('  transfert international quasi certain. Une operation en monnaie locale');
+        po('  sans correspondant est un virement domestique.');
+
+        print_sub('24.2 Transferts par devise');
+        tbl_line('4,10,16,22,22,16,16');
+        po('  |' || fpad('N#', 4) || '|' || fpad('DEVISE', 10) || '|' || fpadl('NB OPERATIONS', 16) || '|'
+            || fpadl('MONTANT DEVISE', 22) || '|' || fpadl('CONTRE-VALEUR', 22) || '|'
+            || fpad('1ERE OPER.', 16) || '|' || fpad('DER. OPER.', 16) || '|');
+        tbl_line('4,10,16,22,22,16,16');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT h.ac_ccy ccy, COUNT(DISTINCT h.trn_ref_no) nb,
+                             SUM(NVL(h.fcy_amount, 0)) fcy, SUM(NVL(h.lcy_amount, 0)) lcy,
+                             MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                        FROM actb_history h
+                       WHERE h.module = k_mod_ft
+                       GROUP BY h.ac_ccy
+                       ORDER BY COUNT(*) DESC) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 30;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ccy, 10) || '|' || fpadl(fnum(r.nb), 16) || '|'
+                    || fpadl(famt(r.fcy), 22) || '|' || fpadl(fmio(r.lcy), 22) || '|'
+                    || fpad(fdt(r.d1), 16) || '|' || fpad(fdt(r.d2), 16) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,10,16,22,22,16,16');
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+
+    -- =========================================================
+    -- 25. FLUX ENTRANTS ET SORTANTS
+    -- =========================================================
+    print_section('25. FLUX ENTRANTS ET SORTANTS');
+    BEGIN
+        po('  Le sens du flux se lit sur le compte du client : un debit du compte client');
+        po('  correspond a un transfert emis, un credit a un transfert recu. La');
+        po('  distinction porte l''obligation de rapatriement pour les flux entrants et');
+        po('  l''obligation de justification pour les flux sortants.');
+
+        print_sub('25.1 Sens des flux par devise, sur les comptes clients');
+        tbl_line('4,10,16,16,22,22,16');
+        po('  |' || fpad('N#', 4) || '|' || fpad('DEVISE', 10) || '|' || fpad('SENS', 16) || '|'
+            || fpadl('NB ECRITURES', 16) || '|' || fpadl('MONTANT DEVISE', 22) || '|'
+            || fpadl('CONTRE-VALEUR', 22) || '|' || fpadl('NB COMPTES', 16) || '|');
+        tbl_line('4,10,16,16,22,22,16');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT h.ac_ccy ccy,
+                             CASE h.drcr_ind WHEN 'D' THEN 'EMIS (debit)'
+                                             WHEN 'C' THEN 'RECU (credit)'
+                                             ELSE h.drcr_ind END sens,
+                             COUNT(*) nb, SUM(NVL(h.fcy_amount, 0)) fcy,
+                             SUM(NVL(h.lcy_amount, 0)) lcy, COUNT(DISTINCT h.ac_no) nbc
+                        FROM actb_history h
+                       WHERE h.module = k_mod_ft
+                         AND h.cust_gl = 'A'
+                       GROUP BY h.ac_ccy, h.drcr_ind
+                       ORDER BY SUM(NVL(h.lcy_amount, 0)) DESC) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 40;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ccy, 10) || '|' || fpad(r.sens, 16) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(famt(r.fcy), 22) || '|'
+                    || fpadl(fmio(r.lcy), 22) || '|' || fpadl(fnum(r.nbc), 16) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,10,16,16,22,22,16');
+
+        print_sub('25.2 Evolution annuelle des flux en devises');
+        tbl_line('4,10,10,16,22,22,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('ANNEE', 10) || '|' || fpad('DEVISE', 10) || '|'
+            || fpadl('NB ECRITURES', 16) || '|' || fpadl('EMIS (DEBIT)', 22) || '|'
+            || fpadl('RECU (CREDIT)', 22) || '|' || fpadl('SOLDE NET', 22) || '|');
+        tbl_line('4,10,10,16,22,22,22');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT TO_CHAR(h.trn_dt, 'YYYY') an, h.ac_ccy ccy, COUNT(*) nb,
+                             SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                             SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
+                        FROM actb_history h
+                       WHERE h.module = k_mod_ft
+                         AND h.cust_gl = 'A'
+                         AND h.ac_ccy <> k_lcy
+                       GROUP BY TO_CHAR(h.trn_dt, 'YYYY'), h.ac_ccy
+                       ORDER BY 1, 2) LOOP
+                v_row := v_row + 1;
+                EXIT WHEN v_row > 80;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.an, 10) || '|' || fpad(r.ccy, 10) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.deb), 22) || '|'
+                    || fpadl(fmio(r.cre), 22) || '|' || fpadl(fmio(r.cre - r.deb), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,10,10,16,22,22,22');
+        IF v_row = 0 THEN
+            po('    (aucun flux en devise etrangere sur les comptes clients)');
+        END IF;
+
+        print_sub('25.3 Generaux mouvementes par les transferts');
+        tbl_line('4,22,40,10,16,22,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('GENERAL', 22) || '|' || fpad('LIBELLE', 40) || '|'
+            || fpad('DEVISE', 10) || '|' || fpadl('NB ECRITURES', 16) || '|'
+            || fpadl('TOTAL DEBIT', 22) || '|' || fpadl('TOTAL CREDIT', 22) || '|');
+        tbl_line('4,22,40,10,16,22,22');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT * FROM (
+                        SELECT h.ac_no, MAX(h.ac_ccy) ccy, COUNT(*) nb,
+                               (SELECT MAX(a.ac_gl_desc) FROM sttb_account a
+                                 WHERE a.ac_gl_no = h.ac_no) lib,
+                               SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                               SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
+                          FROM actb_history h
+                         WHERE h.module = k_mod_ft
+                           AND h.cust_gl = 'G'
+                         GROUP BY h.ac_no
+                         ORDER BY COUNT(*) DESC
+                      ) WHERE ROWNUM <= 40) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 22) || '|' || fpad(r.lib, 40) || '|'
+                    || fpad(r.ccy, 10) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.deb), 22) || '|'
+                    || fpadl(fmio(r.cre), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,22,40,10,16,22,22');
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 26. SEUILS REGLEMENTAIRES ET FRACTIONNEMENT
+    -- =========================================================
+    print_section('26. SEUILS REGLEMENTAIRES ET FRACTIONNEMENT DES OPERATIONS');
+    BEGIN
+        print_kv('Seuil de justification et de domiciliation',
+                 TO_CHAR(k_s_justif, 'FM999G999G999') || ' ' || k_lcy);
+        print_kv('Bande examinee sous le seuil',
+                 TO_CHAR(ROUND(k_bande * 100)) || ' pourcent, soit a partir de '
+                 || TO_CHAR(ROUND(k_s_justif * (1 - k_bande)), 'FM999G999G999') || ' ' || k_lcy);
+        po('  Le montant d''une operation est pris egal au plus grand montant en');
+        po('  contre-valeur locale parmi ses ecritures.');
+
+        print_sub('26.1 Distribution des operations de transfert par tranche de montant');
+        tbl_line('4,34,16,14,22,14');
+        po('  |' || fpad('N#', 4) || '|' || fpad('TRANCHE DE MONTANT', 34) || '|'
+            || fpadl('NB OPERATIONS', 16) || '|' || fpadl('% NB', 14) || '|'
+            || fpadl('TOTAL LCY', 22) || '|' || fpadl('% MONTANT', 14) || '|');
+        tbl_line('4,34,16,14,22,14');
+        v_row := 0;
+        BEGIN
+            SELECT COUNT(*), SUM(mt) INTO v_tot, v_mt
+              FROM (SELECT MAX(NVL(h.lcy_amount, 0)) mt
+                      FROM actb_history h
+                     WHERE h.module = k_mod_ft
+                     GROUP BY h.trn_ref_no);
+            FOR r IN (
+                SELECT tr, COUNT(*) nb, SUM(mt) somme
+                  FROM (SELECT CASE
+                                 WHEN mt <  k_s_justif * (1 - k_bande) THEN '1. sous la bande'
+                                 WHEN mt <  k_s_justif                 THEN '2. dans la bande sous le seuil'
+                                 WHEN mt =  k_s_justif                 THEN '3. exactement au seuil'
+                                 WHEN mt <  k_s_justif * 2             THEN '4. de 1 a 2 fois le seuil'
+                                 WHEN mt <  k_s_justif * 10            THEN '5. de 2 a 10 fois le seuil'
+                                 ELSE                                       '6. plus de 10 fois le seuil'
+                               END tr, mt
+                          FROM (SELECT MAX(NVL(h.lcy_amount, 0)) mt
+                                  FROM actb_history h
+                                 WHERE h.module = k_mod_ft
+                                 GROUP BY h.trn_ref_no))
+                 GROUP BY tr ORDER BY tr
+            ) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.tr, 34) || '|' || fpadl(fnum(r.nb), 16) || '|'
+                    || fpadl(fpct(r.nb, v_tot), 14) || '|' || fpadl(fmio(r.somme), 22) || '|'
+                    || fpadl(fpct(r.somme, v_mt), 14) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,34,16,14,22,14');
+        po('  Une concentration anormale dans la tranche 2 est l''indice d''un');
+        po('  fractionnement destine a rester sous le seuil de justification.');
+
+        print_sub('26.2 Repartition fine des operations autour du seuil');
+        tbl_line('4,34,16,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('PALIER (en % du seuil)', 34) || '|'
+            || fpadl('NB OPERATIONS', 16) || '|' || fpadl('TOTAL LCY', 22) || '|');
+        tbl_line('4,34,16,22');
+        v_row := 0;
+        BEGIN
+            FOR r IN (
+                SELECT pal, COUNT(*) nb, SUM(mt) somme
+                  FROM (SELECT LEAST(FLOOR(mt / (k_s_justif / 20)) * 5, 200) pal, mt
+                          FROM (SELECT MAX(NVL(h.lcy_amount, 0)) mt
+                                  FROM actb_history h
+                                 WHERE h.module = k_mod_ft
+                                 GROUP BY h.trn_ref_no)
+                         WHERE mt BETWEEN k_s_justif * 0.5 AND k_s_justif * 2)
+                 GROUP BY pal ORDER BY pal
+            ) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|'
+                    || fpad('de ' || TO_CHAR(r.pal) || ' a ' || TO_CHAR(r.pal + 5) || ' %', 34) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.somme), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,34,16,22');
+        IF v_row = 0 THEN
+            po('    (aucune operation dans la plage examinee)');
+        END IF;
+
+        print_sub('26.3 Comptes cumulant plusieurs operations sous le seuil le meme mois');
+        tbl_line('4,22,10,12,16,22,16');
+        po('  |' || fpad('N#', 4) || '|' || fpad('COMPTE', 22) || '|' || fpad('DEVISE', 10) || '|'
+            || fpad('MOIS', 12) || '|' || fpadl('NB OPERATIONS', 16) || '|'
+            || fpadl('TOTAL LCY', 22) || '|' || fpadl('MOYENNE', 16) || '|');
+        tbl_line('4,22,10,12,16,22,16');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT * FROM (
+                        SELECT ac_no, ccy, mois, COUNT(*) nb, SUM(mt) somme, AVG(mt) moy
+                          FROM (SELECT h.ac_no, MAX(h.ac_ccy) ccy,
+                                       TO_CHAR(MIN(h.trn_dt), 'YYYY-MM') mois,
+                                       MAX(NVL(h.lcy_amount, 0)) mt
+                                  FROM actb_history h
+                                 WHERE h.module = k_mod_ft
+                                   AND h.cust_gl = 'A'
+                                 GROUP BY h.ac_no, h.trn_ref_no)
+                         WHERE mt BETWEEN k_s_justif * (1 - k_bande) AND k_s_justif
+                         GROUP BY ac_no, ccy, mois
+                        HAVING COUNT(*) >= 3
+                         ORDER BY COUNT(*) DESC, SUM(mt) DESC
+                      ) WHERE ROWNUM <= 40) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 22) || '|' || fpad(r.ccy, 10) || '|'
+                    || fpad(r.mois, 12) || '|' || fpadl(fnum(r.nb), 16) || '|' || fpadl(famt(r.somme), 22) || '|'
+                    || fpadl(famt(r.moy), 16) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,22,10,12,16,22,16');
+        IF v_row = 0 THEN
+            po('    (aucun compte ne cumule trois operations ou plus dans la bande le meme mois)');
+        END IF;
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    -- =========================================================
+    -- 27. DONNEURS D'ORDRE ET BENEFICIAIRES
+    -- =========================================================
+    print_section('27. DONNEURS D''ORDRE ET BENEFICIAIRES DES TRANSFERTS');
+    BEGIN
+        po('  Le rattachement des transferts aux clients passe par le compte mouvemente.');
+        po('  Il permet de relier la revue des changes au dispositif de connaissance du');
+        po('  client deja audite par ailleurs.');
+
+        print_sub('27.1 Les 30 clients les plus actifs en transfert');
+        tbl_line('4,14,32,8,8,16,22,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('CIF', 14) || '|' || fpad('CLIENT', 32) || '|'
+            || fpad('TYPE', 8) || '|' || fpad('PAYS', 8) || '|' || fpadl('NB OPERATIONS', 16) || '|'
+            || fpadl('EMIS (DEBIT)', 22) || '|' || fpadl('RECU (CREDIT)', 22) || '|');
+        tbl_line('4,14,32,8,8,16,22,22');
+        v_row := 0;
+        BEGIN
+            FOR r IN (SELECT * FROM (
+                        SELECT a.cust_no,
+                               MAX(c.customer_name1) nom, MAX(c.customer_type) typ,
+                               MAX(c.country) pays,
+                               COUNT(DISTINCT h.trn_ref_no) nb,
+                               SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
+                               SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre
+                          FROM actb_history h
+                          JOIN sttm_cust_account a ON a.cust_ac_no = h.ac_no
+                          JOIN sttm_customer c ON c.customer_no = a.cust_no
+                         WHERE h.module = k_mod_ft
+                           AND h.cust_gl = 'A'
+                         GROUP BY a.cust_no
+                         ORDER BY SUM(NVL(h.lcy_amount, 0)) DESC
+                      ) WHERE ROWNUM <= 30) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.cust_no, 14) || '|' || fpad(r.nom, 32) || '|'
+                    || fpad(r.typ, 8) || '|' || fpad(r.pays, 8) || '|' || fpadl(fnum(r.nb), 16) || '|'
+                    || fpadl(fmio(r.deb), 22) || '|' || fpadl(fmio(r.cre), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,14,32,8,8,16,22,22');
+
+        print_sub('27.2 Transferts par pays du client');
+        tbl_line('4,12,16,16,22,16');
+        po('  |' || fpad('N#', 4) || '|' || fpad('PAYS', 12) || '|' || fpadl('NB CLIENTS', 16) || '|'
+            || fpadl('NB OPERATIONS', 16) || '|' || fpadl('TOTAL LCY', 22) || '|'
+            || fpadl('% OPERATIONS', 16) || '|');
+        tbl_line('4,12,16,16,22,16');
+        v_row := 0;
+        BEGIN
+            SELECT COUNT(DISTINCT h.trn_ref_no) INTO v_tot
+              FROM actb_history h WHERE h.module = k_mod_ft AND h.cust_gl = 'A';
+            FOR r IN (SELECT * FROM (
+                        SELECT c.country pays, COUNT(DISTINCT a.cust_no) nbc,
+                               COUNT(DISTINCT h.trn_ref_no) nb,
+                               SUM(NVL(h.lcy_amount, 0)) mt
+                          FROM actb_history h
+                          JOIN sttm_cust_account a ON a.cust_ac_no = h.ac_no
+                          JOIN sttm_customer c ON c.customer_no = a.cust_no
+                         WHERE h.module = k_mod_ft
+                           AND h.cust_gl = 'A'
+                         GROUP BY c.country
+                         ORDER BY COUNT(DISTINCT h.trn_ref_no) DESC
+                      ) WHERE ROWNUM <= 40) LOOP
+                v_row := v_row + 1;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.pays, 12) || '|' || fpadl(fnum(r.nbc), 16) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.mt), 22) || '|'
+                    || fpadl(fpct(r.nb, v_tot), 16) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        tbl_line('4,12,16,16,22,16');
+
+        print_sub('27.3 Couverture KYC des clients transferant');
+        BEGIN
+            SELECT COUNT(DISTINCT a.cust_no),
+                   COUNT(DISTINCT CASE WHEN TRIM(c.kyc_ref_no) IS NULL THEN a.cust_no END),
+                   COUNT(DISTINCT CASE WHEN TRIM(c.country) IS NULL THEN a.cust_no END),
+                   COUNT(DISTINCT CASE WHEN NVL(TRIM(c.frozen), 'N') = 'Y' THEN a.cust_no END)
+              INTO v_cnt, v_cnt2, v_cnt3, v_row
+              FROM actb_history h
+              JOIN sttm_cust_account a ON a.cust_ac_no = h.ac_no
+              JOIN sttm_customer c ON c.customer_no = a.cust_no
+             WHERE h.module = k_mod_ft
+               AND h.cust_gl = 'A';
+            print_kv('Clients ayant emis ou recu un transfert', fnum(v_cnt));
+            print_kv('Dont sans dossier KYC',                   fnum(v_cnt2) || '   ' || fpct(v_cnt2, v_cnt));
+            print_kv('Dont sans pays renseigne',                fnum(v_cnt3) || '   ' || fpct(v_cnt3, v_cnt));
+            print_kv('Dont geles',                              fnum(v_row)  || '   ' || fpct(v_row, v_cnt));
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+
+        po('');
+        po('  >>> FIN DE LA PARTIE 5');
+    EXCEPTION
+        WHEN OTHERS THEN
+            po('');
+            po('    !! SECTION INTERROMPUE : ' || SQLERRM);
+            po('       ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+    END;
+
+    po(v_sep);
+    po('   PARTIE 6/6 : CADRE CEMAC ET CONTROLES CANDIDATS');
     po(v_sep);
 
     -- =========================================================
-    -- 22. RAPPEL DU CADRE REGLEMENTAIRE
+    -- 28. RAPPEL DU CADRE REGLEMENTAIRE
     -- =========================================================
-    print_section('22. CADRE REGLEMENTAIRE DE REFERENCE');
+    print_section('28. CADRE REGLEMENTAIRE DE REFERENCE');
     BEGIN
         po('  AVERTISSEMENT');
         po('    Ce rappel a ete etabli a partir de sources secondaires. Le texte officiel');
@@ -1965,6 +2633,35 @@ BEGIN
         po('       l''Afrique Centrale, par delegation de la Banque Centrale ; sanctions');
         po('       administratives relevant de la seule BEAC.');
         po('');
+        po('  OBLIGATIONS PROPRES AUX TRANSFERTS INTERNATIONAUX');
+        po('    Les transferts avec l''etranger etant inclus dans le perimetre de la');
+        po('    revue, les obligations suivantes structurent la partie 5 du rapport.');
+        po('    a. Les reglements des transactions avec l''etranger au dela du seuil de');
+        po('       ' || TO_CHAR(k_s_justif, 'FM999G999G999') || ' ' || k_lcy
+            || ' doivent transiter par un intermediaire agree.');
+        po('    b. Tout transfert doit etre appuye des justificatifs requis. L''execution');
+        po('       d''un transfert au profit d''un agent economique n''ayant pas apure');
+        po('       l''ensemble de ses dossiers de domiciliation d''importation est');
+        po('       assimilee a un transfert sans justificatifs, sanctionnee par');
+        po('       l''article 164 du Reglement.');
+        po('    c. Les depenses d''importation de services d''un montant egal ou superieur');
+        po('       au seuil doivent etre domiciliees aupres d''un etablissement de credit');
+        po('       de la CEMAC et declarees a la Banque Centrale.');
+        po('    d. Les recettes d''exportation doivent etre rapatriees dans le delai de');
+        po('       ' || TO_CHAR(k_j_rapat) || ' jours et cedees selon les quotites en vigueur.');
+        po('    e. L''instruction n 002 encadre la tarification des operations de');
+        po('       transfert au sein de la CEMAC.');
+        po('    f. Les sanctions administratives applicables aux prestataires de services');
+        po('       de paiement sont prevues aux articles 167, 171 et 172 du Reglement.');
+        po('');
+        po('  CE QUE LA BASE PEUT ET NE PEUT PAS PROUVER SUR LES TRANSFERTS');
+        po('    FLEXCUBE porte le flux comptable, la devise, le cours, le compte');
+        po('    mouvemente, l''horodatage et l''identite des operateurs. Il ne porte ni le');
+        po('    dossier de domiciliation, ni la facture, ni la declaration a la BEAC.');
+        po('    Les tests de la partie 5 mesurent donc la COHERENCE et la TRACABILITE du');
+        po('    flux, et identifient les operations a rapprocher des dossiers papier :');
+        po('    ils ne concluent pas seuls a la conformite documentaire.');
+        po('');
         po('  PORTEE POUR L''AUDIT DES DONNEES');
         po('    Une partie de ces obligations ne se verifie pas dans FLEXCUBE (dossiers');
         po('    de domiciliation, declarations douanieres, etats decadaires transmis a la');
@@ -1980,9 +2677,9 @@ BEGIN
     END;
 
     -- =========================================================
-    -- 23. CONTROLES CANDIDATS
+    -- 29. CONTROLES CANDIDATS
     -- =========================================================
-    print_section('23. CONTROLES PREPARATOIRES : DIMENSIONNEMENT DES FUTURS TESTS');
+    print_section('29. CONTROLES PREPARATOIRES : DIMENSIONNEMENT DES FUTURS TESTS');
     BEGIN
         po('  Chaque ligne est un test candidat du futur script d''audit du change.');
         po('  Le chiffre indique le nombre de cas concernes ; il permettra de retenir');
@@ -2088,7 +2785,7 @@ BEGIN
         END;
         tbl_line('4,72,16,22');
 
-        print_sub('23.2 Sur le referentiel des cours');
+        print_sub('29.2 Sur le referentiel des cours');
         tbl_line('4,72,16');
         po('  |' || fpad('N#', 4) || '|' || fpad('CONTROLE CANDIDAT', 72) || '|' || fpadl('NB CAS', 16) || '|');
         tbl_line('4,72,16');
@@ -2159,7 +2856,7 @@ BEGIN
             || fpadl(f_cas(v_cnt), 16) || '|');
         tbl_line('4,72,16');
 
-        print_sub('23.3 Sur les comptes et les clients');
+        print_sub('29.3 Sur les comptes et les clients');
         tbl_line('4,72,16');
         po('  |' || fpad('N#', 4) || '|' || fpad('CONTROLE CANDIDAT', 72) || '|' || fpadl('NB CAS', 16) || '|');
         tbl_line('4,72,16');
@@ -2239,7 +2936,7 @@ BEGIN
             || fpadl(f_cas(v_cnt), 16) || '|');
         tbl_line('4,72,16');
 
-        print_sub('23.4 Sur la position de change et la reevaluation');
+        print_sub('29.4 Sur la position de change et la reevaluation');
         tbl_line('4,72,16');
         po('  |' || fpad('N#', 4) || '|' || fpad('CONTROLE CANDIDAT', 72) || '|' || fpadl('NB CAS', 16) || '|');
         tbl_line('4,72,16');
@@ -2295,6 +2992,151 @@ BEGIN
             || fpadl(f_cas(v_cnt), 16) || '|');
         tbl_line('4,72,16');
 
+
+        print_sub('29.5 Sur les transferts internationaux');
+        po('  Les compteurs ci-dessous sont calcules au niveau de l''operation, en une');
+        po('  seule lecture du perimetre du module ' || k_mod_ft || '.');
+        po('');
+        tbl_line('4,72,16,22');
+        po('  |' || fpad('N#', 4) || '|' || fpad('CONTROLE CANDIDAT', 72) || '|' || fpadl('NB CAS', 16) || '|'
+            || fpadl('MONTANT LCY', 22) || '|');
+        tbl_line('4,72,16,22');
+        BEGIN
+            FOR r IN (
+                SELECT
+                  COUNT(*) n0, SUM(mt) m0,
+                  SUM(CASE WHEN n_fx > 0 THEN 1 ELSE 0 END) n1,
+                  SUM(CASE WHEN n_fx > 0 THEN mt ELSE 0 END) m1,
+                  SUM(CASE WHEN n_fx > 0 AND n_ext = 0 THEN 1 ELSE 0 END) n2,
+                  SUM(CASE WHEN n_fx > 0 AND n_ext = 0 THEN mt ELSE 0 END) m2,
+                  SUM(CASE WHEN mt >= k_s_justif THEN 1 ELSE 0 END) n3,
+                  SUM(CASE WHEN mt >= k_s_justif THEN mt ELSE 0 END) m3,
+                  SUM(CASE WHEN mt >= k_s_justif AND n_ext = 0 THEN 1 ELSE 0 END) n4,
+                  SUM(CASE WHEN mt >= k_s_justif AND n_ext = 0 THEN mt ELSE 0 END) m4,
+                  SUM(CASE WHEN mt >= k_s_justif * (1 - k_bande) AND mt < k_s_justif
+                           THEN 1 ELSE 0 END) n5,
+                  SUM(CASE WHEN mt >= k_s_justif * (1 - k_bande) AND mt < k_s_justif
+                           THEN mt ELSE 0 END) m5,
+                  SUM(CASE WHEN n_fx > 0 AND n_corr = 0 THEN 1 ELSE 0 END) n6,
+                  SUM(CASE WHEN n_fx > 0 AND n_corr = 0 THEN mt ELSE 0 END) m6,
+                  SUM(CASE WHEN n_auto > 0 THEN 1 ELSE 0 END) n7,
+                  SUM(CASE WHEN n_auto > 0 THEN mt ELSE 0 END) m7,
+                  SUM(CASE WHEN n_wk > 0 THEN 1 ELSE 0 END) n8,
+                  SUM(CASE WHEN n_wk > 0 THEN mt ELSE 0 END) m8,
+                  SUM(CASE WHEN n_fx > 0 AND n_norate > 0 THEN 1 ELSE 0 END) n9,
+                  SUM(CASE WHEN n_fx > 0 AND n_norate > 0 THEN mt ELSE 0 END) m9,
+                  SUM(CASE WHEN n_cli = 0 THEN 1 ELSE 0 END) n10,
+                  SUM(CASE WHEN n_cli = 0 THEN mt ELSE 0 END) m10
+                FROM (SELECT h.trn_ref_no,
+                             MAX(NVL(h.lcy_amount, 0)) mt,
+                             SUM(CASE WHEN h.ac_ccy <> k_lcy THEN 1 ELSE 0 END) n_fx,
+                             SUM(CASE WHEN h.cust_gl = 'G' AND h.ac_ccy <> k_lcy
+                                      THEN 1 ELSE 0 END) n_corr,
+                             SUM(CASE WHEN TRIM(h.external_ref_no) IS NOT NULL
+                                      THEN 1 ELSE 0 END) n_ext,
+                             SUM(CASE WHEN h.user_id = h.auth_id
+                                        AND UPPER(NVL(TRIM(h.user_id), 'X')) <> 'SYSTEM'
+                                      THEN 1 ELSE 0 END) n_auto,
+                             SUM(CASE WHEN (TRUNC(h.trn_dt) - TRUNC(h.trn_dt, 'IW') + 1) IN (6, 7)
+                                      THEN 1 ELSE 0 END) n_wk,
+                             SUM(CASE WHEN h.ac_ccy <> k_lcy AND NVL(h.exch_rate, 0) = 0
+                                      THEN 1 ELSE 0 END) n_norate,
+                             SUM(CASE WHEN h.cust_gl = 'A' THEN 1 ELSE 0 END) n_cli
+                        FROM actb_history h
+                       WHERE h.module = k_mod_ft
+                       GROUP BY h.trn_ref_no)
+            ) LOOP
+                po('  |' || fpadl('1', 4) || '|'
+                    || fpad('Operations de transfert (population de reference)', 72) || '|'
+                    || fpadl(fnum(r.n0), 16) || '|' || fpadl(fmio(r.m0), 22) || '|');
+                po('  |' || fpadl('2', 4) || '|'
+                    || fpad('Transfert comportant au moins une ecriture en devise', 72) || '|'
+                    || fpadl(fnum(r.n1), 16) || '|' || fpadl(fmio(r.m1), 22) || '|');
+                po('  |' || fpadl('3', 4) || '|'
+                    || fpad('Transfert en devise sans reference externe (message absent)', 72) || '|'
+                    || fpadl(fnum(r.n2), 16) || '|' || fpadl(fmio(r.m2), 22) || '|');
+                po('  |' || fpadl('4', 4) || '|'
+                    || fpad('Transfert au dela du seuil de justification', 72) || '|'
+                    || fpadl(fnum(r.n3), 16) || '|' || fpadl(fmio(r.m3), 22) || '|');
+                po('  |' || fpadl('5', 4) || '|'
+                    || fpad('Transfert au dela du seuil sans reference externe', 72) || '|'
+                    || fpadl(fnum(r.n4), 16) || '|' || fpadl(fmio(r.m4), 22) || '|');
+                po('  |' || fpadl('6', 4) || '|'
+                    || fpad('Transfert dans la bande immediatement sous le seuil', 72) || '|'
+                    || fpadl(fnum(r.n5), 16) || '|' || fpadl(fmio(r.m5), 22) || '|');
+                po('  |' || fpadl('7', 4) || '|'
+                    || fpad('Transfert en devise ne mouvementant aucun general en devise', 72) || '|'
+                    || fpadl(fnum(r.n6), 16) || '|' || fpadl(fmio(r.m6), 22) || '|');
+                po('  |' || fpadl('8', 4) || '|'
+                    || fpad('Transfert saisi et autorise par le meme agent', 72) || '|'
+                    || fpadl(fnum(r.n7), 16) || '|' || fpadl(fmio(r.m7), 22) || '|');
+                po('  |' || fpadl('9', 4) || '|'
+                    || fpad('Transfert passe un samedi ou un dimanche', 72) || '|'
+                    || fpadl(fnum(r.n8), 16) || '|' || fpadl(fmio(r.m8), 22) || '|');
+                po('  |' || fpadl('10', 4) || '|'
+                    || fpad('Transfert en devise sans cours de change sur au moins une ecriture', 72) || '|'
+                    || fpadl(fnum(r.n9), 16) || '|' || fpadl(fmio(r.m9), 22) || '|');
+                po('  |' || fpadl('11', 4) || '|'
+                    || fpad('Transfert ne mouvementant aucun compte client (general a general)', 72) || '|'
+                    || fpadl(fnum(r.n10), 16) || '|' || fpadl(fmio(r.m10), 22) || '|');
+            END LOOP;
+        EXCEPTION
+            WHEN OTHERS THEN po('    !! ' || SQLERRM);
+        END;
+        -- Comptes cumulant des operations dans la bande sous le seuil
+        BEGIN
+            SELECT COUNT(*) INTO v_cnt
+              FROM (SELECT ac_no
+                      FROM (SELECT h.ac_no, h.trn_ref_no,
+                                   TO_CHAR(MIN(h.trn_dt), 'YYYY-MM') mois,
+                                   MAX(NVL(h.lcy_amount, 0)) mt
+                              FROM actb_history h
+                             WHERE h.module = k_mod_ft
+                               AND h.cust_gl = 'A'
+                             GROUP BY h.ac_no, h.trn_ref_no)
+                     WHERE mt BETWEEN k_s_justif * (1 - k_bande) AND k_s_justif
+                     GROUP BY ac_no, mois
+                    HAVING COUNT(*) >= 3);
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1;
+        END;
+        po('  |' || fpadl('12', 4) || '|'
+            || fpad('Compte cumulant au moins trois transferts sous le seuil le meme mois', 72) || '|'
+            || fpadl(f_cas(v_cnt), 16) || '|' || fpadl('-', 22) || '|');
+        -- Clients transferant sans dossier KYC
+        BEGIN
+            SELECT COUNT(DISTINCT a.cust_no) INTO v_cnt
+              FROM actb_history h
+              JOIN sttm_cust_account a ON a.cust_ac_no = h.ac_no
+              JOIN sttm_customer c ON c.customer_no = a.cust_no
+             WHERE h.module = k_mod_ft
+               AND h.cust_gl = 'A'
+               AND TRIM(c.kyc_ref_no) IS NULL;
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1;
+        END;
+        po('  |' || fpadl('13', 4) || '|'
+            || fpad('Client transferant sans dossier KYC rattache', 72) || '|'
+            || fpadl(f_cas(v_cnt), 16) || '|' || fpadl('-', 22) || '|');
+        -- Transferts portes par un client gele
+        BEGIN
+            SELECT COUNT(DISTINCT h.trn_ref_no) INTO v_cnt
+              FROM actb_history h
+              JOIN sttm_cust_account a ON a.cust_ac_no = h.ac_no
+              JOIN sttm_customer c ON c.customer_no = a.cust_no
+             WHERE h.module = k_mod_ft
+               AND h.cust_gl = 'A'
+               AND NVL(TRIM(c.frozen), 'N') = 'Y';
+        EXCEPTION
+            WHEN OTHERS THEN v_cnt := -1;
+        END;
+        po('  |' || fpadl('14', 4) || '|'
+            || fpad('Transfert porte par un client gele', 72) || '|'
+            || fpadl(f_cas(v_cnt), 16) || '|' || fpadl('-', 22) || '|');
+        tbl_line('4,72,16,22');
+        po('  Les controles 3, 5 et 6 sont des indices de defaut de justification ou de');
+        po('  fractionnement : ils designent les operations a rapprocher des dossiers de');
+        po('  domiciliation, ils ne constatent pas a eux seuls une infraction.');
         po('');
         po('  LECTURE DU TABLEAU');
         po('    Un compte a zero valide le controle et permet de l''ecarter du script');

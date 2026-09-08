@@ -78,12 +78,10 @@ DECLARE
     k_dt_from     DATE := TO_DATE('01/01/2000', 'DD/MM/YYYY');
     k_dt_to       DATE := TO_DATE('31/12/2099', 'DD/MM/YYYY');
 
-    -- Recalculation tolerances
+    -- Recalculation tolerance
     k_tol_abs     NUMBER := 1;           -- absolute tolerance, in XAF
-    k_tol_pct     NUMBER := 0.01;        -- relative tolerance, in percent
 
     -- Business thresholds
-    k_mt_signif   NUMBER := 1000000000;  -- materiality threshold, in XAF
     k_mt_large    NUMBER := 5000000000;  -- large deal walkthrough threshold (5 Bn)
     k_rate_high   NUMBER := 8;           -- high rate walkthrough threshold, in percent
     k_rate_max    NUMBER := 15;          -- upper plausible rate, in percent
@@ -92,7 +90,6 @@ DECLARE
     k_retro_d     NUMBER := 5;           -- tolerated back valuation, in calendar days
     k_late_d      NUMBER := 5;           -- tolerated settlement delay, in days
     k_gap_d       NUMBER := 3;           -- tolerated gap in the accrual series, in days
-    k_old_d       NUMBER := 90;          -- age from which a matured deal is reported
     k_day_basis   NUMBER := 360;         -- day count basis used for estimates
     k_conc_lim    NUMBER := 500000000000;-- ALM concentration limit per issuer, in XAF
 
@@ -137,9 +134,8 @@ DECLARE
     k_prod_pre    VARCHAR2(60) := 'TBTR,MTPD';  -- interest deducted up front
     k_prod_bond   VARCHAR2(60) := 'OTAP';       -- bonds, income on 7334
 
-    -- Module and external application
+    -- Module audited
     k_mod         VARCHAR2(4)  := 'MM';
-    k_ext_pat     VARCHAR2(30) := '%CALYPSO%';
 
     -- ========================================================================
     -- Test registry, fed by p_verdict and printed in part 12
@@ -175,6 +171,7 @@ DECLARE
     v_mt_ctr  NUMBER := 0;    -- cumulative nominal in scope
     v_d_last  DATE;           -- last accounting entry of the module
     v_d_accr  DATE;           -- last interest accrual of the module
+    v_d_max   DATE;           -- second date buffer, used by the cross checks
     v_lib     VARCHAR2(200);  -- account description buffer
 
     -- Column widths of the securities detail table (see sec_head below)
@@ -647,15 +644,12 @@ BEGIN
         print_kv('Reporting date',                       fdt(k_asof));
         print_kv('Audited period on BOOKING_DATE',       fdt(k_dt_from) || ' to ' || fdt(k_dt_to));
         print_kv('Absolute tolerance on recalculations', famt(k_tol_abs) || ' XAF');
-        print_kv('Relative tolerance on recalculations', TO_CHAR(k_tol_pct) || ' %');
-        print_kv('Materiality threshold',                famt(k_mt_signif) || ' XAF (' || fmio(k_mt_signif) || ')');
         print_kv('Large deal walkthrough threshold',     famt(k_mt_large) || ' XAF (' || fmio(k_mt_large) || ')');
         print_kv('High rate walkthrough threshold',      ftx(k_rate_high));
         print_kv('Plausible rate range',                 ftx(k_rate_min) || ' to ' || ftx(k_rate_max));
         print_kv('Tolerated back valuation',             TO_CHAR(k_retro_d) || ' days');
         print_kv('Tolerated settlement delay',           TO_CHAR(k_late_d) || ' days');
         print_kv('Tolerated gap in the accrual series',  TO_CHAR(k_gap_d) || ' days');
-        print_kv('Age at which a matured deal is flagged', TO_CHAR(k_old_d) || ' days');
         print_kv('Day count basis used for estimates',   TO_CHAR(k_day_basis));
         print_kv('ALM concentration limit per issuer',   fmio(k_conc_lim));
         print_kv('Detail lines printed per test',        TO_CHAR(k_top));

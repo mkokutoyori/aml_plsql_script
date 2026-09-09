@@ -1558,52 +1558,78 @@ BEGIN
 
         -- -----------------------------------------------------
         print_sub('2.1 d. Who else posts on a transit account');
-        po('  Everything on the three bridges that is NOT the interface, broken down');
-        po('  by module, product and user. A transit account of an automated');
-        po('  interface should be touched by that interface and by nothing else.');
-        po('  Anything here is either a manual correction, which has to be');
-        po('  documented and approved, or a second producer nobody accounted for.');
+        po('  Everything on the bridges that is NOT the interface, broken down by');
+        po('  module, product and user, ONE TABLE PER ACCOUNT. A transit account of');
+        po('  an automated interface should be touched by that interface and by');
+        po('  nothing else. Anything here is either a manual correction, which has to');
+        po('  be documented and approved, or a second producer nobody accounted for.');
         po('  Both are worth a question, and neither is visible if the review looks');
         po('  only at what Calypso posted.');
-        tbl_head('4,20,10,12,18,16,26,26,16,16',
-                 'N#|ACCOUNT|MODULE|PRODUCT|USER|LINES|GROSS FLOW|BALANCE'
-                 || '|FIRST|LAST',
-                 '|AC_NO|MODULE|PRODUCT|USER_ID|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT'
-                 || '|TRN_DT|TRN_DT',
-                 'RLLLLRRRLL');
-        v_row := 0;
+        po('');
+        po('  Each account is closed by its own subtotal, so a line can be traced to');
+        po('  one account without reading across the whole section.');
         v_cnt := 0;
         v_mt  := 0;
-        FOR r IN (SELECT h.ac_no, NVL(h.module, '-') mdl, NVL(h.product, '-') prd,
-                         NVL(h.user_id, '-') usr, COUNT(*) nb,
-                         SUM(ABS(NVL(h.lcy_amount, 0))) gr,
-                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                             ELSE -NVL(h.lcy_amount, 0) END) sgn,
-                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
-                    FROM actb_history h
-                   WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                     AND h.trn_dt <  k_cy_to + 1
-                     AND NOT (h.module = k_cy_mod AND h.product = k_cy_prod
-                              AND LOWER(h.user_id) LIKE k_cy_upat
-                              AND h.trn_dt >= k_cy_from)
-                   GROUP BY h.ac_no, NVL(h.module, '-'), NVL(h.product, '-'),
-                            NVL(h.user_id, '-')
-                   ORDER BY COUNT(*) DESC) LOOP
-            v_row := v_row + 1;
-            EXIT WHEN v_row > k_top_all;
-            v_cnt := v_cnt + r.nb;
-            v_mt  := v_mt + ABS(r.sgn);
-            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|'
-                || fpad(r.mdl, 10) || '|' || fpad(r.prd, 12) || '|'
-                || fpad(r.usr, 18) || '|' || fpadl(fnum(r.nb), 16) || '|'
-                || fpadl(fmio(r.gr), 26) || '|' || fpadl(famt(r.sgn), 26) || '|'
-                || fpad(fdt(r.d1), 16) || '|' || fpad(fdt(r.d2), 16) || '|');
+        FOR a IN (SELECT 1 ord, k_cy_brg_sec ac FROM DUAL UNION ALL
+                  SELECT 2, k_cy_brg_mm FROM DUAL UNION ALL
+                  SELECT 3, k_cy_brg_mir FROM DUAL
+                  ORDER BY 1) LOOP
+            SELECT MAX(x.ac_gl_desc) INTO v_lib
+              FROM sttb_account x WHERE x.ac_gl_no = a.ac;
+            po('');
+            po('  ' || v_sub);
+            po('  ACCOUNT ' || a.ac || '   -   ' || NVL(v_lib, 'name not found'));
+            po('  ' || v_sub);
+            tbl_head('4,12,14,20,16,26,26,16,16',
+                     'N#|MODULE|PRODUCT|USER|LINES|GROSS FLOW|BALANCE|FIRST|LAST',
+                     '|MODULE|PRODUCT|USER_ID|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT'
+                     || '|TRN_DT|TRN_DT',
+                     'RLLLRRRLL');
+            v_row  := 0;
+            v_cnt2 := 0;
+            v_tot  := 0;
+            v_tot2 := 0;
+            FOR r IN (SELECT NVL(h.module, '-') mdl, NVL(h.product, '-') prd,
+                             NVL(h.user_id, '-') usr, COUNT(*) nb,
+                             SUM(ABS(NVL(h.lcy_amount, 0))) gr,
+                             SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                 ELSE -NVL(h.lcy_amount, 0) END) sgn,
+                             MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                        FROM actb_history h
+                       WHERE h.ac_no = a.ac
+                         AND h.trn_dt <  k_cy_to + 1
+                         AND NOT (h.module = k_cy_mod AND h.product = k_cy_prod
+                                  AND LOWER(h.user_id) LIKE k_cy_upat
+                                  AND h.trn_dt >= k_cy_from)
+                       GROUP BY NVL(h.module, '-'), NVL(h.product, '-'),
+                                NVL(h.user_id, '-')
+                       ORDER BY COUNT(*) DESC) LOOP
+                v_row  := v_row + 1;
+                EXIT WHEN v_row > k_top_all;
+                v_cnt2 := v_cnt2 + r.nb;
+                v_tot  := v_tot + r.gr;
+                v_tot2 := v_tot2 + r.sgn;
+                po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.mdl, 12) || '|'
+                    || fpad(r.prd, 14) || '|' || fpad(r.usr, 20) || '|'
+                    || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.gr), 26) || '|'
+                    || fpadl(famt(r.sgn), 26) || '|' || fpad(fdt(r.d1), 16) || '|'
+                    || fpad(fdt(r.d2), 16) || '|');
+            END LOOP;
+            tbl_line('4,12,14,20,16,26,26,16,16');
+            v_cnt := v_cnt + v_cnt2;
+            v_mt  := v_mt + ABS(v_tot2);
+            IF v_row = 0 THEN
+                po('    Nothing. This account is touched by the interface and by nobody');
+                po('    else, which is how it should be.');
+            ELSE
+                print_kv('    Lines not posted by the interface', fnum(v_cnt2));
+                print_kv('    Gross flow they represent',         fmio(v_tot));
+                print_kv('    Balance they leave on the account', famt(v_tot2));
+            END IF;
         END LOOP;
-        tbl_line('4,20,10,12,18,16,26,26,16,16');
-        IF v_row = 0 THEN
-            po('  Nothing. The three transit accounts are touched by the interface and');
-            po('  by nobody else, which is how it should be.');
-        END IF;
+        po('');
+        print_kv('Lines on the transit accounts not posted by the interface', fnum(v_cnt));
+        print_kv('Balance they leave, signs ignored',                         famt(v_mt));
         p_test('CAL-14', 'A transit account of the interface is used by the interface only');
         p_obj('these three accounts exist for one automated interface. An');
         po('                   entry on them from another module, another product or a human');

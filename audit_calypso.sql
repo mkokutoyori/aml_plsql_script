@@ -30,8 +30,13 @@
 --             What it still carries is the accounting measure of what has
 --             not been closed. It is the one figure in this report that
 --             cannot be explained away.
---             It is read on the WHOLE ACCOUNT, not on the Calypso slice of
---             it: an account has to come back to nil whoever posted on it,
+--             Section 2.1 a first settles whether there are only three of
+--             them, by listing every account the interface moves that this
+--             script has not declared: the three bridges are a parameter
+--             inherited from an earlier analysis, not a fact of the system.
+--             The balance is read on the WHOLE ACCOUNT, not on the Calypso
+--             slice of it: an account has to come back to nil whoever posted
+--             on it,
 --             and a manual correction on the plumbing between two systems is
 --             exactly what an audit looks for. The balance is then split
 --             into what the interface posted, what anything else posted, and
@@ -56,7 +61,7 @@
 --   trn_dt >= the go live AND trn_dt < the day after the cut off, so a
 --   balance printed here is the balance AT that date. A query written
 --   trn_dt >= the cut off measures the movement AFTER it instead, and will
---   never reproduce this report. Section 2.1 a prints the exact query that
+--   never reproduce this report. Section 2.1 b prints the exact query that
 --   reproduces its own headline figures.
 --
 --   ONE GRANT IS REQUIRED BEYOND READ ACCESS: EXECUTE on the function
@@ -76,10 +81,10 @@
 --   PART 1  - the interface, its footprint and its narrative
 --             1.1 footprint   1.2 calendar   1.3 THE NARRATIVE   1.4 accounts
 --   PART 2  - THE TRANSIT ACCOUNTS AND THEIR RESIDUAL BALANCE  CAL-01, 02,
---                                                              03 and 14
---             2.1 a how much and who put it there   b in proportion
---                 c who else posts   d growing   e age   f named
---                 g the other pairs
+--                                                              03, 14, 15
+--             2.1 a are there only three   b how much and who put it there
+--                 c in proportion   d who else posts   e growing   f age
+--                 g named   h the other pairs
 --   PART 3  - THE PORTFOLIO DEDUCED FROM THE ENTRIES           CAL-04 to 06
 --             3.1 a position   b month by month   c SECURITY BY SECURITY
 --                 d accrued interest   e off balance sheet   f income
@@ -195,6 +200,22 @@ DECLARE
     k_cy_exp_mm   VARCHAR2(20) := '601100100';  -- interest expense, money market
     k_cy_com_pf   VARCHAR2(20) := '725000100';  -- portfolio management commission
     k_cy_com_fx   VARCHAR2(20) := '625000105';  -- commission paid on FX purchases
+
+    -- Every account the review has mapped, assembled from the parameters above
+    -- and used by 2.1 a to answer one question: does the interface touch
+    -- anything this script has not declared. Framed by commas so a membership
+    -- test is INSTR(k_cy_known, ',' || ac_no || ',').
+    k_cy_known    VARCHAR2(1000) :=
+        ',' || k_cy_brg_sec || ',' || k_cy_brg_mm  || ',' || k_cy_brg_mir ||
+        ',' || k_cy_bond    || ',' || k_cy_bill    || ',' || k_cy_accr    ||
+        ',' || k_cy_def_b   || ',' || k_cy_def_t   || ',' || k_cy_prov    ||
+        ',' || k_cy_borrow  || ',' || k_cy_debt    || ',' || k_cy_fx_pos  ||
+        ',' || k_cy_fx_cv   || ',' || k_cy_col_gl  || ',' || k_cy_col_ti  ||
+        ',' || k_cy_ob_fxb  || ',' || k_cy_ob_fxs  || ',' || k_cy_ob_fwd  ||
+        ',' || k_cy_ob_adj  || ',' || k_cy_cus_t   || ',' || k_cy_cus_c   ||
+        ',' || k_cy_inc_b   || ',' || k_cy_inc_br  || ',' || k_cy_inc_t   ||
+        ',' || k_cy_inc_tr  || ',' || k_cy_exp_mm  || ',' || k_cy_com_pf  ||
+        ',' || k_cy_com_fx  || ',';
 
     -- Calypso thresholds
     k_cy_age      NUMBER := 30;           -- tolerated age of a bridge item, in days
@@ -1299,7 +1320,101 @@ BEGIN
         po('  Who put it there. Is it growing. And how old it is, deal by deal.');
 
         -- -----------------------------------------------------
-        print_sub('2.1 a. What each transit account carries at ' || fdt(k_cy_to)
+        print_sub('2.1 a. Are there only three transit accounts');
+        po('  THE THREE BRIDGES ARE NOT A FACT OF THE SYSTEM, THEY ARE A PARAMETER');
+        po('  OF THIS SCRIPT. They were named by an earlier analysis run over six');
+        po('  months of entries, and that analysis worked on an extract which itself');
+        po('  filtered out the accounts beginning with ' || k_cy_excl || '. Nothing guarantees the');
+        po('  list is complete, and a transit account nobody declared is a transit');
+        po('  account nobody reconciles.');
+        po('');
+        po('  So the question is settled here rather than assumed. The table lists');
+        po('  EVERY account the interface has moved that this script has NOT declared');
+        po('  in section 0.4. If it is empty, the map is complete and the three');
+        po('  bridges are the three transit accounts. If it is not, each line is an');
+        po('  account to classify, and any of them carrying a balance in class 4');
+        po('  belongs in the parameter block beside the other three.');
+        po('');
+        po('  GROSS OVER BALANCE is the signature of plumbing: a transit account');
+        po('  passes an enormous flow and keeps almost nothing. Read it with the');
+        po('  class, but do not read it alone, because the daily valuation engine');
+        po('  produces the same signature on the income accounts for a completely');
+        po('  different reason (section 4.1).');
+        tbl_head('4,20,8,32,16,26,26,18,24',
+                 'N#|ACCOUNT|CLASS|ACCOUNT NAME|LINES|GROSS FLOW|BALANCE'
+                 || '|GROSS OVER BALANCE|WHAT IT LOOKS LIKE',
+                 '|AC_NO| |AC_GL_DESC|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT| | ',
+                 'RLLLRRRRL');
+        v_row := 0;
+        v_cnt := 0;
+        v_mt  := 0;
+        FOR r IN (SELECT h.ac_no, MAX(s.lib) lib, COUNT(*) nb,
+                         SUM(ABS(NVL(h.lcy_amount, 0))) gr,
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                             ELSE -NVL(h.lcy_amount, 0) END) sgn
+                    FROM actb_history h
+                    LEFT JOIN (SELECT ac_gl_no, MAX(ac_gl_desc) lib
+                                 FROM sttb_account GROUP BY ac_gl_no) s
+                           ON s.ac_gl_no = h.ac_no
+                   WHERE h.module = k_cy_mod
+                         AND h.product = k_cy_prod
+                         AND LOWER(h.user_id) LIKE k_cy_upat
+                         AND h.trn_dt >= k_cy_from
+                         AND h.trn_dt <  k_cy_to + 1
+                     AND INSTR(k_cy_known, ',' || h.ac_no || ',') = 0
+                   GROUP BY h.ac_no
+                   ORDER BY SUM(ABS(NVL(h.lcy_amount, 0))) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top_all;
+            v_cnt := v_cnt + 1;
+            IF SUBSTR(r.ac_no, 1, 1) = '4' THEN
+                v_mt := v_mt + ABS(r.sgn);
+            END IF;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|'
+                || fpad(SUBSTR(r.ac_no, 1, 3), 8) || '|' || fpad(r.lib, 32) || '|'
+                || fpadl(fnum(r.nb), 16) || '|' || fpadl(fmio(r.gr), 26) || '|'
+                || fpadl(famt(r.sgn), 26) || '|'
+                || fpadl(CASE WHEN ABS(r.sgn) <= k_tol_abs THEN 'nil balance'
+                              ELSE fnum(ROUND(r.gr / ABS(r.sgn))) END, 18) || '|'
+                || fpad(CASE WHEN SUBSTR(r.ac_no, 1, 1) = '4'
+                              AND ABS(r.sgn) > k_tol_abs THEN 'TRANSIT, TO DECLARE'
+                             WHEN SUBSTR(r.ac_no, 1, 1) = '4' THEN 'transit, cleared'
+                             WHEN SUBSTR(r.ac_no, 1, 1) = '9' THEN 'off balance sheet'
+                             WHEN SUBSTR(r.ac_no, 1, 1) IN ('6', '7')
+                                  THEN 'income or expense'
+                             WHEN SUBSTR(r.ac_no, 1, 3) = k_cy_excl
+                                  THEN 'the excluded family'
+                             ELSE 'balance sheet' END, 24) || '|');
+        END LOOP;
+        tbl_line('4,20,8,32,16,26,26,18,24');
+        IF v_row = 0 THEN
+            po('  Empty. Every account the interface moves is declared in section 0.4,');
+            po('  and the three bridges are the three transit accounts of the process.');
+        ELSE
+            print_kv('Accounts moved but not declared',        fnum(v_cnt));
+            print_kv('Of which class 4 carrying a balance',    famt(v_mt) || ' XAF');
+            po('  Each line has to be classified before the residual analysis below can');
+            po('  be called complete. An account of class 4 carrying a balance is a');
+            po('  transit account in all but name: add it to the parameter block, beside');
+            po('  ' || k_cy_brg_sec || ', ' || k_cy_brg_mm || ' and ' || k_cy_brg_mir || ', and run the script again.');
+        END IF;
+        p_test('CAL-15', 'The map of the accounts the interface moves is complete');
+        p_obj('this report tests three transit accounts because an earlier');
+        po('                   analysis named three. That analysis ran on six months of entries,');
+        po('                   from an extract that excluded the ' || k_cy_excl || ' family, so the list is a');
+        po('                   working assumption and not a fact. An account the interface');
+        po('                   moves and nobody declared is an account nobody reconciles, and');
+        po('                   if it is a transit account it is carrying a residual that no');
+        po('                   control in this report is looking at.');
+        p_how('every AC_NO moved by the interface over the period that is not');
+        po('                   in the list assembled in the parameter block from section 0.4. The');
+        po('                   amount reported is the balance carried by those of them that sit');
+        po('                   in class 4, the regularisation and liaison classes, since those');
+        po('                   are the ones that would be transit accounts.');
+        p_verdict('CAL-15', 'Account moved by the interface and not declared by this review',
+                  v_cnt, NULL, v_mt, 'HIGH');
+        -- -----------------------------------------------------
+        print_sub('2.1 b. What each transit account carries at ' || fdt(k_cy_to)
                   || ', and who put it there');
         po('  BALANCE is credit minus debit, as this bank computes it and as the');
         po('  general ledger shows it. A positive figure is a credit balance left on');
@@ -1406,7 +1521,7 @@ BEGIN
         po('     ORDER BY h.ac_no;');
 
         -- -----------------------------------------------------
-        print_sub('2.1 b. The same in proportion, and the volume behind it');
+        print_sub('2.1 c. The same in proportion, and the volume behind it');
         po('  BALANCE OVER GROSS puts the residual in proportion: a balance of a few');
         po('  parts per million of the flow is a handful of unsettled deals, a');
         po('  balance of several percent is a mechanism that does not clear.');
@@ -1442,7 +1557,7 @@ BEGIN
         tbl_line('4,20,16,20,18,26,26,20,16,16');
 
         -- -----------------------------------------------------
-        print_sub('2.1 c. Who else posts on a transit account');
+        print_sub('2.1 d. Who else posts on a transit account');
         po('  Everything on the three bridges that is NOT the interface, broken down');
         po('  by module, product and user. A transit account of an automated');
         po('  interface should be touched by that interface and by nothing else.');
@@ -1501,13 +1616,13 @@ BEGIN
         po('                   not module ' || k_cy_mod || ' product ' || k_cy_prod
                              || ' by a user matching ' || k_cy_upat || ' on or after');
         po('                   ' || fdt(k_cy_from) || '. Entries predating the go live are counted here');
-        po('                   too and shown separately in 2.1 a: they are not the interface');
+        po('                   too and shown separately in 2.1 b: they are not the interface');
         po('                   failing, they are what the account already carried.');
         p_verdict('CAL-14', 'Entry on a transit account that the interface did not post',
                   v_cnt, NULL, v_mt, 'HIGH');
 
         -- -----------------------------------------------------
-        print_sub('2.1 d. Is the balance growing, month by month');
+        print_sub('2.1 e. Is the balance growing, month by month');
         po('  MOVEMENT is what the month added to the account, ALL sources, and');
         po('  RUNNING BALANCE what is left at the end of it. A transit account that');
         po('  works oscillates around nil. One that drifts in the same direction');
@@ -1547,7 +1662,7 @@ BEGIN
         tbl_line('4,20,14,26,26,30,16');
 
         -- -----------------------------------------------------
-        print_sub('2.1 e. How old the unmatched items are');
+        print_sub('2.1 f. How old the unmatched items are');
         po('  The balance is broken down by DEAL KEY, the identifier the description');
         po('  carries, because a Calypso deal is scattered over several FLEXCUBE');
         po('  references and only that key puts it back together. On an entry that');
@@ -1688,7 +1803,7 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        print_sub('2.1 f. The unmatched items that carry the most, named');
+        print_sub('2.1 g. The unmatched items that carry the most, named');
         po('  The same population without the age filter, ranked by what it carries.');
         po('  SOURCE says whether the item was posted by the interface or by');
         po('  something else, so the reader knows who to ask. ROUND marks a balance');
@@ -1744,7 +1859,7 @@ BEGIN
         tbl_line('4,26,20,20,28,14,14,12,12');
 
         -- -----------------------------------------------------
-        print_sub('2.1 g. The other accounts that have to come back to nil');
+        print_sub('2.1 h. The other accounts that have to come back to nil');
         po('  A transit account is not the only one that has to offset. The FX');
         po('  position account and its counter value account must offset each other');
         po('  to the franc; the off balance sheet commitments must be reversed when');
@@ -2879,6 +2994,8 @@ BEGIN
                            '4', 'yes' FROM DUAL
                     UNION ALL SELECT 14, 'CAL-14', 'A transit account is used by the interface only',
                            '2', 'yes' FROM DUAL
+                    UNION ALL SELECT 15, 'CAL-15', 'The map of the accounts moved is complete',
+                           '2', 'yes' FROM DUAL
                   ) ORDER BY n) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.cd, 12) || '|'
@@ -2902,27 +3019,35 @@ BEGIN
         print_kv('First entry, last entry',  fdt(v_cy_d1) || ' to ' || fdt(v_cy_d2));
 
         print_sub('5.5 Limitations of the review');
-        po('  1. Part 2 reads the transit accounts on the WHOLE account, every');
+        po('  1. THE THREE TRANSIT ACCOUNTS ARE A PARAMETER, NOT A FACT. They were');
+        po('     named by an earlier analysis that ran on six months of entries and');
+        po('     on an extract excluding the ' || k_cy_excl || ' family. Section 2.1 a settles the');
+        po('     question by listing every account the interface moves that this');
+        po('     script has not declared, and CAL-15 fails when that list is not');
+        po('     empty. Until it is empty, or until every line on it has been');
+        po('     classified, the residual analysis of part 2 is complete for three');
+        po('     accounts and silent on any other.');
+        po('  2. Part 2 reads the transit accounts on the WHOLE account, every');
         po('     entry whatever its origin, because an account has to return to nil');
         po('     whoever posted on it. Everywhere else the population is the');
-        po('     interface only. Section 2.1 a splits the balance into what Calypso');
+        po('     interface only. Section 2.1 b splits the balance into what Calypso');
         po('     posted, what anything else posted and what predated the go live, so');
         po('     the two scopes can be tied together on the page.');
-        po('  2. Calypso posts entries and creates no contract. Nothing here can be');
+        po('  3. Calypso posts entries and creates no contract. Nothing here can be');
         po('     reconciled to a deal file, because none is sent. The portfolio of');
         po('     part 3 IS the portfolio, not a control against one.');
-        po('  3. The business information lives in the description returned by');
+        po('  4. The business information lives in the description returned by');
         po('     webserve.FN_GET_DESC, which is code the audit does not control.');
         po('     Section 1.3 measures how far it can be trusted. If it shows more');
         po('     than one field count, the positional reading is right for one');
         po('     format only, and the token offset k_cy_p0 has to be set for the');
         po('     format that matters before the figures are used.');
-        po('  4. The review is cut off at ' || fdt(k_cy_to) || '. Residual balances, positions and');
+        po('  5. The review is cut off at ' || fdt(k_cy_to) || '. Residual balances, positions and');
         po('     ages are all read at that date, and section 1.1 a prints how much');
         po('     activity lies beyond it.');
-        po('  5. Gross totals on the accounts of section 4.1 are inflated by the');
+        po('  6. Gross totals on the accounts of section 4.1 are inflated by the');
         po('     post and reverse engine and must never be used as statistics.');
-        po('  6. Seven questions cannot be answered from the ledger at all. They are');
+        po('  7. Seven questions cannot be answered from the ledger at all. They are');
         po('     listed in section 4.4 with what has to be asked of the front');
         po('     office. None of them should be closed on an assumption.');
 

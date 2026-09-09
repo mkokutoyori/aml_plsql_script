@@ -134,7 +134,7 @@ can run on it — they all need a deal file that does not exist.
 **The two paradigms must never be mixed in one report.** In the MM module a
 security is a contract and every control confronts the entries with its terms;
 in Calypso there are only entries. `audit_calypso.sql` is therefore a separate,
-standalone script — its own parameters, its own controls (CAL-01 to CAL-14),
+standalone script — its own parameters, its own controls (CAL-01 to CAL-15),
 its own summary — cut off at 31/08/2026. `audit_securities.sql` says in its
 header what it does not cover and points there; it must not grow a Calypso
 section again.
@@ -166,6 +166,19 @@ Calypso deal key, never by `TRN_REF_NO` (one reference per *event*, so every
 reference is unbalanced on the bridge by design). A residual that is an exact
 multiple of a billion is one whole missing leg, not a drift, and is resolvable
 in a single query.
+
+**The three bridges are a parameter, not a fact.** They were named by an
+analysis that ran on six months of entries, from an extract that itself
+excluded the `4526%` family — so the list is a working assumption. Never let a
+report imply otherwise. Section 2.1 a of `audit_calypso.sql` settles it by
+listing **every account the interface moves that the script has not declared**
+(membership tested against `k_cy_known`, assembled from the parameter block),
+with its class, its gross flow, its balance and the gross-over-balance ratio
+that is the signature of plumbing. CAL-15 fails while that list is not empty:
+an account of class 4 carrying a balance is a transit account in all but name
+and belongs in the parameter block beside the other three. The ratio alone
+does not identify a transit account — the daily valuation engine produces the
+same signature on the income accounts for an entirely different reason.
 
 **Read a transit account WHOLE, not as the Calypso slice of it.** It has to
 come back to nil *as an account*, whoever posted on it, and a manual correction
@@ -283,7 +296,7 @@ Two traps:
   family.
 - `audit_calypso.sql` — the Calypso interface audit script (English). Entries
   only, no contract: transit account residuals read on the whole account, the
-  portfolio rebuilt from the entries, CAL-01 to CAL-14. Standalone, run on its own.
+  portfolio rebuilt from the entries, CAL-01 to CAL-15. Standalone, run on its own.
 - `audit_marche_monetaire.sql` — the previous money-market script (French),
   kept for reference; do not delete.
 - `explore_mm_operations.sql`, `explore_fx_operations.sql` — exploration

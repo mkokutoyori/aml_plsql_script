@@ -206,7 +206,8 @@ DECLARE
 
     -- ========================================================================
     -- Display helpers
-    -- ========================================================================    PROCEDURE po(t VARCHAR2) IS
+    -- ========================================================================
+    PROCEDURE po(t VARCHAR2) IS
     BEGIN
         DBMS_OUTPUT.PUT_LINE(t);
     END;
@@ -427,6 +428,7 @@ DECLARE
         END IF;
         po(v_l);
     END;
+
     -- ========================================================================
     -- THE CALYPSO ITEM TABLE
     -- Calypso posts entries, not contracts, so a finding there cannot name a

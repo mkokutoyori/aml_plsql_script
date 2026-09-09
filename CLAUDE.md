@@ -199,11 +199,25 @@ Two traps:
   class, `SUBSTR(AC_NO, 1, 4)`, so a sub-account opened later inside an
   authorised class is caught without amending the script. Use
   `AC_NATURAL_GL` only as a second-rank fallback.
+- **In this bank the balance is CREDIT MINUS DEBIT.** Every signed sum is
+  therefore `CASE drcr_ind WHEN 'C' THEN amount ELSE -amount END`, and that is
+  what the general ledger shows. On an asset — a security account, an accrued
+  receivable, a nostro — the balance is consequently **negative** while the
+  bank still holds something. Do not "fix" that sign at the source: a report
+  whose balances do not match the ledger is useless at the reconciliation
+  stage.
+  Where a figure has to be read in its natural sense instead, call it a
+  **POSITION**, compute it as `-balance` for a debit-nature account (`+balance`
+  for an income or a deferred income), and say so in the column heading. The
+  two words are used consistently in both scripts and are defined in PART 0.
+  Whenever a balance is compared with a positive expected amount — a nominal,
+  a theoretical coupon, a rebuilt position — the comparison is against the
+  POSITION, never the balance: that is exactly where a blind sign flip breaks
+  a control (LIF-06, CUT-03, CUT-05, CPN-02, INT-05 and 1.12 all depend on it).
 - **A reversal does not flip the direction: it repeats the same `DRCR_IND`
-  with a NEGATIVE `LCY_AMOUNT`.** Every total must therefore be a SIGNED sum
-  (`CASE drcr_ind WHEN 'D' THEN amount ELSE -amount END`). Summing gross
-  debits against gross credits reads reversals backwards and inflates both
-  columns.
+  with a NEGATIVE `LCY_AMOUNT`.** The signed sum above nets them correctly.
+  Summing gross debits against gross credits reads reversals backwards and
+  inflates both columns.
 - Never de-duplicate with `SELECT DISTINCT` on the whole row: legitimately
   identical lines exist and only the technical key separates them.
 - `STTB_ACCOUNT` holds several rows per `AC_GL_NO`. Always join through a

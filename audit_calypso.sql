@@ -626,11 +626,26 @@ BEGIN
         po('  and no entry can say which of the two is right.');
 
         print_sub('0.5 Reading the report');
-        po('  SIGNED BALANCE is always debits minus credits. On an asset account it');
-        po('  is the position; on a liability or an income account a credit balance');
-        po('  shows as a negative figure. Gross debit and gross credit are printed');
-        po('  separately where they help, and section 4.1 says exactly on which');
-        po('  accounts they must not be used.');
+        po('  TWO WORDS, AND THEY ARE NOT THE SAME THING.');
+        po('');
+        po('    BALANCE   the balance as this bank computes it, CREDIT MINUS DEBIT.');
+        po('              That is the figure the general ledger shows, so it is the');
+        po('              figure this report prints wherever a column is called a');
+        po('              balance, a residual or a net. On an asset the balance is');
+        po('              therefore NEGATIVE when the bank holds something: a');
+        po('              security account carrying paper shows a debit balance,');
+        po('              which in credit minus debit is a negative number.');
+        po('    POSITION  what the bank actually holds, in its natural sense and');
+        po('              always positive when normal. On a debit nature account it');
+        po('              is MINUS the balance; on a credit nature account, an');
+        po('              income or a deferred income, it is the balance itself.');
+        po('');
+        po('  Every column says which of the two it is. The portfolio of part 3 is');
+        po('  given in positions, because a portfolio read in negative numbers helps');
+        po('  nobody; the bridge residuals of part 2 are given as balances, because');
+        po('  that is what has to be matched against the ledger. Gross debit and');
+        po('  gross credit are printed separately where they help, and section 4.1');
+        po('  says exactly on which accounts they must not be used.');
         po('');
         po('  Each test prints why it matters, how it is run, and a verdict:');
         po('');
@@ -747,7 +762,7 @@ BEGIN
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
         print_kv('Gross debits',  fmio(v_tot));
         print_kv('Gross credits', fmio(v_tot2));
-        print_kv('Difference',    famt(v_tot - v_tot2)
+        print_kv('Balance (credits minus debits)', famt(v_tot2 - v_tot)
                  || CASE WHEN ABS(v_tot - v_tot2) <= k_tol_abs
                          THEN '   the whole population balances'
                          ELSE '   THE POPULATION DOES NOT BALANCE' END);
@@ -854,11 +869,11 @@ BEGIN
         -- =====================================================
         print_sub('1.2 The posting calendar, month by month');
         po('  LINES is the volume, DATES the number of business days used, WEEKEND');
-        po('  the lines dated on a Saturday or a Sunday. NET is the signed total,');
-        po('  debits minus credits, and it must be nil every month: an interface');
-        po('  that posts an unbalanced month has lost an entry on the way.');
+        po('  the lines dated on a Saturday or a Sunday. BALANCE is credit minus');
+        po('  debit, and it must be nil every month: an interface that posts an');
+        po('  unbalanced month has lost an entry on the way.');
         tbl_head('4,14,18,12,14,28,24,16',
-                 'N#|MONTH|LINES|DATES|WEEKEND|GROSS AMOUNT|NET (D minus C)|VERDICT',
+                 'N#|MONTH|LINES|DATES|WEEKEND|GROSS AMOUNT|BALANCE (C minus D)|VERDICT',
                  '|TRN_DT|TRN_REF_NO|TRN_DT|TRN_DT|LCY_AMOUNT|LCY_AMOUNT| ',
                  'RLRRRRRR');
         v_row := 0;
@@ -868,7 +883,7 @@ BEGIN
                          SUM(CASE WHEN TRUNC(h.trn_dt) - TRUNC(h.trn_dt, 'IW') >= 5
                                   THEN 1 ELSE 0 END) nbw,
                          SUM(ABS(NVL(h.lcy_amount, 0))) mt,
-                         SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) sgn
                     FROM actb_history h
                    WHERE h.module = k_cy_mod
@@ -1118,12 +1133,12 @@ BEGIN
         tbl_line('4,26,18,22,26,18,18,18');
 
         print_sub('1.3 b. The events Calypso posts');
-        po('  Each event is a leg of a deal, never a whole deal. NET is the signed');
-        po('  total of the event over the period: an event that posts and reverses');
-        po('  itself, like the daily valuation engine, nets to nearly nothing while');
+        po('  Each event is a leg of a deal, never a whole deal. BALANCE is credit');
+        po('  minus debit over the period: an event that posts and reverses itself,');
+        po('  like the daily valuation engine, comes back to nearly nothing while');
         po('  moving billions gross. That contrast is the subject of 4.1.');
         tbl_head('4,28,22,28,26,18,18',
-                 'N#|EVENT|LINES|GROSS AMOUNT|NET (D minus C)|FIRST|LAST',
+                 'N#|EVENT|LINES|GROSS AMOUNT|BALANCE (C minus D)|FIRST|LAST',
                  '|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT|TRN_DT|TRN_DT',
                  'RLRRRLL');
         v_row := 0;
@@ -1137,7 +1152,7 @@ BEGIN
                                                       h.event, h.instrument_code, h.related_customer,
                                                       h.value_dt, h.trn_dt, h.related_reference) dsc,
                                  ABS(NVL(h.lcy_amount, 0)) mt,
-                                 CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                 CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                  ELSE -NVL(h.lcy_amount, 0) END sgn,
                                  h.trn_dt dt
                             FROM actb_history h
@@ -1159,16 +1174,16 @@ BEGIN
 
         -- =====================================================
         print_sub('1.4 Every account Calypso moves');
-        po('  The complete map of the interface on the chart of accounts. SIGNED');
-        po('  BALANCE is what the account carries at ' || fdt(k_cy_to) || ' from Calypso entries');
-        po('  ALONE, debits minus credits: on an asset account it is the position,');
-        po('  on a liability or income account a credit balance shows as negative.');
-        po('  Read it with the class, first two digits: 5 balance sheet securities');
-        po('  and treasury, 4 transit and deferred income, 6 expense, 7 income,');
-        po('  9 off balance sheet.');
+        po('  The complete map of the interface on the chart of accounts. BALANCE is');
+        po('  what the account carries at ' || fdt(k_cy_to) || ' from Calypso entries ALONE, in the');
+        po('  convention of this bank, CREDIT MINUS DEBIT. A security account holding');
+        po('  paper therefore shows a NEGATIVE balance, and an income account a');
+        po('  positive one. Read it with the class, first two digits: 5 balance sheet');
+        po('  securities and treasury, 4 transit and deferred income, 6 expense,');
+        po('  7 income, 9 off balance sheet.');
         tbl_head('4,20,8,40,20,26,26,26,16,16',
                  'N#|ACCOUNT|CLASS|ACCOUNT NAME|LINES|GROSS DEBIT|GROSS CREDIT'
-                 || '|SIGNED BALANCE|FIRST|LAST',
+                 || '|BALANCE (C minus D)|FIRST|LAST',
                  '|AC_NO| |AC_GL_DESC|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT'
                  || '|TRN_DT|TRN_DT',
                  'RLLLRRRRLL');
@@ -1178,7 +1193,7 @@ BEGIN
                                   ELSE 0 END) dr,
                          SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0)
                                   ELSE 0 END) cr,
-                         SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) sgn,
                          MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
                     FROM actb_history h
@@ -1230,11 +1245,13 @@ BEGIN
 
         -- -----------------------------------------------------
         print_sub('2.1 a. How much each bridge still carries at ' || fdt(k_cy_to));
-        po('  RESIDUAL is the signed balance, debits minus credits. A negative');
-        po('  figure is a credit balance: the interface owes the clearing. RESIDUAL');
-        po('  OVER GROSS puts it in proportion: a residual of a few parts per');
-        po('  million of the flow is a handful of unsettled deals, a residual of');
-        po('  several percent is a mechanism that does not clear.');
+        po('  RESIDUAL is the balance in the convention of this bank, CREDIT MINUS');
+        po('  DEBIT. A positive figure is a credit balance left on the bridge, a');
+        po('  negative one a debit balance. Either way it is a deal the interface');
+        po('  started and did not finish. RESIDUAL OVER GROSS puts it in proportion:');
+        po('  a residual of a few parts per million of the flow is a handful of');
+        po('  unsettled deals, a residual of several percent is a mechanism that');
+        po('  does not clear.');
         tbl_head('4,20,40,20,28,28,20,18',
                  'N#|BRIDGE ACCOUNT|ACCOUNT NAME|LINES|GROSS FLOW|RESIDUAL AT CUT OFF'
                  || '|RESIDUAL OVER GROSS|VERDICT',
@@ -1248,7 +1265,7 @@ BEGIN
                   SELECT 3, k_cy_brg_mir FROM DUAL
                   ORDER BY 1) LOOP
             SELECT COUNT(*), NVL(SUM(ABS(NVL(h.lcy_amount, 0))), 0),
-                   NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                   NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_cnt2, v_tot, v_tot2
               FROM actb_history h
@@ -1284,7 +1301,8 @@ BEGIN
         po('                   at the cut off is a deal the interface started and never');
         po('                   finished, and it sits in the balance sheet as an asset or a');
         po('                   liability that belongs to nobody.');
-        p_how('signed balance of each of the three bridge accounts over the');
+        p_how('balance, credit minus debit, of each of the three bridge');
+        po('                   accounts over the');
         po('                   whole Calypso population, at ' || fdt(k_cy_to) || '. Tolerance ' || famt(k_tol_abs) || ' XAF.');
         p_verdict('CAL-01', 'Bridge account that does not return to nil',
                   v_cnt, 3, v_mt, 'CRITICAL');
@@ -1303,7 +1321,7 @@ BEGIN
         FOR r IN (SELECT ac_no, mth, mvt, nb,
                          SUM(mvt) OVER (PARTITION BY ac_no ORDER BY mth) run
                     FROM (SELECT h.ac_no, TO_CHAR(h.trn_dt, 'YYYY-MM') mth,
-                                 SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                 SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) mvt, COUNT(*) nb
                             FROM actb_history h
                            WHERE h.module = k_cy_mod
@@ -1349,7 +1367,7 @@ BEGIN
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
                                  COUNT(*) nbl,
-                                 SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                 SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) resid,
                                  CASE WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 30
                                            THEN '1. 0 to 30 days'
@@ -1376,7 +1394,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
-                          HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                          HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs)
                    GROUP BY bucket
                    ORDER BY bucket) LOOP
@@ -1403,7 +1421,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
-                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) resid,
                        MAX(h.trn_dt) dlast
                   FROM actb_history h
@@ -1420,7 +1438,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
-                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
                    AND TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) > k_cy_age);
         p_test('CAL-02', 'No item stays on a bridge account beyond the tolerated age');
@@ -1476,7 +1494,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|')) ins,
                                        MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) resid
                                   FROM actb_history h
                                  WHERE h.module = k_cy_mod
@@ -1537,7 +1555,7 @@ BEGIN
                                                h.related_customer, h.value_dt, h.trn_dt,
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
-                           SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) resid,
                            MIN(h.trn_dt) d1, MAX(h.trn_dt) d2, COUNT(*) nb
                       FROM actb_history h
@@ -1554,9 +1572,9 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
-                    HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                    HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                     ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                     ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) DESC
                   ) WHERE ROWNUM <= k_top) LOOP
             v_row := v_row + 1;
@@ -1596,10 +1614,10 @@ BEGIN
                   SELECT 5, 'Client custody, third party pool against client position',
                          k_cy_cus_t, k_cy_cus_c FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT NVL(SUM(CASE WHEN h.ac_no = r.a1 THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT NVL(SUM(CASE WHEN h.ac_no = r.a1 THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
-                   NVL(SUM(CASE WHEN h.ac_no = r.a2 THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                   NVL(SUM(CASE WHEN h.ac_no = r.a2 THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0)
               INTO v_tot, v_tot2
@@ -1625,7 +1643,8 @@ BEGIN
         po('                   counter value, a commitment and its reversal, a pledge and its');
         po('                   release. What does not offset is either a deal still open, which');
         po('                   must be identifiable, or a leg that was never sent.');
-        p_how('signed balance of the two accounts of each pair, added. Five');
+        p_how('balance, credit minus debit, of the two accounts of each pair,');
+        po('                   added. Five');
         po('                   pairs tested, tolerance ' || famt(k_tol_abs) || ' XAF. A net that is not nil is');
         po('                   not automatically wrong on the commitment pairs, where deals');
         po('                   straddling the cut off are normal, but it must be explained deal');
@@ -1670,30 +1689,34 @@ BEGIN
 
         -- -----------------------------------------------------
         print_sub('3.1 a. The portfolio at ' || fdt(k_cy_to) || ', line by line');
-        tbl_head('4,48,20,20,30,26',
-                 'N#|WHAT IT IS|ACCOUNT|LINES|BALANCE AT CUT OFF|LAST MOVEMENT',
-                 '| |AC_NO|TRN_REF_NO|LCY_AMOUNT|TRN_DT',
-                 'RLLRRL');
+        po('  BALANCE is credit minus debit, as the general ledger shows it, so the');
+        po('  security accounts come out NEGATIVE: they carry a debit balance.');
+        po('  POSITION is the same figure in its natural sense, positive when the');
+        po('  bank holds something, and it is what the totals below are built on.');
+        tbl_head('4,48,20,18,28,28,20',
+                 'N#|WHAT IT IS|ACCOUNT|LINES|BALANCE (C minus D)|POSITION|LAST MOVEMENT',
+                 '| |AC_NO|TRN_REF_NO|LCY_AMOUNT| |TRN_DT',
+                 'RLLRRRL');
         v_row := 0;
         v_tot := 0;
         v_tot2 := 0;
-        FOR r IN (SELECT 1 ord, 'Bonds at face value' q, k_cy_bond ac, 1 sg FROM DUAL
+        FOR r IN (SELECT 1 ord, 'Bonds at face value' q, k_cy_bond ac, -1 sg FROM DUAL
                   UNION ALL
-                  SELECT 2, 'Treasury bills at face value', k_cy_bill, 1 FROM DUAL
+                  SELECT 2, 'Treasury bills at face value', k_cy_bill, -1 FROM DUAL
                   UNION ALL
-                  SELECT 3, 'Accrued interest receivable', k_cy_accr, 1 FROM DUAL
+                  SELECT 3, 'Accrued interest receivable', k_cy_accr, -1 FROM DUAL
                   UNION ALL
-                  SELECT 4, 'Unearned income parked on the bonds', k_cy_def_b, -1 FROM DUAL
+                  SELECT 4, 'Unearned income parked on the bonds', k_cy_def_b, 1 FROM DUAL
                   UNION ALL
-                  SELECT 5, 'Unearned income parked on the bills', k_cy_def_t, -1 FROM DUAL
+                  SELECT 5, 'Unearned income parked on the bills', k_cy_def_t, 1 FROM DUAL
                   UNION ALL
-                  SELECT 6, 'Impairment provision, mark to market', k_cy_prov, -1 FROM DUAL
+                  SELECT 6, 'Impairment provision, mark to market', k_cy_prov, 1 FROM DUAL
                   UNION ALL
-                  SELECT 7, 'Overnight borrowing, repo liability', k_cy_borrow, -1 FROM DUAL
+                  SELECT 7, 'Overnight borrowing, repo liability', k_cy_borrow, 1 FROM DUAL
                   UNION ALL
-                  SELECT 8, 'Accrued interest payable on the borrowing', k_cy_debt, -1 FROM DUAL
+                  SELECT 8, 'Accrued interest payable on the borrowing', k_cy_debt, 1 FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0), MAX(h.trn_dt)
               INTO v_cnt, v_mt, v_d_max
               FROM actb_history h
@@ -1704,19 +1727,20 @@ BEGIN
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
             IF r.ord <= 2 THEN
-                v_tot := v_tot + v_mt;
+                v_tot := v_tot - v_mt;
             ELSIF r.ord IN (4, 5) THEN
-                v_tot2 := v_tot2 + (-v_mt);
+                v_tot2 := v_tot2 + v_mt;
             END IF;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.q, 48) || '|'
-                || fpad(r.ac, 20) || '|' || fpadl(fnum(v_cnt), 20) || '|'
-                || fpadl(famt(v_mt), 30) || '|' || fpad(fdt(v_d_max), 26) || '|');
+                || fpad(r.ac, 20) || '|' || fpadl(fnum(v_cnt), 18) || '|'
+                || fpadl(famt(v_mt), 28) || '|' || fpadl(famt(v_mt * r.sg), 28) || '|'
+                || fpad(fdt(v_d_max), 20) || '|');
         END LOOP;
-        tbl_line('4,48,20,20,30,26');
+        tbl_line('4,48,20,18,28,28,20');
         po('');
-        print_kv('Securities at FACE VALUE (' || k_cy_bond || ' plus ' || k_cy_bill || ')',
-                 famt(v_tot) || ' XAF   ' || fmio(v_tot));
-        print_kv('Unearned income still parked (credit balance)',
+        print_kv('Securities at FACE VALUE, position (' || k_cy_bond || ' plus '
+                 || k_cy_bill || ')', famt(v_tot) || ' XAF   ' || fmio(v_tot));
+        print_kv('Unearned income still parked, position',
                  famt(v_tot2) || ' XAF   ' || fmio(v_tot2));
         print_kv('CARRYING VALUE of the portfolio, face less unearned',
                  famt(v_tot - v_tot2) || ' XAF   ' || fmio(v_tot - v_tot2));
@@ -1728,7 +1752,10 @@ BEGIN
         print_sub('3.1 b. The portfolio month by month');
         po('  BOUGHT is what was debited to the security accounts in the month,');
         po('  SOLD what was credited, and POSITION the running face value at the end');
-        po('  of it. That series is the history of the book since the go live.');
+        po('  of it, in its natural sense. In the balance convention of the bank that');
+        po('  same position is the negative of the column, the security accounts');
+        po('  carrying a debit balance. That series is the history of the book since');
+        po('  the go live.');
         tbl_head('4,14,28,28,30,20,20',
                  'N#|MONTH|BOUGHT IN THE MONTH|SOLD IN THE MONTH|POSITION AT FACE VALUE'
                  || '|DEALS|LINES',
@@ -1772,9 +1799,14 @@ BEGIN
         print_sub('3.1 c. The portfolio line by line, security by security');
         po('  THIS IS THE PORTFOLIO. Each line is an instrument as the narrative');
         po('  names it, with what the accounts say the bank still holds of it. FACE');
-        po('  is the balance of the security accounts, UNEARNED the income still');
-        po('  parked against it, CARRYING the difference, ACCRUED the coupon');
-        po('  receivable attached to it.');
+        po('  is what the security accounts carry, UNEARNED the income still parked');
+        po('  against it, CARRYING the difference, ACCRUED the coupon receivable');
+        po('  attached to it.');
+        po('');
+        po('  ALL FOUR ARE POSITIONS, not balances: they are printed in their natural');
+        po('  sense, positive when the bank holds something. In the balance');
+        po('  convention of the bank, credit minus debit, FACE and ACCRUED are the');
+        po('  negatives of what is shown, UNEARNED is as shown.');
         po('');
         po('  An instrument whose FACE is nil has been fully sold or redeemed and is');
         po('  not printed. One whose FACE is nil but which still carries UNEARNED or');
@@ -1807,14 +1839,14 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
                            SUM(CASE WHEN h.ac_no IN (k_cy_bond, k_cy_bill)
-                                    THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END) face,
+                                    THEN -(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                       ELSE -NVL(h.lcy_amount, 0) END) ELSE 0 END) face,
                            SUM(CASE WHEN h.ac_no IN (k_cy_def_b, k_cy_def_t)
-                                    THEN -(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) ELSE 0 END) unearned,
+                                    THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                       ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END) unearned,
                            SUM(CASE WHEN h.ac_no = k_cy_accr
-                                    THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END) accrued,
+                                    THEN -(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                       ELSE -NVL(h.lcy_amount, 0) END) ELSE 0 END) accrued,
                            COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
                                                h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
@@ -1865,7 +1897,7 @@ BEGIN
         po('  difference is itself the finding, and CAL-04 measures it.');
 
         SELECT NVL(SUM(CASE WHEN h.ac_no IN (k_cy_bond, k_cy_bill)
-                            THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                            THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END), 0),
                NVL(SUM(CASE WHEN h.ac_no IN (k_cy_bond, k_cy_bill)
                              AND TRIM(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
@@ -1875,7 +1907,7 @@ BEGIN
                                                  h.related_customer, h.value_dt, h.trn_dt,
                                                  h.related_reference) || '|', '[^|]*\|',
                                              1, k_cy_t_lbl + k_cy_p0), '|')) IS NULL
-                            THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                            THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END), 0)
           INTO v_tot, v_tot2
           FROM actb_history h
@@ -1892,7 +1924,7 @@ BEGIN
         po('                   attributed to any paper, cannot be valued, cannot be confirmed');
         po('                   with the custodian and cannot be sold knowingly. It is a');
         po('                   position the bank owns without being able to say what it is.');
-        p_how('signed balance of the security accounts (' || k_cy_bond || ' and ' || k_cy_bill || ')');
+        p_how('balance of the security accounts (' || k_cy_bond || ' and ' || k_cy_bill || ')');
         po('                   whose instrument field is empty in the description, against the');
         po('                   total balance of the same accounts.');
         IF ABS(v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
@@ -1906,8 +1938,10 @@ BEGIN
         po('  income recognised on cash the bank has not received, and it is the');
         po('  single most likely place for an overstatement in this book.');
         po('');
-        po('  AGE is counted from the last entry touching that instrument to');
-        po('  ' || fdt(k_cy_to) || '. An accrued balance whose last movement is old is either a');
+        po('  ACCRUED CARRIED is a position, printed in its natural sense; the');
+        po('  balance of the account in credit minus debit is its negative. AGE is');
+        po('  counted from the last entry touching that instrument to');
+        po('  ' || fdt(k_cy_to) || '. An accrued position whose last movement is old is either a');
         po('  coupon collected outside Calypso and never cleared here, or a coupon');
         po('  that was never collected at all.');
         tbl_head('4,44,16,28,20,16,16,20',
@@ -1932,7 +1966,7 @@ BEGIN
                                                    h.related_customer, h.value_dt, h.trn_dt,
                                                    h.related_reference) || '|', '[^|]*\|',
                                                1, k_cy_t_book + k_cy_p0), '|')) book,
-                                   SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                   -SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) accrued,
                                    COUNT(*) nb, MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
                               FROM actb_history h
@@ -1968,7 +2002,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
-                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) accrued,
                        MAX(h.trn_dt) d2
                   FROM actb_history h
@@ -1985,7 +2019,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
-                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
                    AND MONTHS_BETWEEN(k_cy_to, MAX(h.trn_dt)) > k_cy_age_c);
         p_test('CAL-05', 'Accrued interest does not sit uncollected indefinitely');
@@ -1993,7 +2027,7 @@ BEGIN
         po('                   cashed. One that has not moved for more than ' || TO_CHAR(k_cy_age_c) || ' months is');
         po('                   income taken to the profit and loss against cash that never');
         po('                   arrived, and it is carried in the balance sheet as an asset.');
-        p_how('per Calypso deal key, signed balance of account ' || k_cy_accr || ' and');
+        p_how('per Calypso deal key, balance of account ' || k_cy_accr || ' and');
         po('                   date of its last entry. A balance not nil whose last entry is');
         po('                   more than ' || TO_CHAR(k_cy_age_c) || ' months before ' || fdt(k_cy_to) || ' is a finding.');
         p_verdict('CAL-05', 'Accrued interest untouched beyond the tolerated age',
@@ -2041,7 +2075,7 @@ BEGIN
                                                h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|')) ins,
                                        MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) accrued
                                   FROM actb_history h
                                  WHERE h.module = k_cy_mod
@@ -2093,7 +2127,7 @@ BEGIN
                   UNION ALL
                   SELECT 7, 'Securities held for clients', k_cy_cus_c FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0), MAX(h.trn_dt)
               INTO v_cnt, v_mt, v_d_max
               FROM actb_history h
@@ -2108,11 +2142,11 @@ BEGIN
                 || fpadl(famt(v_mt), 30) || '|' || fpad(fdt(v_d_max), 26) || '|');
         END LOOP;
         tbl_line('4,50,20,20,30,26');
-        SELECT NVL(SUM(CASE WHEN h.ac_no = k_cy_col_ti THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+        SELECT NVL(SUM(CASE WHEN h.ac_no = k_cy_col_ti THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END
                             ELSE 0 END), 0),
-               NVL(SUM(CASE WHEN h.ac_no = k_cy_borrow THEN -(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END)
+               NVL(SUM(CASE WHEN h.ac_no = k_cy_borrow THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                       ELSE -NVL(h.lcy_amount, 0) END
                             ELSE 0 END), 0)
           INTO v_tot, v_tot2
           FROM actb_history h
@@ -2123,13 +2157,13 @@ BEGIN
            AND h.ac_no IN (k_cy_col_ti, k_cy_borrow);
         print_kv('Collateral still pledged (' || k_cy_col_ti || ')',       famt(v_tot));
         print_kv('Borrowing still outstanding (' || k_cy_borrow || ')',    famt(v_tot2));
-        print_kv('Collateral in excess of the borrowing',              famt(ABS(v_tot) - v_tot2));
+        print_kv('Collateral in excess of the borrowing',              famt(v_tot - v_tot2));
         p_test('CAL-06', 'The collateral pledged is released when the borrowing is repaid');
         p_obj('securities pledged against a repo must come back to the bank');
         po('                   the day the cash is repaid. Collateral still committed with no');
         po('                   borrowing behind it is paper the bank cannot use, sell or');
         po('                   pledge again, and that nothing in the balance sheet explains.');
-        p_how('signed balance of ' || k_cy_col_ti || ' against the outstanding');
+        p_how('balance of ' || k_cy_col_ti || ' against the outstanding');
         po('                   liability on ' || k_cy_borrow || '. Some excess is normal, a repo being');
         po('                   over collateralised; a large one, or collateral with no');
         po('                   borrowing at all, is not.');
@@ -2144,11 +2178,11 @@ BEGIN
         -- -----------------------------------------------------
         print_sub('3.1 f. What the book earned and what it cost');
         po('  Signed movement of the income and expense accounts over the period.');
-        po('  These are NET figures, debits minus credits, and they are the only');
+        po('  These are BALANCES, credit minus debit, and they are the only');
         po('  ones that mean anything: section 4.1 shows why the gross totals of');
         po('  the same accounts are inflated by a factor of eighty or more.');
         tbl_head('4,50,20,20,30,26',
-                 'N#|INCOME OR EXPENSE|ACCOUNT|LINES|NET OVER THE PERIOD|LAST MOVEMENT',
+                 'N#|INCOME OR EXPENSE|ACCOUNT|LINES|BALANCE (C minus D)|LAST MOVEMENT',
                  '| |AC_NO|TRN_REF_NO|LCY_AMOUNT|TRN_DT',
                  'RLLRRL');
         v_row := 0;
@@ -2167,7 +2201,7 @@ BEGIN
                   UNION ALL
                   SELECT 7, 'Commission paid on FX purchases', k_cy_com_fx, -1 FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0), MAX(h.trn_dt)
               INTO v_cnt, v_mt, v_d_max
               FROM actb_history h
@@ -2177,7 +2211,7 @@ BEGIN
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
-            v_tot := v_tot + (-v_mt) * r.sg;
+            v_tot := v_tot + v_mt;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.q, 50) || '|'
                 || fpad(r.ac, 20) || '|' || fpadl(fnum(v_cnt), 20) || '|'
                 || fpadl(famt(v_mt), 30) || '|' || fpad(fdt(v_d_max), 26) || '|');
@@ -2185,9 +2219,9 @@ BEGIN
         tbl_line('4,50,20,20,30,26');
         print_kv('Net result of the Calypso book over the period',
                  famt(v_tot) || ' XAF   ' || fmio(v_tot));
-        po('  Income accounts carry a credit balance, so their signed movement is');
-        po('  negative; the net result above turns the signs back the right way');
-        po('  round, income positive and expense negative.');
+        po('  In credit minus debit an income account comes out POSITIVE and an');
+        po('  expense account NEGATIVE, so the net result above is simply their sum,');
+        po('  with no sign to turn round: a positive figure is a profit.');
 
     EXCEPTION
         WHEN OTHERS THEN
@@ -2224,7 +2258,7 @@ BEGIN
         FOR r IN (SELECT * FROM (
                     SELECT h.ac_no, MAX(s.lib) lib, COUNT(*) nb,
                            SUM(ABS(NVL(h.lcy_amount, 0))) gr,
-                           SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) net
                       FROM actb_history h
                       LEFT JOIN (SELECT ac_gl_no, MAX(ac_gl_desc) lib
@@ -2236,7 +2270,7 @@ BEGIN
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.ac_no
                     HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
-                           > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END))
                        AND SUM(ABS(NVL(h.lcy_amount, 0))) > 0
                      ORDER BY SUM(ABS(NVL(h.lcy_amount, 0))) DESC
@@ -2260,7 +2294,7 @@ BEGIN
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                  GROUP BY h.ac_no
                 HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
-                       > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END))
                    AND SUM(ABS(NVL(h.lcy_amount, 0))) > 0);
         p_test('CAL-07', 'Gross totals are not usable as statistics on these accounts');
@@ -2281,7 +2315,7 @@ BEGIN
         po('  provision account ' || k_cy_prov || ' is where Calypso posts that revaluation.');
         po('  If it stops moving, the portfolio stops being marked to market, and');
         po('  the balance sheet keeps showing a price that is no longer the price.');
-        SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+        SELECT COUNT(*), NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0),
                MIN(h.trn_dt), MAX(h.trn_dt), COUNT(DISTINCT TRUNC(h.trn_dt))
           INTO v_cnt2, v_mt, v_cy_d1, v_d_max, v_cnt3
@@ -2314,7 +2348,7 @@ BEGIN
         ELSE
             v_cnt := 0;
         END IF;
-        SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+        SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0) INTO v_tot
           FROM actb_history h
          WHERE h.module = k_cy_mod
@@ -2340,7 +2374,7 @@ BEGIN
         po('  balance, does it post when the bank is closed, and who approves it.');
 
         SELECT COUNT(*), NVL(SUM(ABS(sgn)), 0) INTO v_cnt, v_mt
-          FROM (SELECT TRUNC(h.trn_dt) dt, SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+          FROM (SELECT TRUNC(h.trn_dt) dt, SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) sgn
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
@@ -2348,7 +2382,7 @@ BEGIN
                                    AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                  GROUP BY TRUNC(h.trn_dt)
-                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs);
         p_test('CAL-09', 'Every posting day balances on its own');
         p_obj('an interface sends a day as a whole. If the debits and the');
@@ -2368,7 +2402,7 @@ BEGIN
             FOR r IN (SELECT * FROM (
                         SELECT TRUNC(h.trn_dt) dt, COUNT(*) nb,
                                SUM(ABS(NVL(h.lcy_amount, 0))) gr,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) sgn
                           FROM actb_history h
                          WHERE h.module = k_cy_mod
@@ -2376,9 +2410,9 @@ BEGIN
                                    AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                          GROUP BY TRUNC(h.trn_dt)
-                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
@@ -2494,12 +2528,12 @@ BEGIN
                   v_cnt, v_cy_nb, v_mt, 'MEDIUM');
         IF v_cnt > 0 THEN
             tbl_head('4,20,44,22,30,18,18',
-                     'N#|ACCOUNT|ACCOUNT NAME|LINES|SIGNED BALANCE|FIRST|LAST',
+                     'N#|ACCOUNT|ACCOUNT NAME|LINES|BALANCE (C minus D)|FIRST|LAST',
                      '|AC_NO|AC_GL_DESC|TRN_REF_NO|LCY_AMOUNT|TRN_DT|TRN_DT',
                      'RLLRRLL');
             v_row := 0;
             FOR r IN (SELECT h.ac_no, MAX(s.lib) lib, COUNT(*) nb,
-                             SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                             SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) sgn,
                              MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
                         FROM actb_history h

@@ -624,11 +624,11 @@ DECLARE
         BEGIN
             SELECT NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                      IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                      ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
                    NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) IN (k_cl_accr_pl, k_cl_accr_tr)
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                      ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
                    NVL(SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) = k_cl_defer
@@ -640,7 +640,7 @@ DECLARE
                                                      ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
                    NVL(SUM(CASE WHEN h.ac_no = k_ac_nostro OR SUBSTR(h.ac_no, 1, 2) = k_cl_cash
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                      ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
                    NVL(SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END), 0),
@@ -650,6 +650,8 @@ DECLARE
              WHERE h.trn_ref_no = p_ref AND h.module = k_mod;
             po('');
             po('    POSITION LEFT ON THE BALANCE SHEET, read from the entries');
+            po('    Balances are credit minus debit, as this bank computes them, so a');
+            po('    security or a receivable the bank still holds shows as NEGATIVE.');
             print_kv('    Securities (' || k_cl_bond_pl || ', ' || k_cl_bill_pl || ', '
                      || k_cl_bill_tr || ')', famt(v_bsec));
             print_kv('    Accrued receivable (' || k_cl_accr_pl || ', ' || k_cl_accr_tr || ')',
@@ -667,7 +669,7 @@ DECLARE
                     WHEN v_nliq > 0
                          THEN 'redeemed BUT a balance is still open, see part 2'
                     WHEN ABS(v_bsec) > k_tol_abs
-                         THEN 'still held, position of ' || famt(v_bsec) || ' XAF carried'
+                         THEN 'still held, position of ' || famt(-v_bsec) || ' XAF carried'
                     ELSE 'no redemption entry and no security balance, to be explained'
                END);
         EXCEPTION
@@ -856,7 +858,7 @@ BEGIN
         po('    redemption      the PRINCIPAL_LIQD tag, not a row in a liquidation table');
         po('    collection      the INT_%_LIQD tags');
         po('    accrual         EVENT = ACCR');
-        po('    position closed the signed balance of the security account is nil,');
+        po('    position closed the balance of the security account is nil,');
         po('                    not a status column saying so');
         po('');
         po('  LDTB_CONTRACT_MASTER is used for the TERMS of the deal only: nominal,');
@@ -1296,11 +1298,14 @@ BEGIN
         tbl_line('4,12,22,8,18,26,16,16');
 
         print_sub('1.10 Accounts moved and the balance they carry');
-        po('  Signed balance = debits minus credits. On an asset account a positive');
-        po('  balance is a position held; on an income account the sign is reversed');
-        po('  and shown as credits minus debits.');
+        po('  BALANCE is credit minus debit, as this bank computes it. A security');
+        po('  account carrying paper therefore shows a NEGATIVE balance, because it');
+        po('  carries a debit balance, and an income account a positive one. Where a');
+        po('  figure is printed in its natural sense instead, the column is called a');
+        po('  POSITION and the text says so.');
         tbl_head('4,22,8,40,18,26,26,26,16',
-                 'N#|ACCOUNT|CLASS|ACCOUNT NAME|ENTRIES|TOTAL DEBIT|TOTAL CREDIT|SIGNED BALANCE|CONTRACTS',
+                 'N#|ACCOUNT|CLASS|ACCOUNT NAME|ENTRIES|TOTAL DEBIT|TOTAL CREDIT'
+                 || '|BALANCE (C minus D)|CONTRACTS',
                  '|AC_NO| |AC_GL_DESC| |LCY_AMOUNT|LCY_AMOUNT| |TRN_REF_NO',
                  'RLLLRRRRR');
         v_row := 0;
@@ -1393,7 +1398,7 @@ BEGIN
                                 WHERE h.trn_ref_no = c.contract_ref_no
                                   AND h.module = k_mod
                                   AND h.amount_tag = 'PRINCIPAL_LIQD');
-            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                            ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_tot2
               FROM actb_history h
@@ -1412,9 +1417,9 @@ BEGIN
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.prod, 12) || '|'
                 || fpadl(fnum(v_cnt), 20) || '|' || fpadl(fmio(v_tot), 28) || '|'
-                || fpadl(fmio(v_tot2), 28) || '|' || fpadl(fmio(v_tot2 - v_tot), 26) || '|'
-                || fpadl(CASE WHEN ABS(v_tot2 - v_tot) <= k_tol_abs THEN 'MATCHES'
-                              WHEN v_tot2 > v_tot THEN 'ENTRIES HIGHER'
+                || fpadl(fmio(-v_tot2), 28) || '|' || fpadl(fmio(-v_tot2 - v_tot), 26) || '|'
+                || fpadl(CASE WHEN ABS(v_tot2 + v_tot) <= k_tol_abs THEN 'MATCHES'
+                              WHEN -v_tot2 > v_tot THEN 'ENTRIES HIGHER'
                               ELSE 'ENTRIES LOWER' END, 16) || '|');
         END LOOP;
         tbl_line('4,12,20,28,28,26,16');
@@ -1455,7 +1460,7 @@ BEGIN
                                             WHERE v.contract_ref_no = c.contract_ref_no)
                        AND TRIM(c.product) = r.prod) q
              WHERE q.d_out IS NOT NULL;
-            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                            ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_tot2
               FROM actb_history h
@@ -1594,7 +1599,7 @@ BEGIN
         v_row := 0;
         FOR r IN (SELECT NVL(h.module, '-') mdl, COUNT(DISTINCT h.trn_ref_no) nb,
                          COUNT(*) nl,
-                         SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                              ELSE -NVL(h.lcy_amount, 0) END) mt
                     FROM actb_history h
                    WHERE EXISTS (SELECT 1 FROM ldtb_contract_master c
@@ -1974,9 +1979,12 @@ BEGIN
     po('  and a LIF control test the same object, the test carries both codes and');
     po('  is run once, so that nothing is counted twice in the summary.');
     po('');
-    po('  SIGNED BALANCE . balance = sum of debits minus sum of credits on the');
-    po('  accounts of the family. A nil balance means the position has left the');
-    po('  balance sheet. Reversals carry negative amounts and are therefore');
+    po('  BALANCE . credit minus debit on the accounts of the family, which is');
+    po('  how this bank computes a balance. A nil balance means the position has');
+    po('  left the balance sheet. On a security or a receivable the balance is');
+    po('  NEGATIVE while the bank still holds something; where a figure is printed');
+    po('  in its natural sense instead, it is called a POSITION and is the');
+    po('  negative of the balance. Reversals carry negative amounts and are');
     po('  netted correctly by this convention.');
     po('');
     po('  ACCOUNT FAMILIES USED BY THIS PART, BY FOUR DIGIT CLASS');
@@ -2053,17 +2061,17 @@ BEGIN
         -- -----------------------------------------------------
         p_test('LC-01 / LIF-02', 'The security account is nil after redemption');
         p_obj('once PRINCIPAL_LIQD has been booked, the security has left the');
-        po('                   bank. The signed balance of classes ' || k_cl_bond_pl || ', ' || k_cl_bill_pl
+        po('                   bank. The balance of classes ' || k_cl_bond_pl || ', ' || k_cl_bill_pl
             || ' and ' || k_cl_bill_tr || ' must');
         po('                   therefore be nil. A residue is an incomplete redemption: the');
         po('                   asset is still on the balance sheet although it was repaid.');
-        p_how('per contract, signed balance of the security accounts, restricted');
+        p_how('per contract, balance of the security accounts, restricted');
         po('                   to contracts carrying at least one PRINCIPAL_LIQD entry.');
         SELECT COUNT(*), NVL(SUM(ABS(bal_sec)), 0) INTO v_cnt, v_mt
           FROM (SELECT h.trn_ref_no ref,
                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                      IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                      ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END) bal_sec,
                        SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq
@@ -2085,7 +2093,7 @@ BEGIN
                           FROM (SELECT h.trn_ref_no ref,
                                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                                      IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END
                                                 ELSE 0 END) bal_sec,
                                        SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
@@ -2126,7 +2134,7 @@ BEGIN
                   FROM (SELECT h.trn_ref_no ref,
                                SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                              IN (k_cl_accr_pl, k_cl_accr_tr)
-                                        THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                        THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                              ELSE -NVL(h.lcy_amount, 0) END
                                         ELSE 0 END) bal_accr,
                                SUM(CASE WHEN h.amount_tag LIKE 'INT%LIQD' THEN 1 ELSE 0 END) n_int
@@ -2157,7 +2165,7 @@ BEGIN
                           FROM (SELECT h.trn_ref_no ref,
                                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                                      IN (k_cl_accr_pl, k_cl_accr_tr)
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END
                                                 ELSE 0 END) bal_accr,
                                        SUM(CASE WHEN h.amount_tag LIKE 'INT%LIQD'
@@ -2203,7 +2211,7 @@ BEGIN
           FROM (SELECT a.ref, a.bal_def
                   FROM (SELECT h.trn_ref_no ref,
                                SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) = k_cl_defer
-                                        THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                        THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                              ELSE -NVL(h.lcy_amount, 0) END
                                         ELSE 0 END) bal_def
                           FROM actb_history h
@@ -2232,7 +2240,7 @@ BEGIN
                                c.value_date, c.maturity_date
                           FROM (SELECT h.trn_ref_no ref,
                                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4) = k_cl_defer
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END
                                                 ELSE 0 END) bal_def
                                   FROM actb_history h
@@ -2727,19 +2735,19 @@ BEGIN
         p_test('LIF-06', 'Securities still held carry the right security balance');
         p_obj('a security is STILL HELD when no PRINCIPAL_LIQD entry has been');
         po('                   passed on it: the bank has neither been repaid at maturity nor sold');
-        po('                   it early. While it is held, the signed balance of the security');
+        po('                   it early. While it is held, the balance of the security');
         po('                   account must equal the nominal. A lower balance points to a partial');
         po('                   exit that was never tracked, a higher one to a double booking.');
         p_how('per contract with no PRINCIPAL_LIQD entry in ACTB_HISTORY and a');
-        po('                   maturity beyond ' || fdt(k_asof) || ', signed balance of the security classes');
+        po('                   maturity beyond ' || fdt(k_asof) || ', balance of the security classes');
         po('                   against LCY_AMOUNT. A contract past maturity with no exit entry is');
         po('                   not tested here, it is an LIF-07 finding.');
-        SELECT COUNT(*), NVL(SUM(ABS(bal_sec - nom)), 0) INTO v_cnt, v_mt
+        SELECT COUNT(*), NVL(SUM(ABS(bal_sec + nom)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.bal_sec, c.lcy_amount nom
                   FROM (SELECT h.trn_ref_no ref,
                                SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                              IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                        THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                        THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                              ELSE -NVL(h.lcy_amount, 0) END
                                         ELSE 0 END) bal_sec,
                                SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq
@@ -2750,7 +2758,7 @@ BEGIN
                                              AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                  WHERE a.n_liq = 0 AND c.maturity_date > k_asof)
-         WHERE ABS(bal_sec - nom) > k_tol_abs;
+         WHERE ABS(bal_sec + nom) > k_tol_abs;
         p_verdict('LIF-06', 'Security still held whose balance differs from the nominal',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
@@ -2765,7 +2773,7 @@ BEGIN
                           FROM (SELECT h.trn_ref_no ref,
                                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                                      IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END
                                                 ELSE 0 END) bal_sec,
                                        SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
@@ -2777,13 +2785,13 @@ BEGIN
                                                      AND c.version_no = (SELECT MAX(v.version_no) FROM ldtb_contract_master v
                                                          WHERE v.contract_ref_no = c.contract_ref_no)
                          WHERE a.n_liq = 0 AND c.maturity_date > k_asof
-                           AND ABS(a.bal_sec - c.lcy_amount) > k_tol_abs
-                         ORDER BY ABS(a.bal_sec - c.lcy_amount) DESC
+                           AND ABS(a.bal_sec + c.lcy_amount) > k_tol_abs
+                         ORDER BY ABS(a.bal_sec + c.lcy_amount) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
                 sec_row(v_row, r.ref, r.product, r.issuer, r.lcy_amount, r.main_comp_rate,
                         r.booking_date, r.value_date, r.maturity_date,
-                        famt(r.bal_sec) || ' / ' || famt(r.bal_sec - r.lcy_amount));
+                        famt(-r.bal_sec) || ' / ' || famt(-r.bal_sec - r.lcy_amount));
             END LOOP;
             sec_foot;
         END IF;
@@ -2794,14 +2802,14 @@ BEGIN
         po('                   either the counterparty has not repaid, or the exit entry was');
         po('                   missed. Either way the position still sits in the assets when it');
         po('                   should not, and the bank may be carrying an unrecognised loss.');
-        p_how('per contract with MATURITY_DATE at or before ' || fdt(k_asof) || ', signed balance');
+        p_how('per contract with MATURITY_DATE at or before ' || fdt(k_asof) || ', balance');
         po('                   of the security classes, flagged when it is not nil.');
         SELECT COUNT(*), NVL(SUM(ABS(bal_sec)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.bal_sec
                   FROM (SELECT h.trn_ref_no ref,
                                SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                              IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                        THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                        THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                              ELSE -NVL(h.lcy_amount, 0) END
                                         ELSE 0 END) bal_sec
                           FROM actb_history h
@@ -2826,7 +2834,7 @@ BEGIN
                           FROM (SELECT h.trn_ref_no ref,
                                        SUM(CASE WHEN SUBSTR(h.ac_no, 1, 4)
                                                      IN (k_cl_bond_pl, k_cl_bill_pl, k_cl_bill_tr)
-                                                THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END
                                                 ELSE 0 END) bal_sec
                                   FROM actb_history h
@@ -3140,7 +3148,7 @@ BEGIN
         p_how('signed sum grouped by TRN_REF_NO, flagged beyond ' || famt(k_tol_abs) || ' XAF.');
         SELECT COUNT(*), NVL(SUM(ABS(bal)), 0) INTO v_cnt, v_mt
           FROM (SELECT h.trn_ref_no,
-                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                     ELSE -NVL(h.lcy_amount, 0) END) bal
                   FROM actb_history h
                  WHERE h.module = k_mod
@@ -3158,7 +3166,7 @@ BEGIN
                                c.lcy_amount, c.main_comp_rate, c.booking_date,
                                c.value_date, c.maturity_date
                           FROM (SELECT h.trn_ref_no ref, COUNT(*) nb,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                     ELSE -NVL(h.lcy_amount, 0) END) bal
                                   FROM actb_history h
                                  WHERE h.module = k_mod
@@ -3185,7 +3193,7 @@ BEGIN
         p_how('signed sum grouped by TRN_REF_NO, TRN_DT and AMOUNT_TAG.');
         SELECT COUNT(*), COUNT(DISTINCT ref), NVL(SUM(ABS(bal)), 0) INTO v_cnt, v_cnt2, v_mt
           FROM (SELECT h.trn_ref_no ref, h.trn_dt, h.amount_tag,
-                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                     ELSE -NVL(h.lcy_amount, 0) END) bal
                   FROM actb_history h
                  WHERE h.module = k_mod
@@ -3205,7 +3213,7 @@ BEGIN
                                c.value_date, c.maturity_date
                           FROM (SELECT ref, COUNT(*) nb, SUM(ABS(bal)) bal FROM (
                                     SELECT h.trn_ref_no ref, h.trn_dt, h.amount_tag,
-                                           SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                           SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                         ELSE -NVL(h.lcy_amount, 0) END) bal
                                       FROM actb_history h
                                      WHERE h.module = k_mod
@@ -3225,7 +3233,7 @@ BEGIN
             sec_foot;
             print_sub('DBL-02 a. The unbalanced events, one by one');
             tbl_head('4,24,14,20,24,24,24',
-                     'N#|CONTRACT|DATE|AMOUNT TAG|TOTAL DEBIT|TOTAL CREDIT|SIGNED BALANCE',
+                     'N#|CONTRACT|DATE|AMOUNT TAG|TOTAL DEBIT|TOTAL CREDIT|BALANCE (C minus D)',
                      '|TRN_REF_NO|TRN_DT|AMOUNT_TAG|LCY_AMOUNT|LCY_AMOUNT| ',
                      'RLLLRRR');
             v_row := 0;
@@ -3233,14 +3241,14 @@ BEGIN
                         SELECT h.trn_ref_no ref, h.trn_dt dt, h.amount_tag,
                                SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
                                SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                             ELSE -NVL(h.lcy_amount, 0) END) bal
                           FROM actb_history h
                          WHERE h.module = k_mod
                          GROUP BY h.trn_ref_no, h.trn_dt, h.amount_tag
-                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                 ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                    ELSE -NVL(h.lcy_amount, 0) END)) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
@@ -3261,7 +3269,7 @@ BEGIN
         p_how('signed sum grouped by TRN_DT over the whole module.');
         SELECT COUNT(*), NVL(SUM(ABS(bal)), 0) INTO v_cnt, v_mt
           FROM (SELECT h.trn_dt,
-                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                     ELSE -NVL(h.lcy_amount, 0) END) bal
                   FROM actb_history h
                  WHERE h.module = k_mod
@@ -3273,7 +3281,7 @@ BEGIN
                   v_cnt, v_tot, v_mt, 'HIGH');
         IF v_cnt > 0 THEN
             tbl_head('4,16,20,26,26,26',
-                     'N#|DATE|ENTRIES|TOTAL DEBIT|TOTAL CREDIT|SIGNED BALANCE',
+                     'N#|DATE|ENTRIES|TOTAL DEBIT|TOTAL CREDIT|BALANCE (C minus D)',
                      '|TRN_DT| |LCY_AMOUNT|LCY_AMOUNT| ',
                      'RLRRRR');
             v_row := 0;
@@ -3281,14 +3289,14 @@ BEGIN
                         SELECT h.trn_dt dt, COUNT(*) nb,
                                SUM(CASE WHEN h.drcr_ind = 'D' THEN NVL(h.lcy_amount, 0) ELSE 0 END) deb,
                                SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0) ELSE 0 END) cre,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                             ELSE -NVL(h.lcy_amount, 0) END) bal
                           FROM actb_history h
                          WHERE h.module = k_mod
                          GROUP BY h.trn_dt
-                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                        HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                 ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                         ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                    ELSE -NVL(h.lcy_amount, 0) END)) DESC
                       ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
@@ -3311,7 +3319,7 @@ BEGIN
                                  WHERE h.module = k_mod
                                    AND h.trn_dt IN (SELECT trn_dt FROM (
                                          SELECT h2.trn_dt,
-                                                SUM(CASE h2.drcr_ind WHEN 'D' THEN NVL(h2.lcy_amount, 0)
+                                                SUM(CASE h2.drcr_ind WHEN 'C' THEN NVL(h2.lcy_amount, 0)
                                                                      ELSE -NVL(h2.lcy_amount, 0) END) bal
                                            FROM actb_history h2
                                           WHERE h2.module = k_mod
@@ -3898,7 +3906,7 @@ BEGIN
           FROM (SELECT q.ref, q.dt, q.mt, q.day_int,
                        ABS(q.mt / q.day_int - ROUND(q.mt / q.day_int)) gap
                   FROM (SELECT h.trn_ref_no ref, h.trn_dt dt,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                             ELSE -NVL(h.lcy_amount, 0) END) mt,
                                MAX((SELECT NVL(c.main_comp_amount, 0)
                                            / NULLIF(c.maturity_date - c.value_date, 0)
@@ -3928,7 +3936,7 @@ BEGIN
                           FROM (SELECT ref, COUNT(*) nb, SUM(ABS(mt)) mt FROM (
                                     SELECT q.ref, q.mt
                                       FROM (SELECT h.trn_ref_no ref, h.trn_dt dt,
-                                                   SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                   SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                        ELSE -NVL(h.lcy_amount, 0) END) mt,
                                                    MAX((SELECT NVL(c2.main_comp_amount, 0)
                                                                / NULLIF(c2.maturity_date - c2.value_date, 0)
@@ -3983,7 +3991,7 @@ BEGIN
                                                    AND NVL(h2.lcy_amount, 0) > 0),
                                                c.maturity_date)))
                                  - TRUNC(c.value_date) d_elapsed,
-                               NVL((SELECT ROUND(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               NVL((SELECT ROUND(-SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                      ELSE -NVL(h.lcy_amount, 0) END)
                                           / NULLIF(NVL(c.main_comp_amount, 0)
                                                    / NULLIF(c.maturity_date - c.value_date, 0), 0))
@@ -4026,8 +4034,8 @@ BEGIN
                                                               AND NVL(h2.lcy_amount, 0) > 0),
                                                           c2.maturity_date)))
                                                  - TRUNC(c2.value_date) d_elapsed,
-                                               NVL((SELECT ROUND(SUM(CASE h.drcr_ind
-                                                                        WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                               NVL((SELECT ROUND(-SUM(CASE h.drcr_ind
+                                                                        WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                         ELSE -NVL(h.lcy_amount, 0) END)
                                                           / NULLIF(NVL(c2.main_comp_amount, 0)
                                                                    / NULLIF(c2.maturity_date
@@ -4615,7 +4623,7 @@ BEGIN
         po('                   counted products (' || k_prod_post || '), expected coupon = LCY_AMOUNT times');
         po('                   MAIN_COMP_RATE over 100, times the days from VALUE_DATE to the');
         po('                   earlier of MATURITY_DATE and ' || fdt(v_d_accr) || ', over the basis retained by');
-        po('                   CPN-01. Against the signed balance of the accrued classes read');
+        po('                   CPN-01. Against the balance of the accrued classes read');
         po('                   from ACTB_HISTORY. Tolerance ' || ftx(k_tol_cpn) || ' of the expected coupon.');
         po('                   Contracts fitted on 30/360 whose month count differs from the');
         po('                   actual day count are set aside and counted separately, the two');
@@ -4679,10 +4687,10 @@ BEGIN
                             ELSE d_30 END dbest
                   FROM q
             )
-        SELECT COUNT(*), NVL(SUM(ABS(expc - carr)), 0) INTO v_cnt, v_mt
+        SELECT COUNT(*), NVL(SUM(ABS(expc + carr)), 0) INTO v_cnt, v_mt
           FROM (SELECT ROUND(nom * rate / 100
                              * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
-                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                        ELSE -NVL(h.lcy_amount, 0) END)
                               FROM actb_history h
                              WHERE h.trn_ref_no = w.ref
@@ -4694,7 +4702,7 @@ BEGIN
                    AND vd < v_d_accr
                    AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
                    AND NOT (conv = '30/360' AND d_30 <> d_act))
-         WHERE ABS(expc - carr) > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100);
+         WHERE ABS(expc + carr) > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100);
         p_verdict('CPN-02', 'Accrued coupon different from principal times rate times days',
                   v_cnt, v_nb_ctr, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
@@ -4765,7 +4773,7 @@ BEGIN
                     SELECT w.ref, w.product, w.nom, w.rate, w.bd, w.vd, w.md,
                            ROUND(nom * rate / 100
                                  * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
-                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                        ELSE -NVL(h.lcy_amount, 0) END)
                               FROM actb_history h
                              WHERE h.trn_ref_no = w.ref
@@ -4779,14 +4787,14 @@ BEGIN
                        AND vd < v_d_accr
                        AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
                        AND NOT (conv = '30/360' AND d_30 <> d_act)
-                ) WHERE ABS(expc - carr)
+                ) WHERE ABS(expc + carr)
                         > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100)
-                   ORDER BY ABS(expc - carr) DESC
+                   ORDER BY ABS(expc + carr) DESC
                 ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
                 sec_row(v_row, r.ref, r.product, r.issuer, r.nom, r.rate,
                         r.bd, r.vd, r.md,
-                        famt(r.expc) || ' / ' || famt(r.carr));
+                        famt(r.expc) || ' / ' || famt(-r.carr));
             END LOOP;
             sec_foot;
 
@@ -4869,7 +4877,7 @@ BEGIN
                            ROUND(nom * rate / 100 / basis, 2) dcpn,
                            ROUND(nom * rate / 100
                                  * (TRUNC(LEAST(v_d_accr, md)) - TRUNC(vd)) / basis, 2) expc,
-                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                        ELSE -NVL(h.lcy_amount, 0) END)
                               FROM actb_history h
                              WHERE h.trn_ref_no = w.ref
@@ -4881,16 +4889,16 @@ BEGIN
                        AND vd < v_d_accr
                        AND INSTR(',' || k_prod_post || ',', ',' || product || ',') > 0
                        AND NOT (conv = '30/360' AND d_30 <> d_act)
-                ) WHERE ABS(expc - carr)
+                ) WHERE ABS(expc + carr)
                         > GREATEST(k_tol_abs, k_tol_cpn * ABS(expc) / 100)
-                   ORDER BY ABS(expc - carr) DESC
+                   ORDER BY ABS(expc + carr) DESC
                 ) WHERE ROWNUM <= k_top) LOOP
                 v_row := v_row + 1;
                 po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ref, 24) || '|'
                     || fpad(r.product, 11) || '|' || fpadl(TO_CHAR(r.basis), 10) || '|'
                     || fpadl(fnum(r.drun), 14) || '|' || fpadl(famt(r.dcpn), 20) || '|'
-                    || fpadl(famt(r.expc), 24) || '|' || fpadl(famt(r.carr), 24) || '|'
-                    || fpadl(famt(r.expc - r.carr), 22) || '|');
+                    || fpadl(famt(r.expc), 24) || '|' || fpadl(famt(-r.carr), 24) || '|'
+                    || fpadl(famt(r.expc + r.carr), 22) || '|');
             END LOOP;
             tbl_line('4,24,11,10,14,20,24,24,22');
         END IF;
@@ -5469,12 +5477,12 @@ BEGIN
         po('                   confirmed by the front office. Left unexplained, it is a deal that');
         po('                   existed, consumed cash, and vanished.');
         p_how('contracts with negative entries, no PRINCIPAL_LIQD and a nil');
-        po('                   signed balance; the script then looks for a replacement carrying');
+        po('                   balance; the script then looks for a replacement carrying');
         po('                   the same nominal, rate, value date and maturity.');
         SELECT COUNT(*), NVL(SUM(nom), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, c.lcy_amount nom
                   FROM (SELECT h.trn_ref_no ref,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                             ELSE -NVL(h.lcy_amount, 0) END) bal,
                                SUM(ABS(NVL(h.lcy_amount, 0))) gross,
                                SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq,
@@ -5508,7 +5516,7 @@ BEGIN
                                    AND y.value_date = c.value_date
                                    AND y.maturity_date = c.maturity_date) repl
                           FROM (SELECT h.trn_ref_no ref,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                     ELSE -NVL(h.lcy_amount, 0) END) bal,
                                        SUM(ABS(NVL(h.lcy_amount, 0))) gross,
                                        SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD'
@@ -5548,15 +5556,15 @@ BEGIN
           INTO v_mt, v_tot, v_tot2, v_mt2
           FROM actb_history h WHERE h.module = k_mod;
         tbl_head('4,46,28,28,26',
-                 'N#|SUMMING METHOD|TOTAL DEBIT|TOTAL CREDIT|DEBIT MINUS CREDIT',
+                 'N#|SUMMING METHOD|TOTAL DEBIT|TOTAL CREDIT|BALANCE (C minus D)',
                  '| |LCY_AMOUNT|LCY_AMOUNT| ',
                  'RLRRR');
         po('  |' || fpadl('1', 4) || '|' || fpad('Signed amounts, reversals negative', 46) || '|'
             || fpadl(fmio(v_mt), 28) || '|' || fpadl(fmio(v_tot), 28) || '|'
-            || fpadl(famt(v_mt - v_tot), 26) || '|');
+            || fpadl(famt(v_tot - v_mt), 26) || '|');
         po('  |' || fpadl('2', 4) || '|' || fpad('Absolute amounts, the trapping method', 46) || '|'
             || fpadl(fmio(v_tot2), 28) || '|' || fpadl(fmio(v_mt2), 28) || '|'
-            || fpadl(famt(v_tot2 - v_mt2), 26) || '|');
+            || fpadl(famt(v_mt2 - v_tot2), 26) || '|');
         tbl_line('4,46,28,28,26');
         print_kv('Debit overstated by the gross method',  fmio(v_tot2 - v_mt));
         print_kv('Credit overstated by the gross method', fmio(v_mt2 - v_tot));
@@ -5970,12 +5978,12 @@ BEGIN
         SELECT COUNT(*), NVL(SUM(ABS(cash)), 0) INTO v_cnt, v_mt
           FROM (SELECT a.ref, a.cash
                   FROM (SELECT h.trn_ref_no ref,
-                               SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                             ELSE -NVL(h.lcy_amount, 0) END) bal,
                                SUM(CASE WHEN NVL(h.lcy_amount, 0) < 0 THEN 1 ELSE 0 END) n_neg,
                                SUM(CASE WHEN h.amount_tag = 'PRINCIPAL_LIQD' THEN 1 ELSE 0 END) n_liq,
                                SUM(CASE WHEN h.ac_no = k_ac_nostro
-                                        THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                        THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                              ELSE -NVL(h.lcy_amount, 0) END
                                         ELSE 0 END) cash
                           FROM actb_history h
@@ -5994,7 +6002,7 @@ BEGIN
                                c.lcy_amount, c.main_comp_rate, c.booking_date,
                                c.value_date, c.maturity_date
                           FROM (SELECT h.trn_ref_no ref,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                     ELSE -NVL(h.lcy_amount, 0) END) bal,
                                        SUM(CASE WHEN NVL(h.lcy_amount, 0) < 0
                                                 THEN 1 ELSE 0 END) n_neg,
@@ -6229,7 +6237,7 @@ BEGIN
         po('                   security sold last month as still on the books and invent a gap.');
         po('                   The rebuilt figure below is the one to confront with the securities');
         po('                   position report.');
-        p_how('per account, signed balance from ACTB_HISTORY against the sum of');
+        p_how('per account, balance from ACTB_HISTORY against the sum of');
         po('                   LCY_AMOUNT of the contracts booked on that account and carrying no');
         po('                   PRINCIPAL_LIQD entry at ' || fdt(k_asof) || '.');
         tbl_head('4,22,14,38,28,28,26,14',
@@ -6243,7 +6251,7 @@ BEGIN
                   SELECT 2, k_ac_bill_pl, 'MTPD' FROM DUAL UNION ALL
                   SELECT 3, k_ac_bill_tr, 'TBTR,BTTR' FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                            ELSE -NVL(h.lcy_amount, 0) END), 0)
               INTO v_tot
               FROM actb_history h
@@ -6265,15 +6273,15 @@ BEGIN
                               AND h.ac_no = r.ac);
             SELECT MAX(a.ac_gl_desc) INTO v_lib FROM sttb_account a WHERE a.ac_gl_no = r.ac;
             v_row := v_row + 1;
-            IF ABS(v_tot - v_tot2) > k_tol_abs THEN
+            IF ABS(v_tot + v_tot2) > k_tol_abs THEN
                 v_cnt := v_cnt + 1;
-                v_mt  := v_mt + ABS(v_tot - v_tot2);
+                v_mt  := v_mt + ABS(v_tot + v_tot2);
             END IF;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac, 22) || '|'
                 || fpad(SUBSTR(r.ac, 1, 4), 14) || '|' || fpad(v_lib, 38) || '|'
-                || fpadl(fmio(v_tot), 28) || '|' || fpadl(fmio(v_tot2), 28) || '|'
-                || fpadl(famt(v_tot - v_tot2), 26) || '|'
-                || fpadl(CASE WHEN ABS(v_tot - v_tot2) > k_tol_abs THEN 'GAP' ELSE 'OK' END, 14) || '|');
+                || fpadl(fmio(-v_tot), 28) || '|' || fpadl(fmio(v_tot2), 28) || '|'
+                || fpadl(famt(-v_tot - v_tot2), 26) || '|'
+                || fpadl(CASE WHEN ABS(v_tot + v_tot2) > k_tol_abs THEN 'GAP' ELSE 'OK' END, 14) || '|');
         END LOOP;
         tbl_line('4,22,14,38,28,28,26,14');
         p_verdict('CUT-03', 'Security account whose balance is not justified by what is held',
@@ -6286,7 +6294,7 @@ BEGIN
         po('                   is interest times days remaining divided by the tenor. A residue');
         po('                   carried by a security that has already left the book, redeemed or');
         po('                   sold, is a release that never happened.');
-        p_how('signed balance of class ' || k_cl_defer || ' from ACTB_HISTORY against the rebuilt');
+        p_how('balance of class ' || k_cl_defer || ' from ACTB_HISTORY against the rebuilt');
         po('                   unearned interest of the pre counted contracts carrying no');
         po('                   PRINCIPAL_LIQD entry. Days remaining are floored at zero so that a');
         po('                   contract past its maturity and never unwound adds nothing.');
@@ -6364,10 +6372,10 @@ BEGIN
         po('                   sale and its receivable was settled then, so it has no place in the');
         po('                   rebuilt figure. The theory is bounded at ' || fdt(v_d_accr) || ', the module having');
         po('                   stopped accruing after that date.');
-        p_how('signed balance of the accrued classes from ACTB_HISTORY against');
+        p_how('balance of the accrued classes from ACTB_HISTORY against');
         po('                   the rebuilt earned interest of the post counted contracts carrying');
         po('                   no PRINCIPAL_LIQD entry.');
-        SELECT NVL(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+        SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END), 0)
           INTO v_tot
           FROM actb_history h
@@ -6388,12 +6396,13 @@ BEGIN
                               AND NVL(h2.lcy_amount, 0) > 0)
            AND c.value_date < v_d_accr
            AND INSTR(',' || k_prod_post || ',', ',' || TRIM(c.product) || ',') > 0;
-        print_kv('Accounting balance of the accrued receivable',        fmio(v_tot));
+        print_kv('Balance of the accrued receivable (credit minus debit)', fmio(v_tot));
+        print_kv('The same as a position (minus the balance)',         fmio(-v_tot));
         print_kv('Earned and uncollected interest of the deals still held', fmio(v_tot2));
-        print_kv('Gap',                                                 famt(v_tot - v_tot2));
-        IF ABS(v_tot - v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
+        print_kv('Gap on the position',                                 famt(-v_tot - v_tot2));
+        IF ABS(v_tot + v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
         p_verdict('CUT-05', 'Accrued receivable not justified by the securities still held',
-                  v_cnt, 1, ABS(v_tot - v_tot2), 'CRITICAL');
+                  v_cnt, 1, ABS(v_tot + v_tot2), 'CRITICAL');
         IF v_cnt > 0 THEN
             print_sub('CUT-05 a. Securities still held whose accrued receivable differs'
                       || ' from the theory');
@@ -6409,7 +6418,7 @@ BEGIN
                                      * (TRUNC(LEAST(v_d_accr, c.maturity_date)) - TRUNC(c.value_date))
                                      / NULLIF(c.maturity_date - c.value_date, 0), 2) th
                           FROM (SELECT h.trn_ref_no ref,
-                                       SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                     ELSE -NVL(h.lcy_amount, 0) END) bal_accr
                                   FROM actb_history h
                                  WHERE h.module = k_mod
@@ -6602,7 +6611,7 @@ BEGIN
         po('                   for the bond products only.');
         SELECT COUNT(*), NVL(SUM(ABS(gap)), 0) INTO v_cnt, v_mt
           FROM (SELECT c.contract_ref_no,
-                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                       NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                        ELSE -NVL(h.lcy_amount, 0) END)
                               FROM actb_history h
                              WHERE h.trn_ref_no = c.contract_ref_no
@@ -6632,7 +6641,7 @@ BEGIN
                                  WHERE x.customer_no = c.counterparty) issuer,
                                c.lcy_amount, c.main_comp_rate, c.booking_date,
                                c.value_date, c.maturity_date,
-                               NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                               NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                ELSE -NVL(h.lcy_amount, 0) END)
                                       FROM actb_history h
                                      WHERE h.trn_ref_no = c.contract_ref_no
@@ -6649,7 +6658,7 @@ BEGIN
                                         WHERE h.trn_ref_no = c.contract_ref_no
                                           AND h.module = k_mod
                                           AND h.amount_tag = 'PRINCIPAL')
-                           AND ABS(NVL((SELECT SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                           AND ABS(NVL((SELECT SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                                                    ELSE -NVL(h.lcy_amount, 0) END)
                                           FROM actb_history h
                                          WHERE h.trn_ref_no = c.contract_ref_no

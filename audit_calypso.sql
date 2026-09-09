@@ -40,11 +40,23 @@
 --   therefore rebuild any figure of this report with a query of their own.
 --
 -- HOW TO RUN
---   Single anonymous PL/SQL block, read only, no DDL, no COMMIT: it runs
---   with a plain read grant. One pass, one terminating slash.
+--   Single anonymous PL/SQL block, read only, no DDL, no COMMIT. One pass,
+--   one terminating slash.
 --   SQL Developer : open, F5. SQL*Plus : @audit_calypso.sql
 --   No substitution variable and no bind variable, so no input window
 --   opens at launch.
+--
+--   ONE GRANT IS REQUIRED BEYOND READ ACCESS: EXECUTE on the function
+--   webserve.FN_GET_DESC. FLEXCUBE stores no narrative on an accounting
+--   entry; the description everyone reads is computed by that function from
+--   the columns of the entry, and it is the only place the Calypso business
+--   information survives. Without the grant the block does not compile.
+--
+--   That call is a PL/SQL function invoked once per row, so it is the cost
+--   of this report. Five aggregations need it over the whole population
+--   (1.1, the two tables of 1.3, 1.3 a and 1.3 b); everywhere else it is
+--   restricted to a handful of accounts, and the sections that need no
+--   business meaning at all never call it.
 --
 -- REPORT LAYOUT
 --   PART 0  - scope, parameters, the bridge mechanism, chart of accounts
@@ -90,6 +102,8 @@ DECLARE
     -- millions of rows.
     -- ========================================================================
     k_cy_user     VARCHAR2(20) := 'CALYPSOUSR';  -- USER_ID and AUTH_ID of the interface
+    k_cy_upat     VARCHAR2(30) := '%calypso%';   -- pattern tested on LOWER(USER_ID), so a
+                                          -- second interface account is not missed
     k_cy_mod      VARCHAR2(4)  := 'DE';          -- MODULE the entries are posted under
     k_cy_prod     VARCHAR2(10) := 'MNIP';        -- the single PRODUCT of the interface
     k_cy_tag      VARCHAR2(20) := 'TXN_AMT';     -- the single AMOUNT_TAG
@@ -97,8 +111,23 @@ DECLARE
     k_cy_from     DATE := TO_DATE('16/06/2025', 'DD/MM/YYYY');  -- go live
     k_cy_to       DATE := TO_DATE('31/08/2026', 'DD/MM/YYYY');  -- cut off of this review
 
-    -- Position of the fields inside the narrative EXTERNAL_REF_NO, which is
-    -- pipe separated. Tokens are read positionally, empty ones included.
+    -- ========================================================================
+    -- THE NARRATIVE
+    -- The business meaning of an entry is NOT stored in a column. It is
+    -- produced by the FLEXCUBE function
+    --     webserve.FN_GET_DESC(module, trn_ref_no, ac_entry_sr_no,
+    --                          event_sr_no, trn_code, related_account, ac_no,
+    --                          ac_branch, ac_ccy, amount_tag, event,
+    --                          instrument_code, related_customer,
+    --                          value_dt, trn_dt, related_reference)
+    -- called on the columns of ACTB_HISTORY. This script therefore needs
+    -- EXECUTE on that function; without the grant the block does not compile.
+    -- The call is a PL/SQL function invoked per row, so it is expensive: the
+    -- five sections that need it over the whole population are marked, and
+    -- every other section reads the entries without it.
+    --
+    -- Position of the fields inside that description, which is pipe
+    -- separated. Tokens are read positionally, empty ones included.
     -- If section 1.3 shows the fields shifted by one, because the string
     -- starts with a pipe, set the offset below to 1 and rerun. Nothing else
     -- has to change.
@@ -200,6 +229,9 @@ DECLARE
     v_cy_nb   NUMBER := 0;    -- entry lines in scope, reference denominator
     v_cy_mt   NUMBER := 0;    -- gross flow in scope
     v_cy_dl   NUMBER := 0;    -- distinct deal keys in scope
+    v_cy_dn   NUMBER := 0;    -- lines with an empty description
+    v_cy_dp   NUMBER := 0;    -- lines whose description is pipe separated
+    v_cy_dd   NUMBER := 0;    -- distinct descriptions
     v_cy_d1   DATE;           -- first entry
     v_cy_d2   DATE;           -- last entry
     v_d_last2 DATE;           -- second date buffer for the cross checks
@@ -434,7 +466,7 @@ DECLARE
     -- Calypso posts entries, not contracts, so a finding there cannot name a
     -- CONTRACT_REF_NO. What it names instead is the Calypso deal key, the
     -- book, the counterparty and the instrument, all read from the narrative
-    -- EXTERNAL_REF_NO. The rule that governs the whole file: a finding
+    -- returned by FN_GET_DESC. The rule that governs the whole file: a finding
     -- nobody can trace to a named item is not actionable.
     -- ========================================================================
     PROCEDURE cy_head(p_find VARCHAR2 DEFAULT 'FINDING') IS
@@ -444,8 +476,8 @@ DECLARE
         po('     reliable as section 1.3 shows that narrative to be.');
         tbl_head('4,26,20,20,20,30,14,14,26',
                  'N#|CALYPSO DEAL|BOOK|COUNTERPARTY|EVENT|INSTRUMENT|FIRST|LAST|' || p_find,
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|EXTERNAL_REF_NO|EXTERNAL_REF_NO'
-                 || '|EXTERNAL_REF_NO|TRN_DT|TRN_DT|',
+                 '|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC'
+                 || '|FN_GET_DESC|TRN_DT|TRN_DT|',
                  'RLLLLLLLR');
     END;
 
@@ -490,6 +522,7 @@ BEGIN
 
         print_sub('0.2 Engagement parameters');
         print_kv('Interface user (USER_ID and AUTH_ID)', k_cy_user);
+        print_kv('Pattern actually tested on LOWER(USER_ID)', k_cy_upat);
         print_kv('Module (MODULE)',                      k_cy_mod);
         print_kv('Product (PRODUCT)',                    k_cy_prod);
         print_kv('Amount tag (AMOUNT_TAG)',              k_cy_tag);
@@ -526,11 +559,14 @@ BEGIN
         po('     TRN_REF_NO and can only be reassembled through the deal key of the');
         po('     narrative. Grouping on TRN_REF_NO would show every reference');
         po('     unbalanced on the bridge, by construction, and prove nothing.');
-        po('  3. THE NARRATIVE IS THE ONLY BUSINESS INFORMATION. FLEXCUBE carries');
-        po('     one product, one tag and one transaction code for every line. The');
-        po('     book, the event, the counterparty and the instrument survive only');
-        po('     in EXTERNAL_REF_NO, and section 1.3 measures how far that free text');
-        po('     can be trusted before anything else uses it.');
+        po('  3. THE NARRATIVE IS THE ONLY BUSINESS INFORMATION, AND IT IS NOT A');
+        po('     COLUMN. FLEXCUBE carries one product, one tag and one transaction');
+        po('     code for every line. The book, the event, the counterparty and the');
+        po('     instrument survive only in the description, which is not stored but');
+        po('     COMPUTED by webserve.FN_GET_DESC from the columns of the entry. The');
+        po('     business meaning of a Calypso entry therefore depends on code this');
+        po('     audit does not control and cannot version. Section 1.3 measures how');
+        po('     far that free text can be trusted before anything else uses it.');
         po('');
         po('  A fourth point, on reading the figures. Every business day the');
         po('  valuation engine posts the FULL CUMULATIVE accrual of each position');
@@ -650,7 +686,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
         print_kv('Entry lines posted by ' || k_cy_user, fnum(v_cy_nb));
         print_kv('Gross flow (sum of LCY_AMOUNT)',      fmio(v_cy_mt));
@@ -672,20 +708,30 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
         print_kv('Distinct FLEXCUBE references (TRN_REF_NO)', fnum(v_cnt));
         print_kv('Distinct posting dates (TRN_DT)',           fnum(v_cnt2));
         print_kv('Distinct accounts moved (AC_NO)',           fnum(v_cnt3));
-        SELECT COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no))
-          INTO v_cy_dl
-          FROM actb_history h
-         WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
+        SELECT COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                           1, k_cy_t_id + k_cy_p0), '|'),
+                                  d.ref)),
+               NVL(SUM(CASE WHEN d.dsc IS NULL THEN 1 ELSE 0 END), 0),
+               NVL(SUM(CASE WHEN INSTR(NVL(d.dsc, ' '), '|') > 0
+                            THEN 1 ELSE 0 END), 0),
+               COUNT(DISTINCT d.dsc)
+          INTO v_cy_dl, v_cy_dn, v_cy_dp, v_cy_dd
+          FROM (SELECT h.trn_ref_no ref,
+                       webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                            h.event_sr_no, h.trn_code, h.related_account,
+                                            h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                            h.event, h.instrument_code, h.related_customer,
+                                            h.value_dt, h.trn_dt, h.related_reference) dsc
+                  FROM actb_history h
+                 WHERE h.module = k_cy_mod
+                 AND h.product = k_cy_prod
+                 AND LOWER(h.user_id) LIKE k_cy_upat
+                 AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d;
         print_kv('Distinct Calypso deal keys (narrative)',    fnum(v_cy_dl));
         po('     One FLEXCUBE reference is created PER EVENT, not per deal. The deal');
         po('     key of the narrative is the only thing that puts a deal back');
@@ -697,7 +743,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
         print_kv('Gross debits',  fmio(v_tot));
         print_kv('Gross credits', fmio(v_tot2));
@@ -729,16 +775,18 @@ BEGIN
                   INTO v_cnt, v_mt, v_d_max, v_d_last2
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
-                   AND ((r.ord = 1 AND h.product = k_cy_prod AND h.user_id <> k_cy_user)
-                     OR (r.ord = 2 AND h.user_id = k_cy_user AND h.product <> k_cy_prod)
-                     OR (r.ord = 4 AND h.product = k_cy_prod AND h.user_id = k_cy_user
+                   AND ((r.ord = 1 AND h.product = k_cy_prod
+                                     AND LOWER(h.user_id) NOT LIKE k_cy_upat)
+                     OR (r.ord = 2 AND LOWER(h.user_id) LIKE k_cy_upat AND h.product <> k_cy_prod)
+                     OR (r.ord = 4 AND h.product = k_cy_prod
+                                     AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt > k_cy_to));
                 IF r.ord = 3 THEN
                     SELECT COUNT(*), NVL(SUM(ABS(NVL(h.lcy_amount, 0))), 0),
                            MIN(h.trn_dt), MAX(h.trn_dt)
                       INTO v_cnt, v_mt, v_d_max, v_d_last2
                       FROM actb_history h
-                     WHERE h.user_id = k_cy_user
+                     WHERE LOWER(h.user_id) LIKE k_cy_upat
                        AND h.module <> k_cy_mod;
                 END IF;
             EXCEPTION
@@ -767,7 +815,7 @@ BEGIN
                            SUM(ABS(NVL(h.lcy_amount, 0))) mt, 1 ord
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.ac_branch
                     UNION ALL
@@ -775,7 +823,7 @@ BEGIN
                            SUM(ABS(NVL(h.lcy_amount, 0))), 2
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.ac_ccy
                     UNION ALL
@@ -783,7 +831,7 @@ BEGIN
                            SUM(ABS(NVL(h.lcy_amount, 0))), 3
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.event
                     UNION ALL
@@ -791,7 +839,7 @@ BEGIN
                            SUM(ABS(NVL(h.lcy_amount, 0))), 4
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.drcr_ind
                   ) ORDER BY ord, nb DESC) LOOP
@@ -825,7 +873,7 @@ BEGIN
                     FROM actb_history h
                    WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                    GROUP BY TO_CHAR(h.trn_dt, 'YYYY-MM')
                    ORDER BY 1) LOOP
@@ -845,32 +893,43 @@ BEGIN
 
         -- =====================================================
         print_sub('1.3 The narrative, and how far it can be trusted');
-        po('  EXTERNAL_REF_NO is the only field carrying business meaning. It is');
-        po('  expected to be pipe separated, in this order:');
+        po('  THE DESCRIPTION IS NOT A COLUMN. FLEXCUBE stores no narrative on an');
+        po('  accounting entry. What everyone calls the description is produced by a');
+        po('  function, called on the columns of the entry:');
+        po('');
+        po('    webserve.FN_GET_DESC(module, trn_ref_no, ac_entry_sr_no,');
+        po('                         event_sr_no, trn_code, related_account, ac_no,');
+        po('                         ac_branch, ac_ccy, amount_tag, event,');
+        po('                         instrument_code, related_customer,');
+        po('                         value_dt, trn_dt, related_reference)');
+        po('');
+        po('  That matters for two reasons. The business meaning of a Calypso entry');
+        po('  depends on code the audit does not control and cannot version: change');
+        po('  the function and every figure below changes with it, silently. And the');
+        po('  call is made once per row, so the sections that read it over the whole');
+        po('  population are the slow ones, this one included.');
+        po('');
+        po('  On the Calypso entries the string is expected to be pipe separated:');
         po('');
         po('    deal id | entry id | EVENT | product type | counterparty | book |'
            || ' instrument code | instrument label');
         po('');
         po('  Everything below, and every Calypso control, reads it positionally.');
-        po('  The three tables of this section exist so the reader can verify that');
-        po('  reading before trusting a single figure that depends on it. IF THE');
-        po('  SAMPLE SHOWS THE FIELDS SHIFTED BY ONE, set k_cy_p0 to 1 in the');
-        po('  parameter block and run the script again.');
-        SELECT NVL(SUM(CASE WHEN TRIM(h.external_ref_no) IS NULL THEN 1 ELSE 0 END), 0),
-               NVL(SUM(CASE WHEN INSTR(NVL(h.external_ref_no, ' '), '|') > 0
-                            THEN 1 ELSE 0 END), 0),
-               COUNT(DISTINCT h.external_ref_no)
-          INTO v_cnt, v_cnt2, v_cnt3
-          FROM actb_history h
-         WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
-        print_kv('Lines with an empty narrative',        fnum(v_cnt)
-                 || '   ' || fpct(v_cnt, v_cy_nb));
-        print_kv('Lines whose narrative is pipe separated', fnum(v_cnt2)
-                 || '   ' || fpct(v_cnt2, v_cy_nb));
-        print_kv('Distinct narratives',                  fnum(v_cnt3));
+        po('  The tables of this section exist so the reader can verify that reading');
+        po('  before trusting a single figure that depends on it. IF THE SAMPLE SHOWS');
+        po('  THE FIELDS SHIFTED BY ONE, set k_cy_p0 to 1 in the parameter block and');
+        po('  run the script again.');
+        print_kv('Lines with an empty description',        fnum(v_cy_dn)
+                 || '   ' || fpct(v_cy_dn, v_cy_nb));
+        print_kv('Lines whose description is pipe separated', fnum(v_cy_dp)
+                 || '   ' || fpct(v_cy_dp, v_cy_nb));
+        print_kv('Distinct descriptions',                  fnum(v_cy_dd));
+        po('     A line with no pipe is not an error. The interface also carries');
+        po('     ordinary commercial traffic whose description is free banking text,');
+        po('     a repatriation or a card settlement for instance. Those lines are');
+        po('     not treasury deals and cannot be filtered out by product code, since');
+        po('     everything is ' || k_cy_prod || '. The count above is how much of the flow they');
+        po('     represent.');
 
         po('');
         po('     Distribution of the number of fields. A stable interface produces');
@@ -878,20 +937,25 @@ BEGIN
         po('     any positional reading is right for one of them only.');
         tbl_head('4,20,22,28,18,18',
                  'N#|FIELDS IN THE STRING|LINES|GROSS AMOUNT|FIRST|LAST',
-                 '|EXTERNAL_REF_NO|TRN_REF_NO|LCY_AMOUNT|TRN_DT|TRN_DT',
+                 '|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT|TRN_DT|TRN_DT',
                  'RRRRLL');
         v_row := 0;
-        FOR r IN (SELECT LENGTH(NVL(h.external_ref_no, ' '))
-                         - LENGTH(REPLACE(NVL(h.external_ref_no, ' '), '|', '')) + 1 nbf,
-                         COUNT(*) nb, SUM(ABS(NVL(h.lcy_amount, 0))) mt,
-                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
-                    FROM actb_history h
-                   WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
-                   GROUP BY LENGTH(NVL(h.external_ref_no, ' '))
-                            - LENGTH(REPLACE(NVL(h.external_ref_no, ' '), '|', '')) + 1
+        FOR r IN (SELECT nbf, COUNT(*) nb, SUM(mt) mt, MIN(dt) d1, MAX(dt) d2
+                    FROM (SELECT LENGTH(NVL(d.dsc, ' '))
+                                 - LENGTH(REPLACE(NVL(d.dsc, ' '), '|', '')) + 1 nbf,
+                                 d.mt, d.dt
+                            FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                        h.event_sr_no, h.trn_code, h.related_account,
+                                                        h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                        h.event, h.instrument_code, h.related_customer,
+                                                        h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                         ABS(NVL(h.lcy_amount, 0)) mt, h.trn_dt dt
+                                    FROM actb_history h
+                                   WHERE h.module = k_cy_mod
+                             AND h.product = k_cy_prod
+                             AND LOWER(h.user_id) LIKE k_cy_upat
+                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d)
+                   GROUP BY nbf
                    ORDER BY 2 DESC) LOOP
             v_row := v_row + 1;
             EXIT WHEN v_row > k_top;
@@ -902,22 +966,65 @@ BEGIN
         tbl_line('4,20,22,28,18,18');
 
         po('');
+        po('     The same distribution month by month. THIS IS THE TABLE THAT DATES A');
+        po('     CHANGE OF FORMAT. A field count that appears in one month and stops');
+        po('     in the next is an interface contract that was rewritten, and every');
+        po('     parsing rule written before that month stopped matching on that day,');
+        po('     silently. It has already happened once.');
+        tbl_head('4,16,22,22,30,18',
+                 'N#|MONTH|FIELDS IN THE STRING|LINES|GROSS AMOUNT|SHARE OF THE MONTH',
+                 '|TRN_DT|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT| ',
+                 'RLRRRR');
+        v_row := 0;
+        FOR r IN (SELECT mth, nbf, COUNT(*) nb, SUM(mt) mt,
+                         RATIO_TO_REPORT(COUNT(*)) OVER (PARTITION BY mth) shr
+                    FROM (SELECT TO_CHAR(d.dt, 'YYYY-MM') mth,
+                                 LENGTH(NVL(d.dsc, ' '))
+                                 - LENGTH(REPLACE(NVL(d.dsc, ' '), '|', '')) + 1 nbf,
+                                 d.mt
+                            FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                        h.event_sr_no, h.trn_code, h.related_account,
+                                                        h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                        h.event, h.instrument_code, h.related_customer,
+                                                        h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                         ABS(NVL(h.lcy_amount, 0)) mt, h.trn_dt dt
+                                    FROM actb_history h
+                                   WHERE h.module = k_cy_mod
+                             AND h.product = k_cy_prod
+                             AND LOWER(h.user_id) LIKE k_cy_upat
+                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d)
+                   GROUP BY mth, nbf
+                   ORDER BY mth, nbf) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top_all;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.mth, 16) || '|'
+                || fpadl(fnum(r.nbf), 22) || '|' || fpadl(fnum(r.nb), 22) || '|'
+                || fpadl(fmio(r.mt), 30) || '|'
+                || fpadl(TO_CHAR(ROUND(r.shr * 100, 1), 'FM990D0') || ' %', 18) || '|');
+        END LOOP;
+        tbl_line('4,16,22,22,30,18');
+
+        po('');
         po('     Raw sample. Read it against the field order above.');
         tbl_head('4,16,110',
-                 'N#|DATE|NARRATIVE AS IT IS STORED',
-                 '|TRN_DT|EXTERNAL_REF_NO',
+                 'N#|DATE|DESCRIPTION AS THE FUNCTION RETURNS IT',
+                 '|TRN_DT|FN_GET_DESC',
                  'RLL');
         v_row := 0;
-        FOR r IN (SELECT * FROM (
-                    SELECT h.trn_dt dt, h.external_ref_no ext
-                      FROM actb_history h
-                     WHERE h.module = k_cy_mod
-                               AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
-                       AND h.external_ref_no IS NOT NULL
-                     ORDER BY h.trn_dt DESC, h.trn_ref_no
-                  ) WHERE ROWNUM <= 12) LOOP
+        FOR r IN (SELECT h.trn_dt dt,
+                         webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                              h.event_sr_no, h.trn_code, h.related_account,
+                                              h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                              h.event, h.instrument_code, h.related_customer,
+                                              h.value_dt, h.trn_dt, h.related_reference) ext
+                    FROM (SELECT * FROM (
+                            SELECT h.* FROM actb_history h
+                             WHERE h.module = k_cy_mod
+                             AND h.product = k_cy_prod
+                             AND LOWER(h.user_id) LIKE k_cy_upat
+                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                             ORDER BY h.trn_dt DESC, h.trn_ref_no)
+                           WHERE ROWNUM <= 12) h) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(fdt(r.dt), 16) || '|'
                 || fpad(r.ext, 110) || '|');
@@ -928,31 +1035,35 @@ BEGIN
         po('     The same lines split into the fields this script will use.');
         tbl_head('4,26,18,20,20,16,34',
                  'N#|DEAL KEY|EVENT|BOOK|COUNTERPARTY|PRODUCT TYPE|INSTRUMENT',
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|EXTERNAL_REF_NO|EXTERNAL_REF_NO'
-                 || '|EXTERNAL_REF_NO|EXTERNAL_REF_NO',
+                 '|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC'
+                 || '|FN_GET_DESC|FN_GET_DESC',
                  'RLLLLLL');
         v_row := 0;
-        FOR r IN (SELECT * FROM (
-                    SELECT RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_id + k_cy_p0), '|') k1,
-                           RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_evt + k_cy_p0), '|') k2,
-                           RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_book + k_cy_p0), '|') k3,
-                           RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_ctp + k_cy_p0), '|') k4,
-                           RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_typ + k_cy_p0), '|') k5,
-                           RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_lbl + k_cy_p0), '|') k6
-                      FROM actb_history h
-                     WHERE h.module = k_cy_mod
-                               AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
-                       AND h.external_ref_no IS NOT NULL
-                     ORDER BY h.trn_dt DESC, h.trn_ref_no
-                  ) WHERE ROWNUM <= 12) LOOP
+        FOR r IN (SELECT RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_id + k_cy_p0), '|') k1,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_evt + k_cy_p0), '|') k2,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_book + k_cy_p0), '|') k3,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_ctp + k_cy_p0), '|') k4,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_typ + k_cy_p0), '|') k5,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_lbl + k_cy_p0), '|') k6
+                    FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                      h.event_sr_no, h.trn_code, h.related_account,
+                                                      h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                      h.event, h.instrument_code, h.related_customer,
+                                                      h.value_dt, h.trn_dt, h.related_reference) dsc
+                            FROM (SELECT * FROM (
+                                    SELECT h.* FROM actb_history h
+                                     WHERE h.module = k_cy_mod
+                                     AND h.product = k_cy_prod
+                                     AND LOWER(h.user_id) LIKE k_cy_upat
+                                     AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                     ORDER BY h.trn_dt DESC, h.trn_ref_no)
+                                   WHERE ROWNUM <= 12) h) d) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.k1, 26) || '|'
                 || fpad(r.k2, 18) || '|' || fpad(r.k3, 20) || '|'
@@ -967,28 +1078,35 @@ BEGIN
         po('  product. A book that stops without explanation is worth a question.');
         tbl_head('4,26,18,22,26,18,18,18',
                  'N#|BOOK|PRODUCT TYPE|LINES|GROSS AMOUNT|DEALS|FIRST|LAST',
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|TRN_REF_NO|LCY_AMOUNT'
-                 || '|EXTERNAL_REF_NO|TRN_DT|TRN_DT',
+                 '|FN_GET_DESC|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT'
+                 || '|FN_GET_DESC|TRN_DT|TRN_DT',
                  'RLLRRRLL');
         v_row := 0;
-        FOR r IN (SELECT RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_book + k_cy_p0), '|') book,
-                         RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_typ + k_cy_p0), '|') typ,
-                         COUNT(*) nb, SUM(ABS(NVL(h.lcy_amount, 0))) mt,
-                         COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no)) nbd,
-                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
-                    FROM actb_history h
-                   WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
-                   GROUP BY RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_book + k_cy_p0), '|'),
-                            RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_typ + k_cy_p0), '|')
+        FOR r IN (SELECT RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_book + k_cy_p0), '|') book,
+                         RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_typ + k_cy_p0), '|') typ,
+                         COUNT(*) nb, SUM(d.mt) mt,
+                         COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                            1, k_cy_t_id + k_cy_p0), '|'),
+                                            d.ref)) nbd,
+                         MIN(d.dt) d1, MAX(d.dt) d2
+                    FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                      h.event_sr_no, h.trn_code, h.related_account,
+                                                      h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                      h.event, h.instrument_code, h.related_customer,
+                                                      h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                 h.trn_ref_no ref, ABS(NVL(h.lcy_amount, 0)) mt,
+                                 h.trn_dt dt
+                            FROM actb_history h
+                           WHERE h.module = k_cy_mod
+                           AND h.product = k_cy_prod
+                           AND LOWER(h.user_id) LIKE k_cy_upat
+                           AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d
+                   GROUP BY RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_book + k_cy_p0), '|'),
+                            RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_typ + k_cy_p0), '|')
                    ORDER BY COUNT(*) DESC) LOOP
             v_row := v_row + 1;
             EXIT WHEN v_row > k_top_all;
@@ -1006,22 +1124,29 @@ BEGIN
         po('  moving billions gross. That contrast is the subject of 4.1.');
         tbl_head('4,28,22,28,26,18,18',
                  'N#|EVENT|LINES|GROSS AMOUNT|NET (D minus C)|FIRST|LAST',
-                 '|EXTERNAL_REF_NO|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT|TRN_DT|TRN_DT',
+                 '|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT|TRN_DT|TRN_DT',
                  'RLRRRLL');
         v_row := 0;
-        FOR r IN (SELECT RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_evt + k_cy_p0), '|') evt,
-                         COUNT(*) nb, SUM(ABS(NVL(h.lcy_amount, 0))) mt,
-                         SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) sgn,
-                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
-                    FROM actb_history h
-                   WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
-                   GROUP BY RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
-                                       1, k_cy_t_evt + k_cy_p0), '|')
+        FOR r IN (SELECT RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_evt + k_cy_p0), '|') evt,
+                         COUNT(*) nb, SUM(d.mt) mt, SUM(d.sgn) sgn,
+                         MIN(d.dt) d1, MAX(d.dt) d2
+                    FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                      h.event_sr_no, h.trn_code, h.related_account,
+                                                      h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                      h.event, h.instrument_code, h.related_customer,
+                                                      h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                 ABS(NVL(h.lcy_amount, 0)) mt,
+                                 CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
+                                                 ELSE -NVL(h.lcy_amount, 0) END sgn,
+                                 h.trn_dt dt
+                            FROM actb_history h
+                           WHERE h.module = k_cy_mod
+                           AND h.product = k_cy_prod
+                           AND LOWER(h.user_id) LIKE k_cy_upat
+                           AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d
+                   GROUP BY RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_evt + k_cy_p0), '|')
                    ORDER BY COUNT(*) DESC) LOOP
             v_row := v_row + 1;
             EXIT WHEN v_row > k_top_all;
@@ -1062,7 +1187,7 @@ BEGIN
                            ON s.ac_gl_no = h.ac_no
                    WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                    GROUP BY h.ac_no
                    ORDER BY SUM(ABS(NVL(h.lcy_amount, 0))) DESC) LOOP
@@ -1129,7 +1254,7 @@ BEGIN
               FROM actb_history h
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no = r.ac;
             SELECT MAX(a.ac_gl_desc) INTO v_lib
@@ -1183,7 +1308,7 @@ BEGIN
                             FROM actb_history h
                            WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                              AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                            GROUP BY h.ac_no, TO_CHAR(h.trn_dt, 'YYYY-MM'))
@@ -1209,13 +1334,18 @@ BEGIN
         po('  by itself, and the balance sheet is carrying it as if it would.');
         tbl_head('4,26,22,20,30,22',
                  'N#|AGE OF THE ITEM|ITEMS|LINES|RESIDUAL CARRIED|SHARE OF THE RESIDUAL',
-                 '|TRN_DT|EXTERNAL_REF_NO|TRN_REF_NO|LCY_AMOUNT| ',
+                 '|TRN_DT|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT| ',
                  'RLRRRR');
         v_row := 0;
         v_cnt := 0;
         v_mt  := 0;
         FOR r IN (SELECT bucket, COUNT(*) nb, SUM(nbl) nbl, SUM(resid) mt
-                    FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                    FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
                                  COUNT(*) nbl,
@@ -1235,10 +1365,15 @@ BEGIN
                             FROM actb_history h
                            WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                              AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                           GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                           GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
                           HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1260,7 +1395,12 @@ BEGIN
         po('  whether the residual sits in the recent buckets or in the old ones.');
 
         SELECT COUNT(*), NVL(SUM(ABS(resid)), 0) INTO v_cnt, v_mt
-          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
                        SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1269,10 +1409,15 @@ BEGIN
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                    AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
                 HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1294,16 +1439,41 @@ BEGIN
             FOR r IN (SELECT * FROM (
                         SELECT dk, book, ctp, evt, ins, d1, d2, resid,
                                TRUNC(k_cy_to) - TRUNC(d2) age
-                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_evt + k_cy_p0), '|')) evt,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|')) ins,
                                        MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
                                        SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1311,10 +1481,15 @@ BEGIN
                                   FROM actb_history h
                                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                                    AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no))
                          WHERE ABS(resid) > k_tol_abs
@@ -1335,17 +1510,32 @@ BEGIN
         po('  whole leg missing, not a drift, and the fastest of all to resolve.');
         tbl_head('4,26,20,20,30,16,16,14,12',
                  'N#|DEAL KEY|BOOK|COUNTERPARTY|RESIDUAL CARRIED|FIRST|LAST|LINES|ROUND',
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|EXTERNAL_REF_NO|LCY_AMOUNT'
+                 '|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC|LCY_AMOUNT'
                  || '|TRN_DT|TRN_DT|TRN_REF_NO| ',
                  'RLLLRLLRL');
         v_row := 0;
         FOR r IN (SELECT * FROM (
-                    SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                    SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
-                           MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                           MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
-                           MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                           MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
                            SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) resid,
@@ -1353,10 +1543,15 @@ BEGIN
                       FROM actb_history h
                      WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                        AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                     GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                     GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
                     HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1411,7 +1606,7 @@ BEGIN
               FROM actb_history h
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no IN (r.a1, r.a2);
             v_row := v_row + 1;
@@ -1504,7 +1699,7 @@ BEGIN
               FROM actb_history h
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
@@ -1537,7 +1732,7 @@ BEGIN
         tbl_head('4,14,28,28,30,20,20',
                  'N#|MONTH|BOUGHT IN THE MONTH|SOLD IN THE MONTH|POSITION AT FACE VALUE'
                  || '|DEALS|LINES',
-                 '|TRN_DT|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT|EXTERNAL_REF_NO|TRN_REF_NO',
+                 '|TRN_DT|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT|FN_GET_DESC|TRN_REF_NO',
                  'RLRRRRR');
         v_row := 0;
         FOR r IN (SELECT mth, dr, cr, nbd, nb,
@@ -1547,14 +1742,19 @@ BEGIN
                                           ELSE 0 END) dr,
                                  SUM(CASE WHEN h.drcr_ind = 'C' THEN NVL(h.lcy_amount, 0)
                                           ELSE 0 END) cr,
-                                 COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                 COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)) nbd,
                                  COUNT(*) nb
                             FROM actb_history h
                            WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                              AND h.ac_no IN (k_cy_bond, k_cy_bill)
                            GROUP BY TO_CHAR(h.trn_dt, 'YYYY-MM'))
@@ -1584,17 +1784,27 @@ BEGIN
         tbl_head('4,44,16,28,26,28,24,16,16',
                  'N#|INSTRUMENT|BOOK|FACE VALUE HELD|UNEARNED INCOME|CARRYING VALUE'
                  || '|ACCRUED INTEREST|DEALS|LAST',
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|LCY_AMOUNT|LCY_AMOUNT| |LCY_AMOUNT'
-                 || '|EXTERNAL_REF_NO|TRN_DT',
+                 '|FN_GET_DESC|FN_GET_DESC|LCY_AMOUNT|LCY_AMOUNT| |LCY_AMOUNT'
+                 || '|FN_GET_DESC|TRN_DT',
                  'RLLRRRRRL');
         v_row := 0;
         v_tot := 0;
         v_tot2 := 0;
         v_mt  := 0;
         FOR r IN (SELECT ins, book, face, unearned, accrued, nbd, d2 FROM (
-                    SELECT RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                    SELECT RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                           h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                           h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                           h.amount_tag, h.event, h.instrument_code,
+                                           h.related_customer, h.value_dt, h.trn_dt,
+                                           h.related_reference) || '|', '[^|]*\|',
                                        1, k_cy_t_lbl + k_cy_p0), '|') ins,
-                           MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                           MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
                            SUM(CASE WHEN h.ac_no IN (k_cy_bond, k_cy_bill)
                                     THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1605,18 +1815,28 @@ BEGIN
                            SUM(CASE WHEN h.ac_no = k_cy_accr
                                     THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END) accrued,
-                           COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                           COUNT(DISTINCT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)) nbd,
                            MAX(h.trn_dt) d2
                       FROM actb_history h
                      WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                        AND h.ac_no IN (k_cy_bond, k_cy_bill, k_cy_def_b,
                                        k_cy_def_t, k_cy_accr)
-                     GROUP BY RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                     GROUP BY RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                           h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                           h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                           h.amount_tag, h.event, h.instrument_code,
+                                           h.related_customer, h.value_dt, h.trn_dt,
+                                           h.related_reference) || '|', '[^|]*\|',
                                        1, k_cy_t_lbl + k_cy_p0), '|')
                   ) WHERE ABS(face) > k_tol_abs
                        OR ABS(unearned) > k_tol_abs
@@ -1648,7 +1868,12 @@ BEGIN
                             THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END), 0),
                NVL(SUM(CASE WHEN h.ac_no IN (k_cy_bond, k_cy_bill)
-                             AND TRIM(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                             AND TRIM(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                                 h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                                 h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                                 h.amount_tag, h.event, h.instrument_code,
+                                                 h.related_customer, h.value_dt, h.trn_dt,
+                                                 h.related_reference) || '|', '[^|]*\|',
                                              1, k_cy_t_lbl + k_cy_p0), '|')) IS NULL
                             THEN CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END ELSE 0 END), 0)
@@ -1656,7 +1881,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND h.ac_no IN (k_cy_bond, k_cy_bill);
         print_kv('Face value carried with no instrument in the narrative',
@@ -1668,7 +1893,7 @@ BEGIN
         po('                   with the custodian and cannot be sold knowingly. It is a');
         po('                   position the bank owns without being able to say what it is.');
         p_how('signed balance of the security accounts (' || k_cy_bond || ' and ' || k_cy_bill || ')');
-        po('                   whose instrument field is empty in EXTERNAL_REF_NO, against the');
+        po('                   whose instrument field is empty in the description, against the');
         po('                   total balance of the same accounts.');
         IF ABS(v_tot2) > k_tol_abs THEN v_cnt := 1; ELSE v_cnt := 0; END IF;
         p_verdict('CAL-04', 'Securities carried without an identified instrument',
@@ -1687,15 +1912,25 @@ BEGIN
         po('  that was never collected at all.');
         tbl_head('4,44,16,28,20,16,16,20',
                  'N#|INSTRUMENT|BOOK|ACCRUED CARRIED|LINES|FIRST|LAST|AGE IN DAYS',
-                 '|EXTERNAL_REF_NO|EXTERNAL_REF_NO|LCY_AMOUNT|TRN_REF_NO|TRN_DT|TRN_DT| ',
+                 '|FN_GET_DESC|FN_GET_DESC|LCY_AMOUNT|TRN_REF_NO|TRN_DT|TRN_DT| ',
                  'RLLRRLLR');
         v_row := 0;
         FOR r IN (SELECT * FROM (
                     SELECT ins, book, accrued, nb, d1, d2,
                            TRUNC(k_cy_to) - TRUNC(d2) age
-                      FROM (SELECT RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                      FROM (SELECT RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|') ins,
-                                   MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                   MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                                   h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                                   h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                                   h.amount_tag, h.event, h.instrument_code,
+                                                   h.related_customer, h.value_dt, h.trn_dt,
+                                                   h.related_reference) || '|', '[^|]*\|',
                                                1, k_cy_t_book + k_cy_p0), '|')) book,
                                    SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END) accrued,
@@ -1703,10 +1938,15 @@ BEGIN
                               FROM actb_history h
                              WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                                AND h.ac_no = k_cy_accr
-                             GROUP BY RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                             GROUP BY RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|'))
                      WHERE ABS(accrued) > k_tol_abs
                      ORDER BY ABS(accrued) DESC
@@ -1720,7 +1960,12 @@ BEGIN
         tbl_line('4,44,16,28,20,16,16,20');
 
         SELECT COUNT(*), NVL(SUM(ABS(accrued)), 0) INTO v_cnt, v_mt
-          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
                        SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1729,10 +1974,15 @@ BEGIN
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                    AND h.ac_no = k_cy_accr
-                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no)
                 HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1754,16 +2004,41 @@ BEGIN
             FOR r IN (SELECT * FROM (
                         SELECT dk, book, ctp, evt, ins, d1, d2, accrued,
                                ROUND(MONTHS_BETWEEN(k_cy_to, d2), 1) mois
-                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no) dk,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_evt + k_cy_p0), '|')) evt,
-                                       MAX(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|')) ins,
                                        MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
                                        SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -1771,10 +2046,15 @@ BEGIN
                                   FROM actb_history h
                                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                                    AND h.ac_no = k_cy_accr
-                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(h.external_ref_no || '|', '[^|]*\|',
+                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
+                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
+                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
+                                               h.amount_tag, h.event, h.instrument_code,
+                                               h.related_customer, h.value_dt, h.trn_dt,
+                                               h.related_reference) || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
                                    h.trn_ref_no))
                          WHERE ABS(accrued) > k_tol_abs
@@ -1819,7 +2099,7 @@ BEGIN
               FROM actb_history h
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
@@ -1838,7 +2118,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND h.ac_no IN (k_cy_col_ti, k_cy_borrow);
         print_kv('Collateral still pledged (' || k_cy_col_ti || ')',       famt(v_tot));
@@ -1893,7 +2173,7 @@ BEGIN
               FROM actb_history h
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
@@ -1952,7 +2232,7 @@ BEGIN
                              ON s.ac_gl_no = h.ac_no
                      WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                      GROUP BY h.ac_no
                     HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
@@ -1976,7 +2256,7 @@ BEGIN
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                  GROUP BY h.ac_no
                 HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
@@ -2008,7 +2288,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND h.ac_no = k_cy_prov;
         print_kv('Revaluation lines posted (' || k_cy_prov || ')', fnum(v_cnt2));
@@ -2039,7 +2319,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND h.ac_no IN (k_cy_bond, k_cy_bill);
         p_verdict('CAL-08', 'Portfolio not revalued within the tolerated period',
@@ -2065,7 +2345,7 @@ BEGIN
                   FROM actb_history h
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                  GROUP BY TRUNC(h.trn_dt)
                 HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -2093,7 +2373,7 @@ BEGIN
                           FROM actb_history h
                          WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                          GROUP BY TRUNC(h.trn_dt)
                         HAVING ABS(SUM(CASE h.drcr_ind WHEN 'D' THEN NVL(h.lcy_amount, 0)
@@ -2113,7 +2393,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND TRUNC(h.trn_dt) - TRUNC(h.trn_dt, 'IW') >= 5;
         p_test('CAL-10', 'The interface posts on business days only');
@@ -2131,7 +2411,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND NVL(h.auth_id, ' ') = NVL(h.user_id, ' ');
         p_test('CAL-11', 'Who approves what the interface posts');
@@ -2151,7 +2431,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND h.value_dt IS NOT NULL
            AND TRUNC(h.trn_dt) - TRUNC(h.value_dt) > k_cy_back_d;
@@ -2178,7 +2458,7 @@ BEGIN
                           FROM actb_history h
                          WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
-                                   AND h.user_id = k_cy_user
+                                   AND LOWER(h.user_id) LIKE k_cy_upat
                                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                            AND h.value_dt IS NOT NULL
                            AND TRUNC(h.trn_dt) - TRUNC(h.value_dt) > k_cy_back_d
@@ -2198,7 +2478,7 @@ BEGIN
           FROM actb_history h
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
-                   AND h.user_id = k_cy_user
+                   AND LOWER(h.user_id) LIKE k_cy_upat
                    AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
            AND SUBSTR(h.ac_no, 1, LENGTH(k_cy_excl)) = k_cy_excl;
         p_test('CAL-13', 'The account family left out of the first extract');
@@ -2228,7 +2508,7 @@ BEGIN
                                ON s.ac_gl_no = h.ac_no
                        WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
-                               AND h.user_id = k_cy_user
+                               AND LOWER(h.user_id) LIKE k_cy_upat
                                AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
                          AND SUBSTR(h.ac_no, 1, LENGTH(k_cy_excl)) = k_cy_excl
                        GROUP BY h.ac_no
@@ -2413,7 +2693,8 @@ BEGIN
         po('  1. Calypso posts entries and creates no contract. Nothing here can be');
         po('     reconciled to a deal file, because none is sent. The portfolio of');
         po('     part 3 IS the portfolio, not a control against one.');
-        po('  2. The business information lives in the free text EXTERNAL_REF_NO.');
+        po('  2. The business information lives in the description returned by');
+        po('     webserve.FN_GET_DESC, which is code the audit does not control.');
         po('     Section 1.3 measures how far it can be trusted. If it shows more');
         po('     than one field count, the positional reading is right for one');
         po('     format only, and the token offset k_cy_p0 has to be set for the');

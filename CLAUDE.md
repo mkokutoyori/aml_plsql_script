@@ -142,8 +142,10 @@ section again.
 Identify its entries by the triple, never by the module alone (`DE` is the
 retail module and holds millions of rows):
 
-    MODULE 'DE' · PRODUCT 'MNIP' · USER_ID = AUTH_ID = 'CALYPSOUSR'
+    MODULE 'DE' · PRODUCT 'MNIP' · LOWER(USER_ID) LIKE '%calypso%'
     one single AMOUNT_TAG 'TXN_AMT' and TRN_CODE 'NIP' on every line
+    (test the user with the pattern, not an equality: a second interface
+     account would otherwise be missed silently)
 
 **The bridge accounts are the heart of the review.** Calypso never posts a deal
 as one balanced entry facing the counterparty: it splits it into legs, each
@@ -167,12 +169,25 @@ unearned income**, and a report that does not net the two overstates the book.
 
 Two traps:
 
-- **The narrative is the only business information.** `EXTERNAL_REF_NO` is
-  pipe-separated (deal id | entry id | event | product type | counterparty |
-  book | instrument code | instrument label). Its format has already changed
-  once without notice. Measure it — field-count distribution, raw samples,
-  parsed samples — *before* any figure depends on it, and keep the token
-  positions in parameters so a shift is a one-line fix.
+- **The narrative is the only business information, and it is NOT a column.**
+  FLEXCUBE stores no description on an accounting entry. What everyone reads
+  is computed by `webserve.FN_GET_DESC(module, trn_ref_no, ac_entry_sr_no,
+  event_sr_no, trn_code, related_account, ac_no, ac_branch, ac_ccy,
+  amount_tag, event, instrument_code, related_customer, value_dt, trn_dt,
+  related_reference)`. The script needs EXECUTE on it or the block will not
+  compile, and the business meaning of every Calypso figure depends on code
+  the audit does not control and cannot version. It is a PL/SQL call **per
+  row**, so compute it once in an inline view and read the tokens from that —
+  never call it inside a `GROUP BY` expression over the whole population, and
+  never on a section that does not need business meaning. On Calypso entries
+  the string is pipe-separated (deal id | entry id | event | product type |
+  counterparty | book | instrument code | instrument label); on the commercial
+  traffic that also flows through the interface it is ordinary free banking
+  text with no pipes at all. Its format has already changed once without
+  notice, so measure it — field-count distribution, the same distribution
+  **month by month** (that is what dates a format change), raw samples, parsed
+  samples — *before* any figure depends on it, and keep the token positions in
+  parameters so a shift is a one-line fix.
 - **Never read a gross total.** The daily engine posts the full cumulative
   accrual and reverses it the next business day, inflating gross flows by a
   factor of eighty or more. Only net movements mean anything.

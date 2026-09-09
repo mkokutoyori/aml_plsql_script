@@ -122,16 +122,22 @@ implied rate at the stated nominal, and the implied nominal at the stated rate.
 One of the two is usually what was really meant, and it tells the auditor at
 once whether the rate or the principal was captured wrong.
 
-## CALYPSO: a system that sends entries and nothing else
+## CALYPSO: a system that sends entries and nothing else — its OWN script
 
 Since 16/06/2025 the securities and treasury business runs in **CALYPSO**, the
 front office system, not in the money market module (whose last entry is dated
 16/06/2025 — the two dates are the migration). Calypso creates **no row in
 `LDTB_CONTRACT_MASTER`**: no nominal, no rate, no value date, no maturity. It
 posts accounting entries and nothing else, so none of the 56 matrix controls
-can run on it — they all need a deal file that does not exist. Part 12 of
-`audit_securities.sql` covers it with its own family, CAL-01 to CAL-13, cut off
-at 31/08/2026.
+can run on it — they all need a deal file that does not exist.
+
+**The two paradigms must never be mixed in one report.** In the MM module a
+security is a contract and every control confronts the entries with its terms;
+in Calypso there are only entries. `audit_calypso.sql` is therefore a separate,
+standalone script — its own parameters, its own controls (CAL-01 to CAL-13),
+its own summary — cut off at 31/08/2026. `audit_securities.sql` says in its
+header what it does not cover and points there; it must not grow a Calypso
+section again.
 
 Identify its entries by the triple, never by the module alone (`DE` is the
 retail module and holds millions of rows):
@@ -222,7 +228,12 @@ Two traps:
 
 ## Files
 
-- `audit_securities.sql` — the current securities audit script (English).
+- `audit_securities.sql` — the securities audit script for the MM module
+  (English). Contracts confronted with their entries; 56 controls plus the CPN
+  family.
+- `audit_calypso.sql` — the Calypso interface audit script (English). Entries
+  only, no contract: bridge account residuals, the portfolio rebuilt from the
+  entries, CAL-01 to CAL-13. Standalone, run on its own.
 - `audit_marche_monetaire.sql` — the previous money-market script (French),
   kept for reference; do not delete.
 - `explore_mm_operations.sql`, `explore_fx_operations.sql` — exploration

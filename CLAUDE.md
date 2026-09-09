@@ -134,7 +134,7 @@ can run on it — they all need a deal file that does not exist.
 **The two paradigms must never be mixed in one report.** In the MM module a
 security is a contract and every control confronts the entries with its terms;
 in Calypso there are only entries. `audit_calypso.sql` is therefore a separate,
-standalone script — its own parameters, its own controls (CAL-01 to CAL-13),
+standalone script — its own parameters, its own controls (CAL-01 to CAL-14),
 its own summary — cut off at 31/08/2026. `audit_securities.sql` says in its
 header what it does not cover and points there; it must not grow a Calypso
 section again.
@@ -161,11 +161,23 @@ as one balanced entry facing the counterparty: it splits it into legs, each
 using a *bridge* account as its counter-leg, cleared on the settlement event —
 `467000186` securities, `467000188` money market and transfers, `467000243`
 client mirror trades. A transit account must return to nil; what it still
-carries is the accounting measure of what the interface has not closed. Age it
-by Calypso deal key, never by `TRN_REF_NO` (one reference per *event*, so every
+carries is the accounting measure of what has not been closed. Age it by
+Calypso deal key, never by `TRN_REF_NO` (one reference per *event*, so every
 reference is unbalanced on the bridge by design). A residual that is an exact
 multiple of a billion is one whole missing leg, not a drift, and is resolvable
 in a single query.
+
+**Read a transit account WHOLE, not as the Calypso slice of it.** It has to
+come back to nil *as an account*, whoever posted on it, and a manual correction
+on the plumbing between two systems is exactly what an audit is looking for —
+testing only the interface's own entries would hide it. Part 2 of
+`audit_calypso.sql` is therefore the one place where the population is the
+account rather than the interface, and it splits the balance three ways so the
+reader sees who has to answer for it: **posted by Calypso** (module/product/user
+on or after the go-live), **posted by anything else**, and **before the go-live**
+(what the account already carried, which is not the interface failing). The
+three add up to the balance by construction, so the split can be ticked on the
+page, and CAL-14 flags the non-interface entries by module, product and user.
 
 **The portfolio has to be rebuilt from the entries**, because it exists nowhere
 else. Securities are carried at **face value** (`512410100` bonds, `511210100`
@@ -270,8 +282,8 @@ Two traps:
   (English). Contracts confronted with their entries; 56 controls plus the CPN
   family.
 - `audit_calypso.sql` — the Calypso interface audit script (English). Entries
-  only, no contract: bridge account residuals, the portfolio rebuilt from the
-  entries, CAL-01 to CAL-13. Standalone, run on its own.
+  only, no contract: transit account residuals read on the whole account, the
+  portfolio rebuilt from the entries, CAL-01 to CAL-14. Standalone, run on its own.
 - `audit_marche_monetaire.sql` — the previous money-market script (French),
   kept for reference; do not delete.
 - `explore_mm_operations.sql`, `explore_fx_operations.sql` — exploration

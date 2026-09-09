@@ -26,10 +26,16 @@
 --   it is the only one talking.
 --
 --   Two sections carry the review:
---     PART 2  THE BRIDGE ACCOUNTS. A bridge is plumbing, not a position. What
---             it still carries is the accounting measure of what the
---             interface has not closed. It is the one figure in this report
---             that cannot be explained away.
+--     PART 2  THE TRANSIT ACCOUNTS. A bridge is plumbing, not a position.
+--             What it still carries is the accounting measure of what has
+--             not been closed. It is the one figure in this report that
+--             cannot be explained away.
+--             It is read on the WHOLE ACCOUNT, not on the Calypso slice of
+--             it: an account has to come back to nil whoever posted on it,
+--             and a manual correction on the plumbing between two systems is
+--             exactly what an audit looks for. The balance is then split
+--             into what the interface posted, what anything else posted, and
+--             what predated the go live. The three add up.
 --     PART 3  THE PORTFOLIO. It exists nowhere else, so this is not a control
 --             against a deal file: it IS the portfolio, security by security,
 --             at face value, at carrying value, with its accrued interest.
@@ -69,12 +75,16 @@
 --   PART 0  - scope, parameters, the bridge mechanism, chart of accounts
 --   PART 1  - the interface, its footprint and its narrative
 --             1.1 footprint   1.2 calendar   1.3 THE NARRATIVE   1.4 accounts
---   PART 2  - THE BRIDGE ACCOUNTS AND THEIR RESIDUAL BALANCE   CAL-01 to 03
---             2.1 a how much   b growing   c age   d named   e other pairs
+--   PART 2  - THE TRANSIT ACCOUNTS AND THEIR RESIDUAL BALANCE  CAL-01, 02,
+--                                                              03 and 14
+--             2.1 a how much and who put it there   b in proportion
+--                 c who else posts   d growing   e age   f named
+--                 g the other pairs
 --   PART 3  - THE PORTFOLIO DEDUCED FROM THE ENTRIES           CAL-04 to 06
 --             3.1 a position   b month by month   c SECURITY BY SECURITY
 --                 d accrued interest   e off balance sheet   f income
 --   PART 4  - engine, revaluation, calendar, blind spots       CAL-07 to 13
+--             (CAL-14 sits with the transit accounts, in part 2)
 --   PART 5  - summary of all tests
 --
 -- THE ONE THING TO KNOW BEFORE READING
@@ -1252,7 +1262,7 @@ BEGIN
     print_part('PART 2 : THE BRIDGE ACCOUNTS AND WHAT THEY STILL CARRY');
     -- ########################################################################
 
-    print_section('2. THE RESIDUAL BALANCE OF THE INTERFACE');
+    print_section('2. THE RESIDUAL BALANCE OF THE TRANSIT ACCOUNTS');
     BEGIN
         po('  A bridge account is plumbing, not a position. Calypso posts one leg of');
         po('  a deal against it and clears it on the settlement event, so at any');
@@ -1260,206 +1270,333 @@ BEGIN
         po('  deals traded but not yet settled.');
         po('');
         po('  What it actually carries is therefore the accounting measure of what');
-        po('  the interface has NOT closed. It is the one figure in this whole part');
-        po('  that cannot be explained away: no deal terms are needed to read it, no');
+        po('  has NOT been closed. It is the one figure in this whole part that');
+        po('  cannot be explained away: no deal terms are needed to read it, no');
         po('  narrative, no valuation policy. The account either returns to nil or');
         po('  it does not.');
         po('');
-        po('  This section answers four questions, in order. How much is left. Is it');
-        po('  growing. How old is it. And which deals is it made of.');
+        po('  THIS PART READS THE WHOLE ACCOUNT, NOT THE CALYPSO SLICE OF IT. A');
+        po('  transit account has to come back to nil as an ACCOUNT. Testing only');
+        po('  the entries the interface posted would hide anything else that landed');
+        po('  there, and a manual correction on a bridge is precisely the kind of');
+        po('  thing an audit is looking for. So the balance below is the true');
+        po('  balance of the account, and it is then split three ways so that the');
+        po('  reader sees at once who has to answer for it:');
+        po('');
+        po('    POSTED BY CALYPSO   module ' || k_cy_mod || ', product ' || k_cy_prod
+           || ', user like ' || k_cy_upat || ',');
+        po('                        dated on or after the go live ' || fdt(k_cy_from));
+        po('    ANYTHING ELSE       everything that is not that, whatever it is');
+        po('    BEFORE THE GO LIVE  the part of ANYTHING ELSE that predates Calypso,');
+        po('                        printed separately because it is not the');
+        po('                        interface failing to clear, it is what the');
+        po('                        account already carried when Calypso arrived');
+        po('');
+        po('  The three add up to the balance, by construction, so the split can be');
+        po('  ticked on the page.');
+        po('');
+        po('  This section then answers four questions, in order. How much is left.');
+        po('  Who put it there. Is it growing. And how old it is, deal by deal.');
 
         -- -----------------------------------------------------
-        print_sub('2.1 a. How much each bridge still carries at ' || fdt(k_cy_to));
-        po('  RESIDUAL is the balance in the convention of this bank, CREDIT MINUS');
-        po('  DEBIT. A positive figure is a credit balance left on the bridge, a');
-        po('  negative one a debit balance. Either way it is a deal the interface');
-        po('  started and did not finish. RESIDUAL OVER GROSS puts it in proportion:');
-        po('  a residual of a few parts per million of the flow is a handful of');
-        po('  unsettled deals, a residual of several percent is a mechanism that');
-        po('  does not clear.');
-        tbl_head('4,20,40,20,28,28,20,18',
-                 'N#|BRIDGE ACCOUNT|ACCOUNT NAME|LINES|GROSS FLOW|RESIDUAL AT CUT OFF'
-                 || '|RESIDUAL OVER GROSS|VERDICT',
-                 '|AC_NO|AC_GL_DESC|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT| | ',
+        print_sub('2.1 a. What each transit account carries at ' || fdt(k_cy_to)
+                  || ', and who put it there');
+        po('  BALANCE is credit minus debit, as this bank computes it and as the');
+        po('  general ledger shows it. A positive figure is a credit balance left on');
+        po('  the bridge, a negative one a debit balance. Either way it is something');
+        po('  that was started and not finished.');
+        tbl_head('4,20,32,26,26,26,26,16',
+                 'N#|ACCOUNT|ACCOUNT NAME|BALANCE, WHOLE ACCOUNT|POSTED BY CALYPSO'
+                 || '|POSTED BY ANYTHING ELSE|OF WHICH BEFORE THE GO LIVE|VERDICT',
+                 '|AC_NO|AC_GL_DESC|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT| ',
                  'RLLRRRRR');
         v_row := 0;
         v_cnt := 0;
         v_mt  := 0;
+        v_mt2 := 0;
         FOR r IN (SELECT 1 ord, k_cy_brg_sec ac FROM DUAL UNION ALL
                   SELECT 2, k_cy_brg_mm FROM DUAL UNION ALL
                   SELECT 3, k_cy_brg_mir FROM DUAL
                   ORDER BY 1) LOOP
-            SELECT COUNT(*), NVL(SUM(ABS(NVL(h.lcy_amount, 0))), 0),
-                   NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END), 0)
-              INTO v_cnt2, v_tot, v_tot2
+            SELECT NVL(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                   ELSE -NVL(h.lcy_amount, 0) END), 0),
+                   NVL(SUM(CASE WHEN h.module = k_cy_mod AND h.product = k_cy_prod
+                                AND LOWER(h.user_id) LIKE k_cy_upat
+                                AND h.trn_dt >= k_cy_from
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0),
+                   NVL(SUM(CASE WHEN h.trn_dt < k_cy_from
+                                THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                     ELSE -NVL(h.lcy_amount, 0) END
+                                ELSE 0 END), 0)
+              INTO v_tot, v_tot2, v_mt2
               FROM actb_history h
-             WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt >= k_cy_from
-                   AND h.trn_dt <  k_cy_to + 1
-               AND h.ac_no = r.ac;
+             WHERE h.ac_no = r.ac
+               AND h.trn_dt <  k_cy_to + 1;
             SELECT MAX(a.ac_gl_desc) INTO v_lib
               FROM sttb_account a WHERE a.ac_gl_no = r.ac;
             v_row := v_row + 1;
-            IF ABS(v_tot2) > k_tol_abs THEN
+            IF ABS(v_tot) > k_tol_abs THEN
                 v_cnt := v_cnt + 1;
-                v_mt  := v_mt + ABS(v_tot2);
+                v_mt  := v_mt + ABS(v_tot);
             END IF;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac, 20) || '|'
-                || fpad(v_lib, 40) || '|' || fpadl(fnum(v_cnt2), 20) || '|'
-                || fpadl(fmio(v_tot), 28) || '|' || fpadl(famt(v_tot2), 28) || '|'
-                || fpadl(fpct(ABS(v_tot2), v_tot), 20) || '|'
-                || fpadl(CASE WHEN ABS(v_tot2) <= k_tol_abs THEN 'CLEARED'
-                              WHEN MOD(ABS(v_tot2), k_cy_round) = 0 THEN 'ROUND, ONE LEG'
-                              ELSE 'NOT CLEARED' END, 18) || '|');
+                || fpad(v_lib, 32) || '|' || fpadl(famt(v_tot), 26) || '|'
+                || fpadl(famt(v_tot2), 26) || '|'
+                || fpadl(famt(v_tot - v_tot2), 26) || '|'
+                || fpadl(famt(v_mt2), 26) || '|'
+                || fpadl(CASE WHEN ABS(v_tot) <= k_tol_abs THEN 'CLEARED'
+                              WHEN MOD(ABS(v_tot), k_cy_round) = 0 THEN 'ROUND, ONE LEG'
+                              ELSE 'NOT CLEARED' END, 16) || '|');
         END LOOP;
-        tbl_line('4,20,40,20,28,28,20,18');
-        print_kv('Bridge accounts that do not clear', fnum(v_cnt) || ' of 3');
-        print_kv('Total left in transit',             famt(v_mt) || ' XAF   ' || fmio(v_mt));
-        po('  A residual that is an EXACT MULTIPLE of ' || fmio(k_cy_round) || ' is flagged ROUND: it is');
+        tbl_line('4,20,32,26,26,26,26,16');
+        print_kv('Transit accounts that do not clear', fnum(v_cnt) || ' of 3');
+        print_kv('Total left in transit',              famt(v_mt) || ' XAF   ' || fmio(v_mt));
+        po('  A balance that is an EXACT MULTIPLE of ' || fmio(k_cy_round) || ' is flagged ROUND: it is');
         po('  one whole unmatched leg, not an accumulation of small breaks, and it');
         po('  should be identifiable in a single query rather than reconciled.');
 
+        p_test('CAL-01', 'The transit accounts return to nil');
+        p_obj('a transit account carries no position. Whatever it still holds');
+        po('                   at the cut off is something that was started and never finished,');
+        po('                   and it sits in the balance sheet as an asset or a liability that');
+        po('                   belongs to nobody. The test is run on the WHOLE account, not on');
+        po('                   the Calypso part of it: the account is what has to come back to');
+        po('                   nil, whoever posted on it.');
+        p_how('balance, credit minus debit, of each of the three transit');
+        po('                   accounts, all entries up to ' || fdt(k_cy_to) || ' whatever their origin.');
+        po('                   Tolerance ' || famt(k_tol_abs) || ' XAF.');
+        p_verdict('CAL-01', 'Transit account that does not return to nil',
+                  v_cnt, 3, v_mt, 'CRITICAL');
+
         po('');
-        po('  HOW TO TICK THE THREE FIGURES ABOVE. Run this, and nothing else. Four');
+        po('  HOW TO TICK THE THREE FIGURES ABOVE. Run this, and nothing else. Three');
         po('  things in it are load bearing, and a query missing any one of them will');
         po('  not reproduce the table.');
         po('');
         po('    1. the period runs UP TO the cut off, not from it. A condition');
         po('       trn_dt >= the cut off date measures the movement AFTER it, which');
         po('       is a different question with a different answer.');
-        po('    2. the population is the interface, not the account. Anything else');
-        po('       posting on a bridge, another module or a manual entry, is not');
-        po('       Calypso and does not belong in the residual of the interface.');
-        po('    3. NEVER join STTB_ACCOUNT directly on AC_NO. It holds several rows');
+        po('    2. NEVER join STTB_ACCOUNT directly on AC_NO. It holds several rows');
         po('       per AC_GL_NO, so a plain join multiplies every entry and inflates');
         po('       the balance by that factor. Take the label with a scalar');
         po('       subquery, as below, or pre aggregate it.');
-        po('    4. the upper bound is written as strictly less than the day after,');
+        po('    3. the upper bound is written as strictly less than the day after,');
         po('       so an entry stamped later in the day on the cut off is not lost.');
         po('');
         po('    SELECT h.ac_no,');
         po('           (SELECT MAX(s.ac_gl_desc) FROM sttb_account s');
         po('             WHERE s.ac_gl_no = h.ac_no) ac_gl_desc,');
         po('           COUNT(*) lines,');
-        po('           SUM(ABS(NVL(h.lcy_amount, 0))) gross_flow,');
         po('           SUM(CASE h.drcr_ind WHEN ''C'' THEN NVL(h.lcy_amount, 0)');
-        po('                               ELSE -NVL(h.lcy_amount, 0) END) residual');
+        po('                               ELSE -NVL(h.lcy_amount, 0) END) balance,');
+        po('           SUM(CASE WHEN h.module = ''' || k_cy_mod || ''' AND h.product = '''
+           || k_cy_prod || '''');
+        po('                     AND LOWER(h.user_id) LIKE ''' || k_cy_upat || '''');
+        po('                     AND h.trn_dt >= TO_DATE(''' || fdt(k_cy_from) || ''', ''DD/MM/YYYY'')');
+        po('                    THEN CASE h.drcr_ind WHEN ''C'' THEN NVL(h.lcy_amount, 0)');
+        po('                                         ELSE -NVL(h.lcy_amount, 0) END');
+        po('                    ELSE 0 END) posted_by_calypso');
         po('      FROM actb_history h');
-        po('     WHERE h.module  = ''' || k_cy_mod || '''');
-        po('       AND h.product = ''' || k_cy_prod || '''');
-        po('       AND LOWER(h.user_id) LIKE ''' || k_cy_upat || '''');
-        po('       AND h.trn_dt >= TO_DATE(''' || fdt(k_cy_from) || ''', ''DD/MM/YYYY'')');
-        po('       AND h.trn_dt <  TO_DATE(''' || fdt(k_cy_to) || ''', ''DD/MM/YYYY'') + 1');
-        po('       AND h.ac_no IN (''' || k_cy_brg_sec || ''', ''' || k_cy_brg_mm
+        po('     WHERE h.ac_no IN (''' || k_cy_brg_sec || ''', ''' || k_cy_brg_mm
            || ''', ''' || k_cy_brg_mir || ''')');
+        po('       AND h.trn_dt <  TO_DATE(''' || fdt(k_cy_to) || ''', ''DD/MM/YYYY'') + 1');
         po('     GROUP BY h.ac_no');
         po('     ORDER BY h.ac_no;');
 
-        p_test('CAL-01', 'The bridge accounts return to nil');
-        p_obj('a transit account carries no position. Whatever it still holds');
-        po('                   at the cut off is a deal the interface started and never');
-        po('                   finished, and it sits in the balance sheet as an asset or a');
-        po('                   liability that belongs to nobody.');
-        p_how('balance, credit minus debit, of each of the three bridge');
-        po('                   accounts over the');
-        po('                   whole Calypso population, at ' || fdt(k_cy_to) || '. Tolerance ' || famt(k_tol_abs) || ' XAF.');
-        p_verdict('CAL-01', 'Bridge account that does not return to nil',
-                  v_cnt, 3, v_mt, 'CRITICAL');
+        -- -----------------------------------------------------
+        print_sub('2.1 b. The same in proportion, and the volume behind it');
+        po('  BALANCE OVER GROSS puts the residual in proportion: a balance of a few');
+        po('  parts per million of the flow is a handful of unsettled deals, a');
+        po('  balance of several percent is a mechanism that does not clear.');
+        tbl_head('4,20,16,20,18,26,26,20,16,16',
+                 'N#|ACCOUNT|LINES, ALL|OF WHICH CALYPSO|OF WHICH OTHER|GROSS FLOW'
+                 || '|BALANCE|BALANCE OVER GROSS|FIRST ENTRY|LAST ENTRY',
+                 '|AC_NO|TRN_REF_NO|TRN_REF_NO|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT| '
+                 || '|TRN_DT|TRN_DT',
+                 'RLRRRRRRLL');
+        v_row := 0;
+        FOR r IN (SELECT h.ac_no, COUNT(*) nb,
+                         SUM(CASE WHEN h.module = k_cy_mod AND h.product = k_cy_prod
+                              AND LOWER(h.user_id) LIKE k_cy_upat
+                              AND h.trn_dt >= k_cy_from
+                                  THEN 1 ELSE 0 END) nb_cy,
+                         SUM(ABS(NVL(h.lcy_amount, 0))) gr,
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                             ELSE -NVL(h.lcy_amount, 0) END) sgn,
+                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                    FROM actb_history h
+                   WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                     AND h.trn_dt <  k_cy_to + 1
+                   GROUP BY h.ac_no
+                   ORDER BY h.ac_no) LOOP
+            v_row := v_row + 1;
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|'
+                || fpadl(fnum(r.nb), 16) || '|' || fpadl(fnum(r.nb_cy), 20) || '|'
+                || fpadl(fnum(r.nb - r.nb_cy), 18) || '|' || fpadl(fmio(r.gr), 26) || '|'
+                || fpadl(famt(r.sgn), 26) || '|'
+                || fpadl(fpct(ABS(r.sgn), r.gr), 20) || '|'
+                || fpad(fdt(r.d1), 16) || '|' || fpad(fdt(r.d2), 16) || '|');
+        END LOOP;
+        tbl_line('4,20,16,20,18,26,26,20,16,16');
 
         -- -----------------------------------------------------
-        print_sub('2.1 b. Is the residual growing, month by month');
-        po('  MOVEMENT is what the month added, RUNNING RESIDUAL what is left at the');
-        po('  end of it. A bridge that works oscillates around nil. One that drifts');
-        po('  in the same direction month after month is not a timing difference, it');
-        po('  is a leg the interface never sends.');
-        tbl_head('4,20,14,28,30,20',
-                 'N#|BRIDGE ACCOUNT|MONTH|MOVEMENT OF THE MONTH|RUNNING RESIDUAL|LINES',
-                 '|AC_NO|TRN_DT|LCY_AMOUNT|LCY_AMOUNT|TRN_REF_NO',
-                 'RLLRRR');
+        print_sub('2.1 c. Who else posts on a transit account');
+        po('  Everything on the three bridges that is NOT the interface, broken down');
+        po('  by module, product and user. A transit account of an automated');
+        po('  interface should be touched by that interface and by nothing else.');
+        po('  Anything here is either a manual correction, which has to be');
+        po('  documented and approved, or a second producer nobody accounted for.');
+        po('  Both are worth a question, and neither is visible if the review looks');
+        po('  only at what Calypso posted.');
+        tbl_head('4,20,10,12,18,16,26,26,16,16',
+                 'N#|ACCOUNT|MODULE|PRODUCT|USER|LINES|GROSS FLOW|BALANCE'
+                 || '|FIRST|LAST',
+                 '|AC_NO|MODULE|PRODUCT|USER_ID|TRN_REF_NO|LCY_AMOUNT|LCY_AMOUNT'
+                 || '|TRN_DT|TRN_DT',
+                 'RLLLLRRRLL');
         v_row := 0;
-        FOR r IN (SELECT ac_no, mth, mvt, nb,
+        v_cnt := 0;
+        v_mt  := 0;
+        FOR r IN (SELECT h.ac_no, NVL(h.module, '-') mdl, NVL(h.product, '-') prd,
+                         NVL(h.user_id, '-') usr, COUNT(*) nb,
+                         SUM(ABS(NVL(h.lcy_amount, 0))) gr,
+                         SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                             ELSE -NVL(h.lcy_amount, 0) END) sgn,
+                         MIN(h.trn_dt) d1, MAX(h.trn_dt) d2
+                    FROM actb_history h
+                   WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                     AND h.trn_dt <  k_cy_to + 1
+                     AND NOT (h.module = k_cy_mod AND h.product = k_cy_prod
+                              AND LOWER(h.user_id) LIKE k_cy_upat
+                              AND h.trn_dt >= k_cy_from)
+                   GROUP BY h.ac_no, NVL(h.module, '-'), NVL(h.product, '-'),
+                            NVL(h.user_id, '-')
+                   ORDER BY COUNT(*) DESC) LOOP
+            v_row := v_row + 1;
+            EXIT WHEN v_row > k_top_all;
+            v_cnt := v_cnt + r.nb;
+            v_mt  := v_mt + ABS(r.sgn);
+            po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|'
+                || fpad(r.mdl, 10) || '|' || fpad(r.prd, 12) || '|'
+                || fpad(r.usr, 18) || '|' || fpadl(fnum(r.nb), 16) || '|'
+                || fpadl(fmio(r.gr), 26) || '|' || fpadl(famt(r.sgn), 26) || '|'
+                || fpad(fdt(r.d1), 16) || '|' || fpad(fdt(r.d2), 16) || '|');
+        END LOOP;
+        tbl_line('4,20,10,12,18,16,26,26,16,16');
+        IF v_row = 0 THEN
+            po('  Nothing. The three transit accounts are touched by the interface and');
+            po('  by nobody else, which is how it should be.');
+        END IF;
+        p_test('CAL-14', 'A transit account of the interface is used by the interface only');
+        p_obj('these three accounts exist for one automated interface. An');
+        po('                   entry on them from another module, another product or a human');
+        po('                   user is either a manual correction on the plumbing between two');
+        po('                   systems, which must be documented and approved, or a second');
+        po('                   producer nobody knew about. Both change what the residual of');
+        po('                   the account means, and neither is visible to a review that');
+        po('                   looks only at what Calypso posted.');
+        p_how('entries on the three transit accounts, up to ' || fdt(k_cy_to) || ', that are');
+        po('                   not module ' || k_cy_mod || ' product ' || k_cy_prod
+                             || ' by a user matching ' || k_cy_upat || ' on or after');
+        po('                   ' || fdt(k_cy_from) || '. Entries predating the go live are counted here');
+        po('                   too and shown separately in 2.1 a: they are not the interface');
+        po('                   failing, they are what the account already carried.');
+        p_verdict('CAL-14', 'Entry on a transit account that the interface did not post',
+                  v_cnt, NULL, v_mt, 'HIGH');
+
+        -- -----------------------------------------------------
+        print_sub('2.1 d. Is the balance growing, month by month');
+        po('  MOVEMENT is what the month added to the account, ALL sources, and');
+        po('  RUNNING BALANCE what is left at the end of it. A transit account that');
+        po('  works oscillates around nil. One that drifts in the same direction');
+        po('  month after month is not a timing difference, it is a leg that is');
+        po('  never sent. OF WHICH CALYPSO isolates the interface inside the');
+        po('  movement of the month.');
+        tbl_head('4,20,14,26,26,30,16',
+                 'N#|ACCOUNT|MONTH|MOVEMENT OF THE MONTH|OF WHICH CALYPSO'
+                 || '|RUNNING BALANCE|LINES',
+                 '|AC_NO|TRN_DT|LCY_AMOUNT|LCY_AMOUNT|LCY_AMOUNT|TRN_REF_NO',
+                 'RLLRRRR');
+        v_row := 0;
+        FOR r IN (SELECT ac_no, mth, mvt, mvt_cy, nb,
                          SUM(mvt) OVER (PARTITION BY ac_no ORDER BY mth) run
                     FROM (SELECT h.ac_no, TO_CHAR(h.trn_dt, 'YYYY-MM') mth,
                                  SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) mvt, COUNT(*) nb
+                                 ELSE -NVL(h.lcy_amount, 0) END) mvt,
+                                 SUM(CASE WHEN h.module = k_cy_mod AND h.product = k_cy_prod
+                                  AND LOWER(h.user_id) LIKE k_cy_upat
+                                  AND h.trn_dt >= k_cy_from
+                                          THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                       ELSE -NVL(h.lcy_amount, 0) END
+                                          ELSE 0 END) mvt_cy,
+                                 COUNT(*) nb
                             FROM actb_history h
-                           WHERE h.module = k_cy_mod
-                               AND h.product = k_cy_prod
-                               AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt >= k_cy_from
-                               AND h.trn_dt <  k_cy_to + 1
-                             AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                           WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                             AND h.trn_dt <  k_cy_to + 1
                            GROUP BY h.ac_no, TO_CHAR(h.trn_dt, 'YYYY-MM'))
                    ORDER BY ac_no, mth) LOOP
             v_row := v_row + 1;
             EXIT WHEN v_row > k_top_all;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.ac_no, 20) || '|'
-                || fpad(r.mth, 14) || '|' || fpadl(famt(r.mvt), 28) || '|'
-                || fpadl(famt(r.run), 30) || '|' || fpadl(fnum(r.nb), 20) || '|');
+                || fpad(r.mth, 14) || '|' || fpadl(famt(r.mvt), 26) || '|'
+                || fpadl(famt(r.mvt_cy), 26) || '|' || fpadl(famt(r.run), 30) || '|'
+                || fpadl(fnum(r.nb), 16) || '|');
         END LOOP;
-        tbl_line('4,20,14,28,30,20');
+        tbl_line('4,20,14,26,26,30,16');
 
         -- -----------------------------------------------------
-        print_sub('2.1 c. How old the unmatched items are');
-        po('  The residual is broken down by DEAL KEY, the Calypso identifier of the');
-        po('  narrative, because a deal is scattered over several FLEXCUBE');
-        po('  references and only that key puts it back together. A deal whose own');
-        po('  contribution to a bridge is not nil is an unmatched item, and its age');
-        po('  is counted from its LAST entry to ' || fdt(k_cy_to) || '.');
+        print_sub('2.1 e. How old the unmatched items are');
+        po('  The balance is broken down by DEAL KEY, the identifier the description');
+        po('  carries, because a Calypso deal is scattered over several FLEXCUBE');
+        po('  references and only that key puts it back together. On an entry that');
+        po('  did not come from the interface the description is ordinary free text');
+        po('  and the key is that text, which still groups the item sensibly. An');
+        po('  item whose own contribution to a transit account is not nil is');
+        po('  unmatched, and its age is counted from its LAST entry to ' || fdt(k_cy_to) || '.');
         po('');
         po('  Read the buckets as a provisioning question. An item a few days old is');
         po('  a settlement in flight. An item six months old is not going to settle');
         po('  by itself, and the balance sheet is carrying it as if it would.');
         tbl_head('4,26,22,20,30,22',
-                 'N#|AGE OF THE ITEM|ITEMS|LINES|RESIDUAL CARRIED|SHARE OF THE RESIDUAL',
+                 'N#|AGE OF THE ITEM|ITEMS|LINES|BALANCE CARRIED|SHARE OF THE BALANCE',
                  '|TRN_DT|FN_GET_DESC|TRN_REF_NO|LCY_AMOUNT| ',
                  'RLRRRR');
         v_row := 0;
         v_cnt := 0;
         v_mt  := 0;
         FOR r IN (SELECT bucket, COUNT(*) nb, SUM(nbl) nbl, SUM(resid) mt
-                    FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                    FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no) dk,
-                                 COUNT(*) nbl,
-                                 SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) resid,
-                                 CASE WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 30
+                                     d.ref) dk,
+                                 COUNT(*) nbl, SUM(d.sgn) resid,
+                                 CASE WHEN TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) <= 30
                                            THEN '1. 0 to 30 days'
-                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 60
+                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) <= 60
                                            THEN '2. 31 to 60 days'
-                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 90
+                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) <= 90
                                            THEN '3. 61 to 90 days'
-                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 180
+                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) <= 180
                                            THEN '4. 91 to 180 days'
-                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) <= 365
+                                      WHEN TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) <= 365
                                            THEN '5. 181 to 365 days'
                                       ELSE '6. more than one year' END bucket
-                            FROM actb_history h
-                           WHERE h.module = k_cy_mod
-                                   AND h.product = k_cy_prod
-                                   AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt >= k_cy_from
-                                   AND h.trn_dt <  k_cy_to + 1
-                             AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                           GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no)
-                          HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs)
+                            FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                      h.event_sr_no, h.trn_code, h.related_account,
+                                                      h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                      h.event, h.instrument_code, h.related_customer,
+                                                      h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                         h.trn_ref_no ref, h.trn_dt dt,
+                                         CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                         ELSE -NVL(h.lcy_amount, 0) END sgn
+                                    FROM actb_history h
+                                   WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                                     AND h.trn_dt <  k_cy_to + 1) d
+                           GROUP BY NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                         1, k_cy_t_id + k_cy_p0), '|'),
+                                        d.ref)
+                          HAVING ABS(SUM(d.sgn)) > k_tol_abs)
                    GROUP BY bucket
                    ORDER BY bucket) LOOP
             v_row := v_row + 1;
@@ -1470,112 +1607,75 @@ BEGIN
                 || fpadl(famt(r.mt), 30) || '|' || fpadl(fpct(ABS(r.mt), v_mt), 22) || '|');
         END LOOP;
         tbl_line('4,26,22,20,30,22');
-        print_kv('Unmatched items in total',              fnum(v_cnt));
-        print_kv('Their gross residual, signs ignored',   famt(v_mt));
+        print_kv('Unmatched items in total',            fnum(v_cnt));
+        print_kv('Their gross balance, signs ignored',  famt(v_mt));
         po('  The last column is a share of the running total and is therefore only');
         po('  exact on the final line. It is printed so the reader sees at a glance');
-        po('  whether the residual sits in the recent buckets or in the old ones.');
+        po('  whether the balance sits in the recent buckets or in the old ones.');
 
         SELECT COUNT(*), NVL(SUM(ABS(resid)), 0) INTO v_cnt, v_mt
-          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no) dk,
-                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) resid,
-                       MAX(h.trn_dt) dlast
-                  FROM actb_history h
-                 WHERE h.module = k_cy_mod
-                                   AND h.product = k_cy_prod
-                                   AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt >= k_cy_from
-                                   AND h.trn_dt <  k_cy_to + 1
-                   AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no)
-                HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                   AND TRUNC(k_cy_to) - TRUNC(MAX(h.trn_dt)) > k_cy_age);
-        p_test('CAL-02', 'No item stays on a bridge account beyond the tolerated age');
+          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                   1, k_cy_t_id + k_cy_p0), '|'),
+                           d.ref) dk,
+                       SUM(d.sgn) resid, MAX(d.dt) dlast
+                  FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                              h.event_sr_no, h.trn_code, h.related_account,
+                                              h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                              h.event, h.instrument_code, h.related_customer,
+                                              h.value_dt, h.trn_dt, h.related_reference) dsc,
+                               h.trn_ref_no ref, h.trn_dt dt,
+                               CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                 ELSE -NVL(h.lcy_amount, 0) END sgn
+                          FROM actb_history h
+                         WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                           AND h.trn_dt <  k_cy_to + 1) d
+                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                 1, k_cy_t_id + k_cy_p0), '|'),
+                              d.ref)
+                HAVING ABS(SUM(d.sgn)) > k_tol_abs
+                   AND TRUNC(k_cy_to) - TRUNC(MAX(d.dt)) > k_cy_age);
+        p_test('CAL-02', 'No item stays on a transit account beyond the tolerated age');
         p_obj('an unsettled deal is normal for a few days. Beyond that it is a');
         po('                   break: the counter leg was never sent, or was sent under a key');
         po('                   that does not match. Left alone it becomes a permanent line of');
         po('                   the balance sheet that no one can attach to a transaction.');
-        p_how('per Calypso deal key, signed contribution to the three bridge');
-        po('                   accounts. An item whose contribution is not nil and whose last');
+        p_how('per deal key, signed contribution to the three transit accounts,');
+        po('                   all sources. An item whose contribution is not nil and whose last');
         po('                   entry is more than ' || TO_CHAR(k_cy_age) || ' days before ' || fdt(k_cy_to) || ' is a finding.');
-        p_verdict('CAL-02', 'Unmatched bridge item older than the tolerated age',
-                  v_cnt, v_cy_dl, v_mt, 'CRITICAL');
+        p_verdict('CAL-02', 'Unmatched item on a transit account beyond the tolerated age',
+                  v_cnt, NULL, v_mt, 'CRITICAL');
         IF v_cnt > 0 THEN
-            cy_head('RESIDUAL / AGE');
+            cy_head('BALANCE / AGE');
             v_row := 0;
             FOR r IN (SELECT * FROM (
                         SELECT dk, book, ctp, evt, ins, d1, d2, resid,
                                TRUNC(k_cy_to) - TRUNC(d2) age
-                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                          FROM (SELECT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no) dk,
-                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                                           d.ref) dk,
+                                       MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_book + k_cy_p0), '|')) book,
-                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
-                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_evt + k_cy_p0), '|')) evt,
-                                       MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
+                                       MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                            1, k_cy_t_lbl + k_cy_p0), '|')) ins,
-                                       MIN(h.trn_dt) d1, MAX(h.trn_dt) d2,
-                                       SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) resid
-                                  FROM actb_history h
-                                 WHERE h.module = k_cy_mod
-                                   AND h.product = k_cy_prod
-                                   AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt >= k_cy_from
-                                   AND h.trn_dt <  k_cy_to + 1
-                                   AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no))
+                                       MIN(d.dt) d1, MAX(d.dt) d2, SUM(d.sgn) resid
+                                  FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                              h.event_sr_no, h.trn_code, h.related_account,
+                                                              h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                              h.event, h.instrument_code, h.related_customer,
+                                                              h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                               h.trn_ref_no ref, h.trn_dt dt,
+                                               CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                                 ELSE -NVL(h.lcy_amount, 0) END sgn
+                                          FROM actb_history h
+                                         WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                                           AND h.trn_dt <  k_cy_to + 1) d
+                                 GROUP BY NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                                 1, k_cy_t_id + k_cy_p0), '|'),
+                                              d.ref))
                          WHERE ABS(resid) > k_tol_abs
                            AND TRUNC(k_cy_to) - TRUNC(d2) > k_cy_age
                          ORDER BY ABS(resid) DESC
@@ -1588,80 +1688,70 @@ BEGIN
         END IF;
 
         -- -----------------------------------------------------
-        print_sub('2.1 d. The unmatched items that carry the most, named');
+        print_sub('2.1 f. The unmatched items that carry the most, named');
         po('  The same population without the age filter, ranked by what it carries.');
-        po('  ROUND marks a residual that is an exact multiple of ' || fmio(k_cy_round) || ': a single');
-        po('  whole leg missing, not a drift, and the fastest of all to resolve.');
-        tbl_head('4,26,20,20,30,16,16,14,12',
-                 'N#|DEAL KEY|BOOK|COUNTERPARTY|RESIDUAL CARRIED|FIRST|LAST|LINES|ROUND',
+        po('  SOURCE says whether the item was posted by the interface or by');
+        po('  something else, so the reader knows who to ask. ROUND marks a balance');
+        po('  that is an exact multiple of ' || fmio(k_cy_round) || ': a single whole leg missing,');
+        po('  not a drift, and the fastest of all to resolve.');
+        tbl_head('4,26,20,20,28,14,14,12,12',
+                 'N#|DEAL KEY|BOOK|COUNTERPARTY|BALANCE CARRIED|FIRST|LAST|SOURCE|ROUND',
                  '|FN_GET_DESC|FN_GET_DESC|FN_GET_DESC|LCY_AMOUNT'
-                 || '|TRN_DT|TRN_DT|TRN_REF_NO| ',
-                 'RLLLRLLRL');
+                 || '|TRN_DT|TRN_DT| | ',
+                 'RLLLRLLLL');
         v_row := 0;
         FOR r IN (SELECT * FROM (
-                    SELECT NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no) dk,
-                           MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_book + k_cy_p0), '|')) book,
-                           MAX(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
-                           SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END) resid,
-                           MIN(h.trn_dt) d1, MAX(h.trn_dt) d2, COUNT(*) nb
-                      FROM actb_history h
-                     WHERE h.module = k_cy_mod
-                                   AND h.product = k_cy_prod
-                                   AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt >= k_cy_from
-                                   AND h.trn_dt <  k_cy_to + 1
-                       AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
-                     GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
-                                               h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
-                                               h.related_account, h.ac_no, h.ac_branch, h.ac_ccy,
-                                               h.amount_tag, h.event, h.instrument_code,
-                                               h.related_customer, h.value_dt, h.trn_dt,
-                                               h.related_reference) || '|', '[^|]*\|',
-                                           1, k_cy_t_id + k_cy_p0), '|'),
-                                   h.trn_ref_no)
-                    HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
-                     ORDER BY ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END)) DESC
+                    SELECT NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                               1, k_cy_t_id + k_cy_p0), '|'),
+                               d.ref) dk,
+                           MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                               1, k_cy_t_book + k_cy_p0), '|')) book,
+                           MAX(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                               1, k_cy_t_ctp + k_cy_p0), '|')) ctp,
+                           SUM(d.sgn) resid, MIN(d.dt) d1, MAX(d.dt) d2,
+                           CASE WHEN MIN(d.cy) = 1 THEN 'CALYPSO'
+                                WHEN MAX(d.cy) = 0 THEN 'OTHER'
+                                ELSE 'MIXED' END src
+                      FROM (SELECT webserve.fn_get_desc(h.module, h.trn_ref_no, h.ac_entry_sr_no,
+                                                  h.event_sr_no, h.trn_code, h.related_account,
+                                                  h.ac_no, h.ac_branch, h.ac_ccy, h.amount_tag,
+                                                  h.event, h.instrument_code, h.related_customer,
+                                                  h.value_dt, h.trn_dt, h.related_reference) dsc,
+                                   h.trn_ref_no ref, h.trn_dt dt,
+                                   CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
+                                     ELSE -NVL(h.lcy_amount, 0) END sgn,
+                                   CASE WHEN h.module = k_cy_mod AND h.product = k_cy_prod
+                                      AND LOWER(h.user_id) LIKE k_cy_upat
+                                      AND h.trn_dt >= k_cy_from
+                                        THEN 1 ELSE 0 END cy
+                              FROM actb_history h
+                             WHERE h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
+                               AND h.trn_dt <  k_cy_to + 1) d
+                     GROUP BY NVL(RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
+                                  1, k_cy_t_id + k_cy_p0), '|'),
+                                  d.ref)
+                    HAVING ABS(SUM(d.sgn)) > k_tol_abs
+                     ORDER BY ABS(SUM(d.sgn)) DESC
                   ) WHERE ROWNUM <= k_top) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.dk, 26) || '|'
                 || fpad(r.book, 20) || '|' || fpad(r.ctp, 20) || '|'
-                || fpadl(famt(r.resid), 30) || '|' || fpad(fdt(r.d1), 16) || '|'
-                || fpad(fdt(r.d2), 16) || '|' || fpadl(fnum(r.nb), 14) || '|'
+                || fpadl(famt(r.resid), 28) || '|' || fpad(fdt(r.d1), 14) || '|'
+                || fpad(fdt(r.d2), 14) || '|' || fpad(r.src, 12) || '|'
                 || fpad(CASE WHEN MOD(ABS(r.resid), k_cy_round) = 0 THEN 'ROUND'
                              ELSE '-' END, 12) || '|');
         END LOOP;
-        tbl_line('4,26,20,20,30,16,16,14,12');
+        tbl_line('4,26,20,20,28,14,14,12,12');
 
         -- -----------------------------------------------------
-        print_sub('2.1 e. The other residual accounts of the interface');
-        po('  A bridge is not the only account that has to come back to nil. The FX');
+        print_sub('2.1 g. The other accounts that have to come back to nil');
+        po('  A transit account is not the only one that has to offset. The FX');
         po('  position account and its counter value account must offset each other');
         po('  to the franc; the off balance sheet commitments must be reversed when');
         po('  the deal settles; the collateral pledged must be released when the');
         po('  borrowing is repaid. Each line below is a pair that should net out,');
-        po('  and what is left is what is still open at ' || fdt(k_cy_to) || '.');
+        po('  and what is left is what is still open at ' || fdt(k_cy_to) || '. These are read on');
+        po('  the WHOLE account as well, for the same reason as the bridges.');
         tbl_head('4,46,22,22,28,28,20',
                  'N#|WHAT SHOULD OFFSET|ACCOUNT|OTHER ACCOUNT|BALANCE|OTHER BALANCE'
                  || '|NET LEFT OPEN',
@@ -1682,19 +1772,15 @@ BEGIN
                          k_cy_cus_t, k_cy_cus_c FROM DUAL
                   ORDER BY 1) LOOP
             SELECT NVL(SUM(CASE WHEN h.ac_no = r.a1 THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END
+                                     ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0),
                    NVL(SUM(CASE WHEN h.ac_no = r.a2 THEN CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
-                                       ELSE -NVL(h.lcy_amount, 0) END
+                                     ELSE -NVL(h.lcy_amount, 0) END
                                 ELSE 0 END), 0)
               INTO v_tot, v_tot2
               FROM actb_history h
-             WHERE h.module = k_cy_mod
-                   AND h.product = k_cy_prod
-                   AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt >= k_cy_from
-                   AND h.trn_dt <  k_cy_to + 1
-               AND h.ac_no IN (r.a1, r.a2);
+             WHERE h.ac_no IN (r.a1, r.a2)
+               AND h.trn_dt <  k_cy_to + 1;
             v_row := v_row + 1;
             IF ABS(v_tot + v_tot2) > k_tol_abs THEN
                 v_cnt := v_cnt + 1;
@@ -1712,11 +1798,11 @@ BEGIN
         po('                   release. What does not offset is either a deal still open, which');
         po('                   must be identifiable, or a leg that was never sent.');
         p_how('balance, credit minus debit, of the two accounts of each pair,');
-        po('                   added. Five');
+        po('                   added, all entries up to ' || fdt(k_cy_to) || ' whatever their origin. Five');
         po('                   pairs tested, tolerance ' || famt(k_tol_abs) || ' XAF. A net that is not nil is');
         po('                   not automatically wrong on the commitment pairs, where deals');
         po('                   straddling the cut off are normal, but it must be explained deal');
-        po('                   by deal, which is what 2.1 d makes possible.');
+        po('                   by deal, which is what 2.1 f makes possible.');
         p_verdict('CAL-03', 'Paired accounts of the interface that do not offset',
                   v_cnt, 5, v_mt, 'HIGH');
 
@@ -2791,6 +2877,8 @@ BEGIN
                            '4', 'yes' FROM DUAL
                     UNION ALL SELECT 13, 'CAL-13', 'The account family left out of the extract',
                            '4', 'yes' FROM DUAL
+                    UNION ALL SELECT 14, 'CAL-14', 'A transit account is used by the interface only',
+                           '2', 'yes' FROM DUAL
                   ) ORDER BY n) LOOP
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.cd, 12) || '|'
@@ -2814,21 +2902,27 @@ BEGIN
         print_kv('First entry, last entry',  fdt(v_cy_d1) || ' to ' || fdt(v_cy_d2));
 
         print_sub('5.5 Limitations of the review');
-        po('  1. Calypso posts entries and creates no contract. Nothing here can be');
+        po('  1. Part 2 reads the transit accounts on the WHOLE account, every');
+        po('     entry whatever its origin, because an account has to return to nil');
+        po('     whoever posted on it. Everywhere else the population is the');
+        po('     interface only. Section 2.1 a splits the balance into what Calypso');
+        po('     posted, what anything else posted and what predated the go live, so');
+        po('     the two scopes can be tied together on the page.');
+        po('  2. Calypso posts entries and creates no contract. Nothing here can be');
         po('     reconciled to a deal file, because none is sent. The portfolio of');
         po('     part 3 IS the portfolio, not a control against one.');
-        po('  2. The business information lives in the description returned by');
+        po('  3. The business information lives in the description returned by');
         po('     webserve.FN_GET_DESC, which is code the audit does not control.');
         po('     Section 1.3 measures how far it can be trusted. If it shows more');
         po('     than one field count, the positional reading is right for one');
         po('     format only, and the token offset k_cy_p0 has to be set for the');
         po('     format that matters before the figures are used.');
-        po('  3. The review is cut off at ' || fdt(k_cy_to) || '. Residual balances, positions and');
+        po('  4. The review is cut off at ' || fdt(k_cy_to) || '. Residual balances, positions and');
         po('     ages are all read at that date, and section 1.1 a prints how much');
         po('     activity lies beyond it.');
-        po('  4. Gross totals on the accounts of section 4.1 are inflated by the');
+        po('  5. Gross totals on the accounts of section 4.1 are inflated by the');
         po('     post and reverse engine and must never be used as statistics.');
-        po('  5. Seven questions cannot be answered from the ledger at all. They are');
+        po('  6. Seven questions cannot be answered from the ledger at all. They are');
         po('     listed in section 4.4 with what has to be asked of the front');
         po('     office. None of them should be closed on an assumption.');
 

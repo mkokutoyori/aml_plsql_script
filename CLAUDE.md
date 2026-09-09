@@ -122,6 +122,55 @@ implied rate at the stated nominal, and the implied nominal at the stated rate.
 One of the two is usually what was really meant, and it tells the auditor at
 once whether the rate or the principal was captured wrong.
 
+## CALYPSO: a system that sends entries and nothing else
+
+Since 16/06/2025 the securities and treasury business runs in **CALYPSO**, the
+front office system, not in the money market module (whose last entry is dated
+16/06/2025 — the two dates are the migration). Calypso creates **no row in
+`LDTB_CONTRACT_MASTER`**: no nominal, no rate, no value date, no maturity. It
+posts accounting entries and nothing else, so none of the 56 matrix controls
+can run on it — they all need a deal file that does not exist. Part 12 of
+`audit_securities.sql` covers it with its own family, CAL-01 to CAL-13, cut off
+at 31/08/2026.
+
+Identify its entries by the triple, never by the module alone (`DE` is the
+retail module and holds millions of rows):
+
+    MODULE 'DE' · PRODUCT 'MNIP' · USER_ID = AUTH_ID = 'CALYPSOUSR'
+    one single AMOUNT_TAG 'TXN_AMT' and TRN_CODE 'NIP' on every line
+
+**The bridge accounts are the heart of the review.** Calypso never posts a deal
+as one balanced entry facing the counterparty: it splits it into legs, each
+using a *bridge* account as its counter-leg, cleared on the settlement event —
+`467000186` securities, `467000188` money market and transfers, `467000243`
+client mirror trades. A transit account must return to nil; what it still
+carries is the accounting measure of what the interface has not closed. Age it
+by Calypso deal key, never by `TRN_REF_NO` (one reference per *event*, so every
+reference is unbalanced on the bridge by design). A residual that is an exact
+multiple of a billion is one whole missing leg, not a drift, and is resolvable
+in a single query.
+
+**The portfolio has to be rebuilt from the entries**, because it exists nowhere
+else. Securities are carried at **face value** (`512410100` bonds, `511210100`
+bills — note bonds land on a *transaction* account and bills on a *placement*
+account, which the chart of accounts and the Calypso books do not agree on);
+the whole premium or discount is parked in a deferred-income account
+(`472200108`, `472200106`) and released daily; the accrued coupon bought with
+the paper sits on `512800100` as an asset. So **carrying value = face value −
+unearned income**, and a report that does not net the two overstates the book.
+
+Two traps:
+
+- **The narrative is the only business information.** `EXTERNAL_REF_NO` is
+  pipe-separated (deal id | entry id | event | product type | counterparty |
+  book | instrument code | instrument label). Its format has already changed
+  once without notice. Measure it — field-count distribution, raw samples,
+  parsed samples — *before* any figure depends on it, and keep the token
+  positions in parameters so a shift is a one-line fix.
+- **Never read a gross total.** The daily engine posts the full cumulative
+  accrual and reverses it the next business day, inflating gross flows by a
+  factor of eighty or more. Only net movements mean anything.
+
 ## Reading ACTB_HISTORY correctly
 
 - **Key on `AC_NO`, not on `AC_NATURAL_GL`.** The natural GL is often empty,

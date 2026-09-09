@@ -147,6 +147,15 @@ retail module and holds millions of rows):
     (test the user with the pattern, not an equality: a second interface
      account would otherwise be missed silently)
 
+Two things a reconciliation query gets wrong, and both were seen in practice:
+the period runs **up to** the cut-off (`trn_dt >= go-live AND trn_dt < cut-off
++ 1`, so an entry stamped later in the day is not lost) — a query written
+`trn_dt >= cut-off` measures the movement *after* it, a different question; and
+a plain `LEFT JOIN sttb_account ON ac_no = ac_gl_no` multiplies every entry and
+inflates the balance, so the label is taken with a scalar subquery. Section
+2.1 a of `audit_calypso.sql` prints the exact query that reproduces its own
+headline figures.
+
 **The bridge accounts are the heart of the review.** Calypso never posts a deal
 as one balanced entry facing the counterparty: it splits it into legs, each
 using a *bridge* account as its counter-leg, cleared on the settlement event —

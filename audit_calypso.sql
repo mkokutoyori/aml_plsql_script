@@ -46,6 +46,13 @@
 --   No substitution variable and no bind variable, so no input window
 --   opens at launch.
 --
+--   THE PERIOD RUNS UP TO THE CUT OFF, NOT FROM IT. Every population is
+--   trn_dt >= the go live AND trn_dt < the day after the cut off, so a
+--   balance printed here is the balance AT that date. A query written
+--   trn_dt >= the cut off measures the movement AFTER it instead, and will
+--   never reproduce this report. Section 2.1 a prints the exact query that
+--   reproduces its own headline figures.
+--
 --   ONE GRANT IS REQUIRED BEYOND READ ACCESS: EXECUTE on the function
 --   webserve.FN_GET_DESC. FLEXCUBE stores no narrative on an accounting
 --   entry; the description everyone reads is computed by that function from
@@ -527,7 +534,9 @@ BEGIN
         print_kv('Product (PRODUCT)',                    k_cy_prod);
         print_kv('Amount tag (AMOUNT_TAG)',              k_cy_tag);
         print_kv('Transaction code (TRN_CODE)',          k_cy_code);
-        print_kv('Period reviewed (TRN_DT)',             fdt(k_cy_from) || ' to ' || fdt(k_cy_to));
+        print_kv('Period reviewed (TRN_DT)',             fdt(k_cy_from) || ' to '
+                 || fdt(k_cy_to) || ' inclusive, that is TRN_DT below '
+                 || fdt(k_cy_to + 1));
         print_kv('Absolute tolerance',                   famt(k_tol_abs) || ' XAF');
         print_kv('Tolerated age of a bridge item',       TO_CHAR(k_cy_age) || ' days');
         print_kv('Tolerated age of accrued interest',    TO_CHAR(k_cy_age_c) || ' months');
@@ -702,7 +711,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1;
         print_kv('Entry lines posted by ' || k_cy_user, fnum(v_cy_nb));
         print_kv('Gross flow (sum of LCY_AMOUNT)',      fmio(v_cy_mt));
         print_kv('First entry (TRN_DT)',                fdt(v_cy_d1));
@@ -724,7 +734,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1;
         print_kv('Distinct FLEXCUBE references (TRN_REF_NO)', fnum(v_cnt));
         print_kv('Distinct posting dates (TRN_DT)',           fnum(v_cnt2));
         print_kv('Distinct accounts moved (AC_NO)',           fnum(v_cnt3));
@@ -746,7 +757,8 @@ BEGIN
                  WHERE h.module = k_cy_mod
                  AND h.product = k_cy_prod
                  AND LOWER(h.user_id) LIKE k_cy_upat
-                 AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d;
+                 AND h.trn_dt >= k_cy_from
+                 AND h.trn_dt <  k_cy_to + 1) d;
         print_kv('Distinct Calypso deal keys (narrative)',    fnum(v_cy_dl));
         po('     One FLEXCUBE reference is created PER EVENT, not per deal. The deal');
         po('     key of the narrative is the only thing that puts a deal back');
@@ -759,7 +771,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to;
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1;
         print_kv('Gross debits',  fmio(v_tot));
         print_kv('Gross credits', fmio(v_tot2));
         print_kv('Balance (credits minus debits)', famt(v_tot2 - v_tot)
@@ -795,7 +808,7 @@ BEGIN
                      OR (r.ord = 2 AND LOWER(h.user_id) LIKE k_cy_upat AND h.product <> k_cy_prod)
                      OR (r.ord = 4 AND h.product = k_cy_prod
                                      AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt > k_cy_to));
+                                   AND h.trn_dt >= k_cy_to + 1));
                 IF r.ord = 3 THEN
                     SELECT COUNT(*), NVL(SUM(ABS(NVL(h.lcy_amount, 0))), 0),
                            MIN(h.trn_dt), MAX(h.trn_dt)
@@ -831,7 +844,8 @@ BEGIN
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                      GROUP BY h.ac_branch
                     UNION ALL
                     SELECT 'CURRENCY', h.ac_ccy, COUNT(*),
@@ -839,7 +853,8 @@ BEGIN
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                      GROUP BY h.ac_ccy
                     UNION ALL
                     SELECT 'EVENT', h.event, COUNT(*),
@@ -847,7 +862,8 @@ BEGIN
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                      GROUP BY h.event
                     UNION ALL
                     SELECT 'DIRECTION', h.drcr_ind, COUNT(*),
@@ -855,7 +871,8 @@ BEGIN
                       FROM actb_history h WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                      GROUP BY h.drcr_ind
                   ) ORDER BY ord, nb DESC) LOOP
             v_row := v_row + 1;
@@ -889,7 +906,8 @@ BEGIN
                    WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                    GROUP BY TO_CHAR(h.trn_dt, 'YYYY-MM')
                    ORDER BY 1) LOOP
             v_row := v_row + 1;
@@ -969,7 +987,8 @@ BEGIN
                                    WHERE h.module = k_cy_mod
                              AND h.product = k_cy_prod
                              AND LOWER(h.user_id) LIKE k_cy_upat
-                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d)
+                             AND h.trn_dt >= k_cy_from
+                             AND h.trn_dt <  k_cy_to + 1) d)
                    GROUP BY nbf
                    ORDER BY 2 DESC) LOOP
             v_row := v_row + 1;
@@ -1007,7 +1026,8 @@ BEGIN
                                    WHERE h.module = k_cy_mod
                              AND h.product = k_cy_prod
                              AND LOWER(h.user_id) LIKE k_cy_upat
-                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d)
+                             AND h.trn_dt >= k_cy_from
+                             AND h.trn_dt <  k_cy_to + 1) d)
                    GROUP BY mth, nbf
                    ORDER BY mth, nbf) LOOP
             v_row := v_row + 1;
@@ -1037,7 +1057,8 @@ BEGIN
                              WHERE h.module = k_cy_mod
                              AND h.product = k_cy_prod
                              AND LOWER(h.user_id) LIKE k_cy_upat
-                             AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                             AND h.trn_dt >= k_cy_from
+                             AND h.trn_dt <  k_cy_to + 1
                              ORDER BY h.trn_dt DESC, h.trn_ref_no)
                            WHERE ROWNUM <= 12) h) LOOP
             v_row := v_row + 1;
@@ -1076,7 +1097,8 @@ BEGIN
                                      WHERE h.module = k_cy_mod
                                      AND h.product = k_cy_prod
                                      AND LOWER(h.user_id) LIKE k_cy_upat
-                                     AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                     AND h.trn_dt >= k_cy_from
+                                     AND h.trn_dt <  k_cy_to + 1
                                      ORDER BY h.trn_dt DESC, h.trn_ref_no)
                                    WHERE ROWNUM <= 12) h) d) LOOP
             v_row := v_row + 1;
@@ -1117,7 +1139,8 @@ BEGIN
                            WHERE h.module = k_cy_mod
                            AND h.product = k_cy_prod
                            AND LOWER(h.user_id) LIKE k_cy_upat
-                           AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d
+                           AND h.trn_dt >= k_cy_from
+                           AND h.trn_dt <  k_cy_to + 1) d
                    GROUP BY RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                    1, k_cy_t_book + k_cy_p0), '|'),
                             RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
@@ -1159,7 +1182,8 @@ BEGIN
                            WHERE h.module = k_cy_mod
                            AND h.product = k_cy_prod
                            AND LOWER(h.user_id) LIKE k_cy_upat
-                           AND h.trn_dt BETWEEN k_cy_from AND k_cy_to) d
+                           AND h.trn_dt >= k_cy_from
+                           AND h.trn_dt <  k_cy_to + 1) d
                    GROUP BY RTRIM(REGEXP_SUBSTR(d.dsc || '|', '[^|]*\|',
                                    1, k_cy_t_evt + k_cy_p0), '|')
                    ORDER BY COUNT(*) DESC) LOOP
@@ -1203,7 +1227,8 @@ BEGIN
                    WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                    GROUP BY h.ac_no
                    ORDER BY SUM(ABS(NVL(h.lcy_amount, 0))) DESC) LOOP
             v_row := v_row + 1;
@@ -1272,7 +1297,8 @@ BEGIN
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                AND h.ac_no = r.ac;
             SELECT MAX(a.ac_gl_desc) INTO v_lib
               FROM sttb_account a WHERE a.ac_gl_no = r.ac;
@@ -1295,6 +1321,42 @@ BEGIN
         po('  A residual that is an EXACT MULTIPLE of ' || fmio(k_cy_round) || ' is flagged ROUND: it is');
         po('  one whole unmatched leg, not an accumulation of small breaks, and it');
         po('  should be identifiable in a single query rather than reconciled.');
+
+        po('');
+        po('  HOW TO TICK THE THREE FIGURES ABOVE. Run this, and nothing else. Four');
+        po('  things in it are load bearing, and a query missing any one of them will');
+        po('  not reproduce the table.');
+        po('');
+        po('    1. the period runs UP TO the cut off, not from it. A condition');
+        po('       trn_dt >= the cut off date measures the movement AFTER it, which');
+        po('       is a different question with a different answer.');
+        po('    2. the population is the interface, not the account. Anything else');
+        po('       posting on a bridge, another module or a manual entry, is not');
+        po('       Calypso and does not belong in the residual of the interface.');
+        po('    3. NEVER join STTB_ACCOUNT directly on AC_NO. It holds several rows');
+        po('       per AC_GL_NO, so a plain join multiplies every entry and inflates');
+        po('       the balance by that factor. Take the label with a scalar');
+        po('       subquery, as below, or pre aggregate it.');
+        po('    4. the upper bound is written as strictly less than the day after,');
+        po('       so an entry stamped later in the day on the cut off is not lost.');
+        po('');
+        po('    SELECT h.ac_no,');
+        po('           (SELECT MAX(s.ac_gl_desc) FROM sttb_account s');
+        po('             WHERE s.ac_gl_no = h.ac_no) ac_gl_desc,');
+        po('           COUNT(*) lines,');
+        po('           SUM(ABS(NVL(h.lcy_amount, 0))) gross_flow,');
+        po('           SUM(CASE h.drcr_ind WHEN ''C'' THEN NVL(h.lcy_amount, 0)');
+        po('                               ELSE -NVL(h.lcy_amount, 0) END) residual');
+        po('      FROM actb_history h');
+        po('     WHERE h.module  = ''' || k_cy_mod || '''');
+        po('       AND h.product = ''' || k_cy_prod || '''');
+        po('       AND LOWER(h.user_id) LIKE ''' || k_cy_upat || '''');
+        po('       AND h.trn_dt >= TO_DATE(''' || fdt(k_cy_from) || ''', ''DD/MM/YYYY'')');
+        po('       AND h.trn_dt <  TO_DATE(''' || fdt(k_cy_to) || ''', ''DD/MM/YYYY'') + 1');
+        po('       AND h.ac_no IN (''' || k_cy_brg_sec || ''', ''' || k_cy_brg_mm
+           || ''', ''' || k_cy_brg_mir || ''')');
+        po('     GROUP BY h.ac_no');
+        po('     ORDER BY h.ac_no;');
 
         p_test('CAL-01', 'The bridge accounts return to nil');
         p_obj('a transit account carries no position. Whatever it still holds');
@@ -1327,7 +1389,8 @@ BEGIN
                            WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                              AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                            GROUP BY h.ac_no, TO_CHAR(h.trn_dt, 'YYYY-MM'))
                    ORDER BY ac_no, mth) LOOP
@@ -1384,7 +1447,8 @@ BEGIN
                            WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                              AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                            GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -1428,7 +1492,8 @@ BEGIN
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                    AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                  GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -1500,7 +1565,8 @@ BEGIN
                                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                                    AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                                  GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -1562,7 +1628,8 @@ BEGIN
                      WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                        AND h.ac_no IN (k_cy_brg_sec, k_cy_brg_mm, k_cy_brg_mir)
                      GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -1625,7 +1692,8 @@ BEGIN
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                AND h.ac_no IN (r.a1, r.a2);
             v_row := v_row + 1;
             IF ABS(v_tot + v_tot2) > k_tol_abs THEN
@@ -1723,7 +1791,8 @@ BEGIN
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
             IF r.ord <= 2 THEN
@@ -1782,7 +1851,8 @@ BEGIN
                            WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                              AND h.ac_no IN (k_cy_bond, k_cy_bill)
                            GROUP BY TO_CHAR(h.trn_dt, 'YYYY-MM'))
                    ORDER BY mth) LOOP
@@ -1860,7 +1930,8 @@ BEGIN
                      WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                        AND h.ac_no IN (k_cy_bond, k_cy_bill, k_cy_def_b,
                                        k_cy_def_t, k_cy_accr)
                      GROUP BY RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
@@ -1914,7 +1985,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND h.ac_no IN (k_cy_bond, k_cy_bill);
         print_kv('Face value carried with no instrument in the narrative',
                  famt(v_tot2) || '   ' || fpct(ABS(v_tot2), ABS(v_tot)));
@@ -1973,7 +2045,8 @@ BEGIN
                              WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                                AND h.ac_no = k_cy_accr
                              GROUP BY RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -2009,7 +2082,8 @@ BEGIN
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                    AND h.ac_no = k_cy_accr
                  GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -2081,7 +2155,8 @@ BEGIN
                                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                                    AND h.ac_no = k_cy_accr
                                  GROUP BY NVL(RTRIM(REGEXP_SUBSTR(webserve.fn_get_desc(h.module, h.trn_ref_no,
                                                h.ac_entry_sr_no, h.event_sr_no, h.trn_code,
@@ -2134,7 +2209,8 @@ BEGIN
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
             po('  |' || fpadl(TO_CHAR(v_row), 4) || '|' || fpad(r.q, 50) || '|'
@@ -2153,7 +2229,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND h.ac_no IN (k_cy_col_ti, k_cy_borrow);
         print_kv('Collateral still pledged (' || k_cy_col_ti || ')',       famt(v_tot));
         print_kv('Borrowing still outstanding (' || k_cy_borrow || ')',    famt(v_tot2));
@@ -2208,7 +2285,8 @@ BEGIN
              WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
                AND h.ac_no = r.ac;
             v_row := v_row + 1;
             v_tot := v_tot + v_mt;
@@ -2267,7 +2345,8 @@ BEGIN
                      WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                      GROUP BY h.ac_no
                     HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
                            > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
@@ -2291,7 +2370,8 @@ BEGIN
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                  GROUP BY h.ac_no
                 HAVING SUM(ABS(NVL(h.lcy_amount, 0)))
                        > k_cy_infl * ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
@@ -2323,7 +2403,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND h.ac_no = k_cy_prov;
         print_kv('Revaluation lines posted (' || k_cy_prov || ')', fnum(v_cnt2));
         print_kv('Distinct dates on which the portfolio was revalued', fnum(v_cnt3));
@@ -2354,7 +2435,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND h.ac_no IN (k_cy_bond, k_cy_bill);
         p_verdict('CAL-08', 'Portfolio not revalued within the tolerated period',
                   v_cnt, 1, ABS(v_tot), 'CRITICAL');
@@ -2380,7 +2462,8 @@ BEGIN
                  WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                  GROUP BY TRUNC(h.trn_dt)
                 HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs);
@@ -2408,7 +2491,8 @@ BEGIN
                          WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                          GROUP BY TRUNC(h.trn_dt)
                         HAVING ABS(SUM(CASE h.drcr_ind WHEN 'C' THEN NVL(h.lcy_amount, 0)
                                        ELSE -NVL(h.lcy_amount, 0) END)) > k_tol_abs
@@ -2428,7 +2512,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND TRUNC(h.trn_dt) - TRUNC(h.trn_dt, 'IW') >= 5;
         p_test('CAL-10', 'The interface posts on business days only');
         p_obj('an accounting day that does not exist in the bank calendar is a');
@@ -2446,7 +2531,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND NVL(h.auth_id, ' ') = NVL(h.user_id, ' ');
         p_test('CAL-11', 'Who approves what the interface posts');
         p_obj('an automated interface entering and approving its own entries is');
@@ -2466,7 +2552,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND h.value_dt IS NOT NULL
            AND TRUNC(h.trn_dt) - TRUNC(h.value_dt) > k_cy_back_d;
         p_test('CAL-12', 'The value date is not pushed back into a closed period');
@@ -2493,7 +2580,8 @@ BEGIN
                          WHERE h.module = k_cy_mod
                                    AND h.product = k_cy_prod
                                    AND LOWER(h.user_id) LIKE k_cy_upat
-                                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                                   AND h.trn_dt >= k_cy_from
+                                   AND h.trn_dt <  k_cy_to + 1
                            AND h.value_dt IS NOT NULL
                            AND TRUNC(h.trn_dt) - TRUNC(h.value_dt) > k_cy_back_d
                          ORDER BY TRUNC(h.trn_dt) - TRUNC(h.value_dt) DESC,
@@ -2513,7 +2601,8 @@ BEGIN
          WHERE h.module = k_cy_mod
                    AND h.product = k_cy_prod
                    AND LOWER(h.user_id) LIKE k_cy_upat
-                   AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                   AND h.trn_dt >= k_cy_from
+                   AND h.trn_dt <  k_cy_to + 1
            AND SUBSTR(h.ac_no, 1, LENGTH(k_cy_excl)) = k_cy_excl;
         p_test('CAL-13', 'The account family left out of the first extract');
         p_obj('the extract this analysis was first built on filtered out the');
@@ -2543,7 +2632,8 @@ BEGIN
                        WHERE h.module = k_cy_mod
                                AND h.product = k_cy_prod
                                AND LOWER(h.user_id) LIKE k_cy_upat
-                               AND h.trn_dt BETWEEN k_cy_from AND k_cy_to
+                               AND h.trn_dt >= k_cy_from
+                               AND h.trn_dt <  k_cy_to + 1
                          AND SUBSTR(h.ac_no, 1, LENGTH(k_cy_excl)) = k_cy_excl
                        GROUP BY h.ac_no
                        ORDER BY COUNT(*) DESC) LOOP
